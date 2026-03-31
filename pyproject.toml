@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reverser"
+version = "0.1.0"
+description = "Claude-powered reverse engineering agent"
+requires-python = ">=3.10"
+dependencies = [
+    "claude-agent-sdk",
+]
+
+[project.scripts]
+reverser = "reverser.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
