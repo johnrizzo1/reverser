@@ -98,8 +98,12 @@ async def run_agent(
     """
     server = create_re_mcp_server()
 
+    max_turns = 50
+
     template = PROMPT_TEMPLATES.get(mode, ANALYZE_PROMPT_TEMPLATE)
     prompt = template.format(binary_path=binary_path)
+
+    system_prompt = SYSTEM_PROMPT.format(budget=budget, max_turns=max_turns)
 
     if log_path is None:
         log_path = session_log_path(binary_path)
@@ -109,11 +113,11 @@ async def run_agent(
     print(f"[Session log: {log_path}]", file=sys.stderr)
 
     options = ClaudeAgentOptions(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         mcp_servers={"re": server},
         allowed_tools=["mcp__re__*"],
         permission_mode="bypassPermissions",
-        max_turns=50,
+        max_turns=max_turns,
         max_budget_usd=budget,
     )
 
