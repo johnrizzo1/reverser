@@ -10,9 +10,14 @@
 
     # Disassemblers / Decompilers
     radare2
-    rizin
-    # rz-ghidra              # may need overlay
-    ghidra
+    (rizin.withPlugins (ps: [ ps.rz-ghidra ]))
+    (ghidra.withExtensions (exts: [
+      exts.findcrypt
+      exts.ghidra-golanganalyzerextension
+      # exts.gnudisassembler  # build fails (binutils compile in sandbox); system binutils covers this
+      exts.machinelearning
+      exts.wasm
+    ]))
     # retdec                  # build failure in capstone dep
     binutils
     elfutils
@@ -102,6 +107,7 @@
         pefile
         malduck
         flare-floss
+        pyhidra
       '';
     };
   };
@@ -113,13 +119,13 @@
     echo "Core tools:"
     echo "  radare2  $(r2 -V 2>/dev/null | head -1)"
     echo "  rizin    $(rizin -V 2>/dev/null | head -1)"
-    echo "  ghidra   $(ghidra --version 2>/dev/null || echo 'installed')"
+    echo "  ghidra   $(ghidra-analyzeHeadless --help 2>&1 | head -1 || echo 'installed')"
     echo "  gdb      $(gdb --version 2>/dev/null | head -1)"
     echo "  tshark   $(tshark --version 2>/dev/null | head -1)"
     echo ""
     echo "Python RE libraries: angr, capstone, unicorn, pwntools, r2pipe,"
     echo "  rzpipe, pyelftools, yara-python, lief, pyshark, ropper,"
-    echo "  keystone-engine, pefile, malduck, flare-floss"
+    echo "  keystone-engine, pefile, malduck, flare-floss, pyhidra"
     echo ""
     echo "Run 'devenv info' for full environment details."
   '';
@@ -155,12 +161,15 @@
     echo "Testing reverser environment..."
     r2 -V > /dev/null 2>&1 && echo "✓ radare2" || echo "✗ radare2"
     rizin -V > /dev/null 2>&1 && echo "✓ rizin" || echo "✗ rizin"
+    rizin -L 2>/dev/null | grep -q ghidra && echo "✓ rz-ghidra" || echo "✗ rz-ghidra"
+    ghidra-analyzeHeadless > /dev/null 2>&1; [ $? -ne 127 ] && echo "✓ ghidra" || echo "✗ ghidra"
     gdb --version > /dev/null 2>&1 && echo "✓ gdb" || echo "✗ gdb"
     tshark --version > /dev/null 2>&1 && echo "✓ tshark" || echo "✗ tshark"
     python3 -c "import angr" > /dev/null 2>&1 && echo "✓ angr" || echo "✗ angr"
     python3 -c "import capstone" > /dev/null 2>&1 && echo "✓ capstone" || echo "✗ capstone"
     python3 -c "import unicorn" > /dev/null 2>&1 && echo "✓ unicorn" || echo "✗ unicorn"
     python3 -c "import pwn" > /dev/null 2>&1 && echo "✓ pwntools" || echo "✗ pwntools"
+    python3 -c "import pyhidra" > /dev/null 2>&1 && echo "✓ pyhidra" || echo "✗ pyhidra"
     echo "Done."
   '';
 }

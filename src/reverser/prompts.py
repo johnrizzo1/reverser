@@ -50,6 +50,40 @@ Summarize your findings:
 - Vulnerabilities or interesting behaviors found
 - Solution (if applicable)
 
+## Tool Speed Tiers — Prefer Fast Tools First
+
+Always prefer faster tools and only escalate to slower ones when the faster tools \
+cannot answer your questions. Extract as much insight as possible from each tier \
+before moving to the next.
+
+### Tier 1: Instant (< 1 second)
+`file_info`, `checksec_binary`, `strings_search`, `readelf_info`, `pe_info`, \
+`binwalk_scan`, `disassemble_bytes`, `nm_symbols`
+→ Run these freely, in parallel when possible. They are cheap and fast.
+
+### Tier 2: Fast (1–5 seconds)
+`r2_command`, `r2_decompile`, `objdump_disasm`, `run_binary`, `rop_gadgets`
+→ Use liberally, but be targeted — avoid dumping entire binaries. \
+Prefer JSON output (`j` suffix) from radare2 to keep results compact.
+
+### Tier 3: Moderate (5–15 seconds)
+`strace_run` (10s timeout), `gdb_batch` (15s timeout)
+→ Use only when Tier 1–2 tools leave open questions. For example, if static \
+analysis shows a suspicious syscall pattern, confirm with `strace_run`. Use \
+`gdb_batch` when you need runtime state (register values, memory contents) \
+that cannot be determined statically.
+
+### Tier 4: Expensive (30–120+ seconds)
+`angr_find_paths` (120s timeout, heavy CPU/memory)
+→ Use as a **last resort** for solving crackmes/CTFs. Never run without first \
+identifying concrete find/avoid addresses from Tier 1–2 analysis. If the problem \
+can be solved by reading the decompiled logic and computing the answer directly, \
+do that instead of running angr.
+
+**General principle:** Each tier you escalate to costs roughly 10x more time. \
+Exhaust cheaper tiers first. If you can solve the problem with strings + decompilation, \
+don't fire up angr or gdb.
+
 ## Tool Usage Guidelines
 
 ### radare2 (r2_command, r2_decompile)
@@ -111,12 +145,15 @@ Binary: {binary_path}
 
 Your goal: Find the correct input (key/flag/password) that the binary accepts.
 
-Approach:
-1. Triage the binary to understand its format and protections
-2. Disassemble and decompile the main function and key validation logic
-3. Identify the success and failure branches (addresses)
-4. Use symbolic execution (angr_find_paths) with those addresses to solve for the correct input
-5. Report the solution
+Approach (prefer fast tools — only escalate when needed):
+1. Triage the binary (file_info, checksec, strings, readelf/pe_info) — run in parallel
+2. Disassemble and decompile the main function and key validation logic (r2_decompile, r2_command)
+3. Try to solve it analytically from the decompiled code — many crackmes have simple \
+   comparisons, XOR ciphers, or hardcoded keys that can be computed directly
+4. If the logic is too complex to solve analytically, run the binary to observe its behavior
+5. Only if needed: identify the success and failure branch addresses, then use \
+   `angr_find_paths` as a last resort — it is slow and expensive
+6. Report the solution
 
 Pay attention to anti-debugging tricks, obfuscated comparisons, and encoded strings.\
 """
