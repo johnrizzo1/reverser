@@ -11,6 +11,8 @@ dependencies = [
     "claude-agent-sdk",
     "boto3",
     "click",
+    "textual>=1.0.0",
+    "openai>=1.0.0",
 ]
 
 [project.scripts]

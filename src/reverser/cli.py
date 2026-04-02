@@ -9,7 +9,7 @@ import sys
 def main():
     parser = argparse.ArgumentParser(
         prog="reverser",
-        description="Claude-powered reverse engineering agent",
+        description="AI-powered reverse engineering agent (Claude or local models via Ollama/vLLM)",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -26,14 +26,40 @@ def main():
         sub.add_argument("--log", metavar="PATH", help="Session log path (default: logs/<binary>_<timestamp>.jsonl)")
         sub.add_argument("--log-dir", metavar="DIR", help="Directory for session logs (default: ./logs)")
 
+    # Shared backend arguments
+    def add_backend_args(sub):
+        sub.add_argument("--backend", "-b", default="claude",
+                         help="LLM backend: claude, ollama, or any OpenAI-compatible server (default: claude)")
+        sub.add_argument("--model", "-m", default=None,
+                         help="Model name/tag for non-claude backends (e.g. qwen3.5:35b-a3b-coding-nvfp4)")
+        sub.add_argument("--api-base", default=None,
+                         help="API base URL override (default: http://localhost:11434/v1 for ollama)")
+
     triage_parser = subparsers.add_parser("triage", help="Quick binary triage")
     add_common_args(triage_parser)
+    add_backend_args(triage_parser)
 
     analyze_parser = subparsers.add_parser("analyze", help="Full reverse engineering analysis")
     add_common_args(analyze_parser)
+    add_backend_args(analyze_parser)
 
     solve_parser = subparsers.add_parser("solve", help="Solve a crackme / CTF challenge")
     add_common_args(solve_parser)
+    add_backend_args(solve_parser)
+
+    # Interactive TUI
+    interactive_parser = subparsers.add_parser(
+        "interactive",
+        aliases=["i"],
+        help="Launch interactive TUI for guided analysis",
+    )
+    interactive_parser.add_argument("binary", nargs="?", default="", help="Path to the binary to analyze")
+    interactive_parser.add_argument("--profile", "-p", default="general",
+                                    help="Agent profile (general, linux, windows, android, chrome, managed, api, ctf)")
+    interactive_parser.add_argument("--budget", type=float, default=5.0, help="Max USD budget (default: 5.0)")
+    interactive_parser.add_argument("--max-turns", type=int, default=50, help="Max agent turns per interaction (default: 50)")
+    interactive_parser.add_argument("--list-profiles", action="store_true", help="List available profiles and exit")
+    add_backend_args(interactive_parser)
 
     # Writeup command
     writeup_parser = subparsers.add_parser("writeup", help="Generate a markdown writeup from a session log")
@@ -44,6 +70,8 @@ def main():
 
     if args.command == "writeup":
         _run_writeup(args)
+    elif args.command in ("interactive", "i"):
+        _run_interactive(args)
     else:
         _run_agent(args)
 
@@ -67,7 +95,39 @@ def _run_agent(args):
         budget=args.budget,
         verbosity=args.verbose,
         log_path=log_path,
+        backend_name=args.backend,
+        model=args.model,
+        api_base=args.api_base,
     ))
+
+
+def _run_interactive(args):
+    if getattr(args, "list_profiles", False):
+        from .profiles import list_profiles
+        for p in list_profiles():
+            print(f"  {p.key:10s}  {p.name}")
+            print(f"             {p.description}")
+            print(f"             Skills: {', '.join(s.name for s in p.skills)}")
+            print()
+        return
+
+    binary = ""
+    if args.binary:
+        binary = os.path.abspath(args.binary)
+        if not os.path.isfile(binary):
+            print(f"Error: file not found: {binary}", file=sys.stderr)
+            sys.exit(1)
+
+    from .tui.app import run_tui
+    run_tui(
+        binary_path=binary,
+        profile=args.profile,
+        budget=args.budget,
+        max_turns=args.max_turns,
+        backend=args.backend,
+        model=args.model,
+        api_base=args.api_base,
+    )
 
 
 def _run_writeup(args):

@@ -28,8 +28,9 @@
     # retdec                  # build failure in capstone dep
     binutils
     elfutils
-    # jadx                    # dep build issue (quark-engine/plotly)
+    # jadx                    # quark-engine dep conflicts with devenv Python env; installed standalone via ~/.local/bin
     cfr
+    procyon
 
     # Dynamic analysis / Debuggers
     gdb
@@ -81,7 +82,6 @@
 
     # Android RE
     apktool
-    # jadx                    # listed above in disassemblers
     dex2jar
 
     # SMT solver
@@ -101,6 +101,8 @@
         claude-agent-sdk
         boto3
         click
+        textual
+        openai
         angr
         capstone
         unicorn
@@ -198,9 +200,19 @@
     echo "Reverser agent environment loaded."
     echo ""
     echo "Agent commands:"
-    echo "  reverser triage|analyze|solve <binary>  Run analysis"
+    echo "  reverser triage <binary>                Quick file/security assessment"
+    echo "  reverser analyze <binary>               Full RE analysis"
+    echo "  reverser solve <binary>                 Solve a crackme/CTF challenge"
+    echo "  reverser interactive <binary>           Launch interactive TUI (alias: i)"
+    echo "  reverser writeup <log.jsonl>            Generate markdown from session log"
+    echo ""
+    echo "  Options: -v (verbose) -vv (thinking) --budget N --profile P"
+    echo "  Backend: -b ollama -m <model>  (or claude by default)"
+    echo "  Profiles: general linux windows android chrome managed api ctf"
+    echo ""
+    echo "Shell helpers:"
     echo "  re-info                                 Tool summary"
-    echo "  re-triage <binary>                      Quick binary triage"
+    echo "  re-triage <binary>                      Quick binary triage (shell)"
     echo ""
     echo "Harness commands:"
     echo "  harness-init          Initialize Incus profile, firewall, and state DB"
@@ -208,8 +220,8 @@
     echo "  harness-build-image   Build the reverser container base image"
     echo "  harness-test          Launch a test container and verify isolation"
     echo "  harness-status        Show processing stats"
-    echo "  harness-process FILE  Analyze a local binary directly"
-    echo "  harness-reset         Clear state DB to reprocess binaries (--failed-only)"
+    echo "  harness-process FILE  Analyze a local binary in an isolated container"
+    echo "  harness-reset         Clear state DB (--failed-only to reset failures)"
     echo "  harness-cleanup       Destroy orphaned containers"
   '';
 
