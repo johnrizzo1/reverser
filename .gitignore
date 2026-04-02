@@ -13,10 +13,27 @@ devenv.local.yaml
 __pycache__/
 *.py[cod]
 *.egg-info/
+dist/
+build/
+*.egg
 .venv/
 
 # Session logs
 logs/
 
+# Harness runtime state
+state.db
+state.db-shm
+state.db-wal
+staging/
+results/
+
+# Editor
+*.swp
+*~
+.idea/
+.vscode/
+
 # Research artifacts
 nix-re-tools.md
+.env

@@ -1,0 +1,29 @@
+# Reverser Harness Configuration
+# Environment variables override these values (prefix: HARNESS_)
+# ANTHROPIC_API_KEY must be set in the environment.
+
+[s3]
+bucket = "dropit-reverser"                     # Required: S3 bucket name
+prefix = ""                     # Only monitor objects under this prefix
+region = "us-east-1"
+
+[monitor]
+poll_interval_seconds = 60
+
+[analysis]
+mode = "solve"                # triage, analyze, or solve
+# mode = "analyze"                # triage, analyze, or solve
+budget = 10.0                   # Max USD per analysis run
+timeout_seconds = 14400         # 4 hours max per binary
+
+[incus]
+image = "reverser-base"         # Base image alias (built by harness-build-image)
+profile = "reverser-isolated"   # Incus profile name
+
+[paths]
+staging_dir = "./staging"
+results_dir = "./results"
+db_path = "./state.db"
+
+[results]
+s3_prefix = "results/"       # Uncomment to upload results back to S3

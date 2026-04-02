@@ -3,10 +3,17 @@
 {
   env.REVERSER_HOME = "${config.devenv.root}";
 
+  dotenv.enable = true;
+
   # ── Core RE packages ──────────────────────────────────────────────
   packages = with pkgs; [
     # Version control
     git
+
+    # Harness dependencies
+    awscli2
+    sqlite
+    jq
 
     # Disassemblers / Decompilers
     radare2
@@ -92,6 +99,8 @@
       enable = true;
       requirements = ''
         claude-agent-sdk
+        boto3
+        click
         angr
         capstone
         unicorn
@@ -112,7 +121,39 @@
     };
   };
 
-  # ── Convenience scripts ───────────────────────────────────────────
+  # ── Harness scripts ────────────────────────────────────────────────
+  scripts.harness-init.exec = ''
+    python -m reverser.harness init "$@"
+  '';
+
+  scripts.harness-run.exec = ''
+    python -m reverser.harness monitor "$@"
+  '';
+
+  scripts.harness-build-image.exec = ''
+    bash "$REVERSER_HOME/incus/build-image.sh" "$@"
+  '';
+
+  scripts.harness-test.exec = ''
+    python -m reverser.harness test-vm "$@"
+  '';
+
+  scripts.harness-status.exec = ''
+    python -m reverser.harness status "$@"
+  '';
+
+  scripts.harness-cleanup.exec = ''
+    python -m reverser.harness cleanup "$@"
+  '';
+
+  scripts.harness-reset.exec = ''
+    python -m reverser.harness reset "$@"
+  '';
+
+  scripts.harness-process.exec = ''
+    python -m reverser.harness process "$@"
+  '';
+
   scripts.re-info.exec = ''
     echo "🔍 Reverser Agent Development Environment"
     echo ""
@@ -153,8 +194,23 @@
   '';
 
   enterShell = ''
+    pip install -q -e "$REVERSER_HOME" 2>/dev/null
     echo "Reverser agent environment loaded."
-    echo "Run 're-info' for tool summary or 're-triage <binary>' for quick analysis."
+    echo ""
+    echo "Agent commands:"
+    echo "  reverser triage|analyze|solve <binary>  Run analysis"
+    echo "  re-info                                 Tool summary"
+    echo "  re-triage <binary>                      Quick binary triage"
+    echo ""
+    echo "Harness commands:"
+    echo "  harness-init          Initialize Incus profile, firewall, and state DB"
+    echo "  harness-run           Start S3 monitor loop"
+    echo "  harness-build-image   Build the reverser container base image"
+    echo "  harness-test          Launch a test container and verify isolation"
+    echo "  harness-status        Show processing stats"
+    echo "  harness-process FILE  Analyze a local binary directly"
+    echo "  harness-reset         Clear state DB to reprocess binaries (--failed-only)"
+    echo "  harness-cleanup       Destroy orphaned containers"
   '';
 
   enterTest = ''
@@ -170,6 +226,11 @@
     python3 -c "import unicorn" > /dev/null 2>&1 && echo "✓ unicorn" || echo "✗ unicorn"
     python3 -c "import pwn" > /dev/null 2>&1 && echo "✓ pwntools" || echo "✗ pwntools"
     python3 -c "import pyhidra" > /dev/null 2>&1 && echo "✓ pyhidra" || echo "✗ pyhidra"
+    echo "Testing harness dependencies..."
+    python3 -c "import boto3" > /dev/null 2>&1 && echo "✓ boto3" || echo "✗ boto3"
+    python3 -c "import click" > /dev/null 2>&1 && echo "✓ click" || echo "✗ click"
+    incus version > /dev/null 2>&1 && echo "✓ incus" || echo "✗ incus (check socket permissions)"
+    aws --version > /dev/null 2>&1 && echo "✓ awscli" || echo "✗ awscli"
     echo "Done."
   '';
 }

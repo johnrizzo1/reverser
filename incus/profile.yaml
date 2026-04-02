@@ -1,0 +1,18 @@
+name: reverser-isolated
+description: Isolated profile for reverser analysis containers
+config:
+  security.nesting: "false"
+  security.privileged: "false"
+  limits.cpu: "16"
+  limits.memory: 32GB
+  limits.memory.swap: "false"
+devices:
+  root:
+    path: /
+    pool: default
+    type: disk
+    size: 50GB
+  eth0:
+    type: nic
+    network: incusbr0
+    name: eth0

@@ -6,13 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "reverser"
 version = "0.1.0"
 description = "Claude-powered reverse engineering agent"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "claude-agent-sdk",
+    "boto3",
+    "click",
 ]
 
 [project.scripts]
 reverser = "reverser.cli:main"
+reverser-harness = "reverser.harness.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
