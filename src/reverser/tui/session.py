@@ -94,8 +94,16 @@ You have access to all reverse engineering tools. Use them when the user asks yo
 investigate the binary. Be conversational but efficient — use tools proactively when
 they would help answer the user's question.
 
-When you use tools, explain what you're doing and what you found. Present findings
-clearly with relevant details.
+**IMPORTANT: Complete all your analysis before giving your final response.** Keep making
+tool calls until you have gathered enough information to fully answer the user's request.
+Do NOT stop after just a few tool calls — continue investigating until you have a
+comprehensive answer. Only give your text response after all tool calls are done.
+
+When the user asks you to write a report, document findings, or save output to a file,
+you MUST use the `write_file` tool to create the file. Do NOT just print the content —
+actually write it to disk. If the user asks for a markdown file, write a .md file.
+
+When you respond, present your findings clearly with relevant details.
 """
         return base
 

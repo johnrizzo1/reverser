@@ -12,10 +12,13 @@ from .tools import mcp_tools_to_openai, execute_tool
 
 log = logging.getLogger(__name__)
 
-# Patterns for detecting tool calls embedded in text output.
-# Many local models output tool calls as JSON text instead of using the
-# structured tool_calls field.
-_TOOL_CALL_PATTERNS = [
+# --- Text-based tool call extraction ---
+# Many local models (especially via Ollama) output tool calls as plain text
+# instead of using the structured tool_calls field. This handles multiple
+# formats including Qwen3's native XML.
+
+# JSON-based patterns
+_JSON_TOOL_PATTERNS = [
     # {"name": "...", "arguments": {...}}
     re.compile(
         r'\{\s*"name"\s*:\s*"(?P<name>[^"]+)"\s*,\s*"arguments"\s*:\s*(?P<args>\{[^}]*\})\s*\}',
@@ -33,15 +36,63 @@ _TOOL_CALL_PATTERNS = [
     ),
 ]
 
+# Qwen3/Qwen3.5 native XML format:
+# <tool_call>
+# <function=function_name>
+# <parameter=key>value</parameter>
+# <parameter=key2>value2</parameter>
+# </function>
+# </tool_call>
+_QWEN3_XML_PATTERN = re.compile(
+    r'<tool_call>\s*<function=(?P<name>[^>]+)>\s*(?P<params>(?:<parameter=[^>]+>.*?</parameter>\s*)*)</function>\s*</tool_call>',
+    re.DOTALL,
+)
+
+_QWEN3_PARAM_PATTERN = re.compile(
+    r'<parameter=(?P<key>[^>]+)>\s*(?P<value>.*?)\s*</parameter>',
+    re.DOTALL,
+)
+
+
+def _parse_qwen3_xml_calls(text: str, known_tools: set[str]) -> list[tuple[str, str]]:
+    """Extract tool calls from Qwen3's native XML format."""
+    results = []
+    for m in _QWEN3_XML_PATTERN.finditer(text):
+        name = m.group("name").strip()
+        if name not in known_tools:
+            continue
+        params_text = m.group("params")
+        args = {}
+        for pm in _QWEN3_PARAM_PATTERN.finditer(params_text):
+            key = pm.group("key").strip()
+            value = pm.group("value").strip()
+            # Try to parse as JSON value (numbers, bools, etc.)
+            try:
+                args[key] = json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                args[key] = value
+        results.append((name, json.dumps(args)))
+    return results
+
 
 def _extract_text_tool_calls(text: str, known_tools: set[str]) -> list[tuple[str, str]]:
     """Try to extract tool calls from plain text output.
 
+    Handles multiple formats:
+    - JSON: {"name": "...", "arguments": {...}}
+    - JSON in <tool_call> tags or code fences
+    - Qwen3 native XML: <tool_call><function=name><parameter=k>v</parameter></function></tool_call>
+
     Returns list of (tool_name, arguments_json) tuples.
     Only returns matches where the tool name is in known_tools.
     """
-    results = []
-    for pattern in _TOOL_CALL_PATTERNS:
+    # Try Qwen3 XML format first (most specific)
+    results = _parse_qwen3_xml_calls(text, known_tools)
+    if results:
+        return results
+
+    # Fall back to JSON patterns
+    for pattern in _JSON_TOOL_PATTERNS:
         for m in pattern.finditer(text):
             name = m.group("name")
             args = m.group("args")
@@ -86,6 +137,7 @@ class OpenAICompatBackend(Backend):
         ]
 
         turn = 0
+        has_used_tools = False
 
         while turn < max_turns:
             turn += 1
@@ -96,6 +148,7 @@ class OpenAICompatBackend(Backend):
                     model=self._model,
                     messages=messages,
                     tools=self._openai_tools if self._openai_tools else None,
+                    extra_body={"think": True},
                 )
             except Exception as e:
                 yield AgentEvent(kind="error", content=str(e), is_error=True)
@@ -108,25 +161,52 @@ class OpenAICompatBackend(Backend):
             # Accumulate the assistant message for conversation history
             messages.append(_message_to_dict(assistant_msg))
 
-            # Emit any text content
-            if assistant_msg.content:
-                yield AgentEvent(kind="text", content=assistant_msg.content)
+            # Extract thinking from the reasoning field (Ollama/Qwen3.5)
+            msg_data = assistant_msg.model_dump() if hasattr(assistant_msg, 'model_dump') else {}
+            reasoning = msg_data.get("reasoning") or ""
+            if reasoning.strip():
+                yield AgentEvent(kind="thinking", content=reasoning.strip())
+
+            # Process content — extract any remaining thinking blocks in text
+            raw_content = assistant_msg.content or ""
+
+            # Extract <think>...</think> blocks as thinking events
+            thinking_match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL)
+            if thinking_match:
+                think_text = thinking_match.group(1).strip()
+                if think_text and not reasoning:
+                    yield AgentEvent(kind="thinking", content=think_text)
+                # Remove thinking block from content for further processing
+                display_content = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL).strip()
+            else:
+                display_content = raw_content
+
+            # Also handle unclosed <think> tags (known Qwen3.5 bug)
+            if display_content.startswith('<think>'):
+                think_text = display_content[7:].strip()
+                if think_text and not reasoning:
+                    yield AgentEvent(kind="thinking", content=think_text)
+                display_content = ""
+
+            # Emit visible text content (stripped of thinking/tool XML)
+            visible_text = re.sub(r'<tool_call>.*?</tool_call>', '', display_content, flags=re.DOTALL).strip()
+            if visible_text:
+                yield AgentEvent(kind="text", content=visible_text)
 
             # Check for tool calls
             if not assistant_msg.tool_calls:
-                # Some models output tool calls as plain text JSON instead of
-                # using the structured tool_calls field. Try to parse them.
+                # Some models output tool calls as plain text (JSON or XML)
+                # instead of using the structured tool_calls field.
                 text_calls = []
-                if assistant_msg.content:
+                if raw_content:
                     text_calls = _extract_text_tool_calls(
-                        assistant_msg.content, self._tool_names,
+                        raw_content, self._tool_names,
                     )
 
                 if text_calls:
-                    # Remove the original text-only assistant message — we'll
-                    # replace it with proper tool call messages.
-                    messages.pop()
-
+                    has_used_tools = True
+                    # Execute the tool calls the model embedded in its text.
+                    result_parts = []
                     for name, args in text_calls:
                         yield AgentEvent(
                             kind="tool_call",
@@ -144,37 +224,42 @@ class OpenAICompatBackend(Backend):
                             is_error=is_error,
                         )
 
-                        # Append as a synthetic assistant + tool message pair
-                        # so the model sees the result in conversation history.
-                        tool_call_id = f"synthetic_{turn}_{name}"
-                        messages.append({
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [{
-                                "id": tool_call_id,
-                                "type": "function",
-                                "function": {"name": name, "arguments": args},
-                            }],
-                        })
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": result_text,
-                        })
+                        status = "ERROR" if is_error else "OK"
+                        result_parts.append(
+                            f"[Tool result: {name} — {status}]\n{result_text}"
+                        )
+
+                    # Feed results back as a user message so the model can
+                    # process them naturally (synthetic tool messages confuse
+                    # many local models).
+                    results_msg = "\n\n".join(result_parts)
+                    results_msg += "\n\nContinue your analysis. Make more tool calls if needed, or provide your final answer."
+                    messages.append({"role": "user", "content": results_msg})
 
                     # Continue the loop so the model can process results.
                     continue
 
-                # No tool calls at all — the model is done
+                # No tool calls found. If the visible response is empty/very
+                # short and the model has used tools before, it may have
+                # stalled — nudge it to continue rather than treating as done.
+                if has_used_tools and len(visible_text) < 80:
+                    messages.append({
+                        "role": "user",
+                        "content": "Continue your analysis. Use the available tools to gather more information, then provide your complete answer.",
+                    })
+                    continue
+
+                # Model gave a substantive text response — it's done.
                 yield AgentEvent(
                     kind="result",
-                    content=assistant_msg.content or "",
+                    content=visible_text,
                     turns=turn,
                     subtype="success",
                 )
                 return
 
             # Process tool calls
+            has_used_tools = True
             for tc in assistant_msg.tool_calls:
                 fn = tc.function
                 yield AgentEvent(
@@ -218,9 +303,7 @@ class OpenAICompatBackend(Backend):
 
 def _message_to_dict(msg) -> dict:
     """Convert an OpenAI ChatCompletionMessage to a plain dict for the messages list."""
-    d = {"role": msg.role}
-    if msg.content:
-        d["content"] = msg.content
+    d = {"role": msg.role, "content": msg.content or ""}
     if msg.tool_calls:
         d["tool_calls"] = [
             {

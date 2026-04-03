@@ -22,7 +22,15 @@ from textual.widgets import (
 
 
 class SelectableRichLog(RichLog):
-    """RichLog with working text selection support."""
+    """RichLog with working text selection and smart auto-scroll."""
+
+    def write(self, *args, **kwargs):
+        # Only auto-scroll if the user is already at the bottom.
+        # This lets users scroll back to read history without being
+        # yanked to the end on every new write.
+        at_bottom = self.is_vertical_scroll_end
+        kwargs.setdefault("scroll_end", at_bottom)
+        return super().write(*args, **kwargs)
 
     def get_selection(self, selection):
         total = len(self.lines)
@@ -75,6 +83,8 @@ class HistoryInput(Input):
                 self._history_index = -1
                 self.value = self._draft
             self.cursor_position = len(self.value)
+
+from rich.markup import escape as markup_escape
 
 from ..profiles import Profile, Skill, get_profile, list_profiles
 from ..backends import AgentEvent
@@ -527,7 +537,7 @@ class ReverserApp(App):
             async for event in self.session.send(message):
                 self._handle_event(event, log)
         except Exception as e:
-            log.write(f"\n[red bold]Error:[/red bold] {e}")
+            log.write(f"\n[red bold]Error:[/red bold] {markup_escape(str(e))}")
         finally:
             input_widget.disabled = False
             input_widget.placeholder = "Message the agent... (or /help)"
@@ -536,30 +546,34 @@ class ReverserApp(App):
 
     def _handle_event(self, event: AgentEvent, log: RichLog) -> None:
         if event.kind == "text":
-            log.write(event.content, shrink=False)
+            if event.content.strip():
+                log.write(markup_escape(event.content), shrink=False)
 
         elif event.kind == "thinking":
-            log.write(f"[dim italic]thinking: {event.content}[/dim italic]")
+            if event.content.strip():
+                log.write(f"[dim italic]thinking: {markup_escape(event.content)}[/dim italic]")
 
         elif event.kind == "tool_call":
             name = event.tool_name.replace("mcp__re__", "")
-            log.write(f"[cyan bold]> {name}[/cyan bold] [dim]{event.tool_input}[/dim]")
+            log.write(f"[cyan bold]> {name}[/cyan bold] [dim]{markup_escape(event.tool_input)}[/dim]")
 
         elif event.kind == "tool_result":
             color = "red" if event.is_error else "green"
-            log.write(f"[{color} dim]{event.content}[/{color} dim]")
+            log.write(f"[{color} dim]{markup_escape(event.content)}[/{color} dim]")
 
         elif event.kind == "turn":
             log.write(f"[dim]── turn {event.turns} ──[/dim]")
+            self._update_status()
 
         elif event.kind == "result":
             if event.cost:
                 log.write(f"\n[dim]Cost: ${event.cost:.4f}[/dim]")
             if event.subtype and event.subtype != "success":
                 log.write(f"[yellow]Agent stopped: {event.subtype}[/yellow]")
+            self._update_status()
 
         elif event.kind == "error":
-            log.write(f"[red bold]Error:[/red bold] {event.content}")
+            log.write(f"[red bold]Error:[/red bold] {markup_escape(event.content)}")
 
     # ── Actions ─────────────────────────────────────────────────────
 
