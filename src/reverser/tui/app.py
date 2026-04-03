@@ -24,13 +24,13 @@ from textual.widgets import (
 class SelectableRichLog(RichLog):
     """RichLog with working text selection and smart auto-scroll."""
 
-    def write(self, *args, **kwargs):
+    def write(self, content=None, width=None, expand=False, shrink=True, scroll_end=None, animate=False):
         # Only auto-scroll if the user is already at the bottom.
         # This lets users scroll back to read history without being
         # yanked to the end on every new write.
-        at_bottom = self.is_vertical_scroll_end
-        kwargs.setdefault("scroll_end", at_bottom)
-        return super().write(*args, **kwargs)
+        if scroll_end is None:
+            scroll_end = self.is_vertical_scroll_end
+        return super().write(content, width=width, expand=expand, shrink=shrink, scroll_end=scroll_end, animate=animate)
 
     def get_selection(self, selection):
         total = len(self.lines)

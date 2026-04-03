@@ -14,6 +14,7 @@
     awscli2
     sqlite
     jq
+    unzip
 
     # Disassemblers / Decompilers
     radare2
@@ -205,7 +206,7 @@
   '';
 
   enterShell = ''
-    pip install -q -e "$REVERSER_HOME"
+    pip install -q --no-deps -e "$REVERSER_HOME" 2>/dev/null || true
     hash -r
     echo "Reverser agent environment loaded."
     echo ""
