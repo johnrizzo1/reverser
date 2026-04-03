@@ -9,6 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key
 from textual.screen import ModalScreen
+from textual.strip import Strip
 from textual.widgets import (
     Footer,
     Header,
@@ -31,6 +32,11 @@ class SelectableRichLog(RichLog):
         if scroll_end is None:
             scroll_end = self.is_vertical_scroll_end
         return super().write(content, width=width, expand=expand, shrink=shrink, scroll_end=scroll_end, animate=animate)
+
+    def render_line(self, y: int) -> Strip:
+        scroll_x, scroll_y = self.scroll_offset
+        strip = super().render_line(y)
+        return strip.apply_offsets(scroll_x, scroll_y + y)
 
     def get_selection(self, selection):
         total = len(self.lines)
@@ -290,7 +296,7 @@ class ReverserApp(App):
         Binding("f2", "show_profiles", "Profile", show=True),
         Binding("f3", "load_binary", "Load", show=True),
         Binding("f5", "clear_log", "Clear", show=True),
-        Binding("ctrl+c", "quit", "Quit", show=True, priority=True),
+        Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
     def __init__(
