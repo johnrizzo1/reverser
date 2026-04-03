@@ -27,16 +27,11 @@
     ]))
     # retdec                  # build failure in capstone dep
     binutils
-    elfutils
     # jadx                    # quark-engine dep conflicts with devenv Python env; installed standalone via ~/.local/bin
     cfr
     procyon
 
     # Dynamic analysis / Debuggers
-    gdb
-    strace
-    ltrace
-    valgrind
     qemu
 
     # Network analysis
@@ -58,10 +53,7 @@
     hexxy
 
     # Fuzzing
-    aflplusplus
-    honggfuzz
     radamsa
-    zzuf
 
     # Crypto / Password cracking
     # hashcat                 # needs opencv/opencl - enable if GPU available
@@ -89,6 +81,23 @@
 
     # Malware analysis
     # yargen
+  ]
+
+  # ── Linux-only packages ────────────────────────────────────────────
+  ++ lib.optionals stdenv.isLinux [
+    gdb
+    strace
+    ltrace
+    elfutils
+    valgrind
+    aflplusplus
+    honggfuzz
+    zzuf
+  ]
+
+  # ── macOS-specific packages ────────────────────────────────────────
+  ++ lib.optionals stdenv.isDarwin [
+    lldb                       # debugger (gdb equivalent)
   ];
 
   # ── Python with RE libraries ──────────────────────────────────────
@@ -163,7 +172,7 @@
     echo "  radare2  $(r2 -V 2>/dev/null | head -1)"
     echo "  rizin    $(rizin -V 2>/dev/null | head -1)"
     echo "  ghidra   $(ghidra-analyzeHeadless --help 2>&1 | head -1 || echo 'installed')"
-    echo "  gdb      $(gdb --version 2>/dev/null | head -1)"
+    echo "  debugger $(gdb --version 2>/dev/null | head -1 || lldb --version 2>/dev/null | head -1)"
     echo "  tshark   $(tshark --version 2>/dev/null | head -1)"
     echo ""
     echo "Python RE libraries: angr, capstone, unicorn, pwntools, r2pipe,"
@@ -196,7 +205,8 @@
   '';
 
   enterShell = ''
-    pip install -q -e "$REVERSER_HOME" 2>/dev/null
+    pip install -q -e "$REVERSER_HOME"
+    hash -r
     echo "Reverser agent environment loaded."
     echo ""
     echo "Agent commands:"
@@ -231,7 +241,7 @@
     rizin -V > /dev/null 2>&1 && echo "✓ rizin" || echo "✗ rizin"
     rizin -L 2>/dev/null | grep -q ghidra && echo "✓ rz-ghidra" || echo "✗ rz-ghidra"
     ghidra-analyzeHeadless > /dev/null 2>&1; [ $? -ne 127 ] && echo "✓ ghidra" || echo "✗ ghidra"
-    gdb --version > /dev/null 2>&1 && echo "✓ gdb" || echo "✗ gdb"
+    gdb --version > /dev/null 2>&1 && echo "✓ gdb" || lldb --version > /dev/null 2>&1 && echo "✓ lldb (gdb n/a)" || echo "✗ gdb/lldb"
     tshark --version > /dev/null 2>&1 && echo "✓ tshark" || echo "✗ tshark"
     python3 -c "import angr" > /dev/null 2>&1 && echo "✓ angr" || echo "✗ angr"
     python3 -c "import capstone" > /dev/null 2>&1 && echo "✓ capstone" || echo "✗ capstone"
