@@ -30,6 +30,9 @@ class AnalysisPipeline:
             image=config.incus_image,
             profile=config.incus_profile,
             anthropic_api_key=config.anthropic_api_key,
+            backend=config.backend,
+            model=config.model,
+            api_base=config.api_base,
         )
 
     def _status(self, msg: str):

@@ -239,17 +239,30 @@ class OpenAICompatBackend(Backend):
                     # Continue the loop so the model can process results.
                     continue
 
-                # No tool calls found. If the visible response is empty/very
-                # short and the model has used tools before, it may have
-                # stalled — nudge it to continue rather than treating as done.
-                if has_used_tools and len(visible_text) < 80:
+                # No tool calls found. Decide whether to nudge the model
+                # to use tools or accept the response as final.
+                #
+                # Nudge when:
+                # - The model hasn't used any tools yet (it's just planning/
+                #   explaining instead of doing work)
+                # - The model has used tools before but gave a short/empty
+                #   reply (likely stalled)
+                if not has_used_tools:
+                    messages.append({
+                        "role": "user",
+                        "content": "Don't just describe what you would do — actually do it now. "
+                        "Use the available tools to start your analysis.",
+                    })
+                    continue
+
+                if len(visible_text) < 80:
                     messages.append({
                         "role": "user",
                         "content": "Continue your analysis. Use the available tools to gather more information, then provide your complete answer.",
                     })
                     continue
 
-                # Model gave a substantive text response — it's done.
+                # Model has used tools and gave a substantive text response — it's done.
                 yield AgentEvent(
                     kind="result",
                     content=visible_text,

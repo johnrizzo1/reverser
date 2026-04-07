@@ -128,10 +128,19 @@ def init(ctx):
 
 @main.command()
 @click.option("-v", "--verbose", count=True, help="Increase verbosity (-v info, -vv debug)")
+@click.option("--backend", "-b", default=None, help="LLM backend: claude, ollama, or any OpenAI-compatible server")
+@click.option("--model", "-m", default=None, help="Model name/tag for non-claude backends")
+@click.option("--api-base", default=None, help="API base URL override")
 @click.pass_context
-def monitor(ctx, verbose):
+def monitor(ctx, verbose, backend, model, api_base):
     """Poll S3 for new binaries and analyze them in isolated containers."""
     config = ctx.obj["config"]
+    if backend:
+        config.backend = backend
+    if model:
+        config.model = model
+    if api_base:
+        config.api_base = api_base
     config.validate()
 
     # Merge group-level and command-level verbosity
@@ -150,7 +159,10 @@ def monitor(ctx, verbose):
     pipeline.vm_manager.ensure_image_exists()
 
     click.echo(f"Monitoring s3://{config.s3_bucket}/{config.s3_prefix}")
-    click.echo(f"Mode: {config.analysis_mode} | Budget: ${config.analysis_budget} | Poll: {config.poll_interval_seconds}s")
+    backend_info = config.backend
+    if config.model:
+        backend_info += f"/{config.model}"
+    click.echo(f"Mode: {config.analysis_mode} | Backend: {backend_info} | Budget: ${config.analysis_budget} | Poll: {config.poll_interval_seconds}s")
     click.echo("Press Ctrl+C to stop.\n")
 
     shutdown = False
@@ -214,12 +226,21 @@ def status(ctx):
 
 @main.command()
 @click.option("-v", "--verbose", count=True, help="Increase verbosity (-v info, -vv debug)")
+@click.option("--backend", "-b", default=None, help="LLM backend: claude, ollama, or any OpenAI-compatible server")
+@click.option("--model", "-m", default=None, help="Model name/tag for non-claude backends")
+@click.option("--api-base", default=None, help="API base URL override")
 @click.argument("binary", type=click.Path(exists=True))
 @click.pass_context
-def process(ctx, verbose, binary):
+def process(ctx, verbose, backend, model, api_base, binary):
     """Analyze a local binary directly (skip S3)."""
     config = ctx.obj["config"]
-    if not config.anthropic_api_key:
+    if backend:
+        config.backend = backend
+    if model:
+        config.model = model
+    if api_base:
+        config.api_base = api_base
+    if not config.anthropic_api_key and config.backend == "claude":
         click.echo("ERROR: ANTHROPIC_API_KEY environment variable is required", err=True)
         sys.exit(1)
 
@@ -236,7 +257,10 @@ def process(ctx, verbose, binary):
     pipeline.vm_manager.ensure_image_exists()
 
     click.echo(f"Analyzing: {binary}")
-    click.echo(f"Mode: {config.analysis_mode} | Budget: ${config.analysis_budget}")
+    backend_info = config.backend
+    if config.model:
+        backend_info += f"/{config.model}"
+    click.echo(f"Mode: {config.analysis_mode} | Backend: {backend_info} | Budget: ${config.analysis_budget}")
 
     success = pipeline.process_local(binary)
     if success:
@@ -287,6 +311,9 @@ def cleanup(ctx):
         image=config.incus_image,
         profile=config.incus_profile,
         anthropic_api_key=config.anthropic_api_key,
+        backend=config.backend,
+        model=config.model,
+        api_base=config.api_base,
     )
 
     containers = vm_mgr.list_containers()
@@ -319,6 +346,9 @@ def test_vm(ctx):
         image=config.incus_image,
         profile=config.incus_profile,
         anthropic_api_key=config.anthropic_api_key or "test-key",
+        backend=config.backend,
+        model=config.model,
+        api_base=config.api_base,
     )
 
     vm_mgr.ensure_image_exists()

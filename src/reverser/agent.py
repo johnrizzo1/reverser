@@ -146,4 +146,7 @@ async def run_agent(
         slog.close()
         print(f"[Log saved: {log_path}]", file=sys.stderr)
 
+    if result_text is None:
+        sys.exit(1)
+
     return result_text

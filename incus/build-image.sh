@@ -101,7 +101,6 @@ incus exec "$BUILD_CONTAINER" -- bash -c '
         nixos.ropgadget \
         nixos.ropr \
         nixos.one_gadget \
-        nixos.wineWowPackages.stable \
         nixos.apktool \
         nixos.dex2jar \
         nixos.z3 \
@@ -113,6 +112,12 @@ incus exec "$BUILD_CONTAINER" -- bash -c '
         nixos.file \
         nixos.nodejs
 '
+
+# 2b. Install Wine separately (may fail due to GCC ICE in some nixpkgs versions)
+echo "Installing Wine (optional)..."
+incus exec "$BUILD_CONTAINER" -- bash -c '
+    nix-env -iA nixos.wineWowPackages.stable 2>&1
+' || echo "WARNING: Wine installation failed — PE binary support will be unavailable."
 
 # 3. Install Ghidra (with extensions) and Rizin (with rz-ghidra plugin)
 echo "Installing Ghidra + extensions and Rizin + rz-ghidra..."
@@ -299,7 +304,44 @@ incus exec "$BUILD_CONTAINER" -- bash -c '
     check_py pyhidra
 '
 
-# 5. Stop and publish as image
+# Clean up caches and unnecessary files to shrink the image
+echo ""
+echo "=== Cleaning up caches ==="
+incus exec "$BUILD_CONTAINER" -- bash -c '
+    export PATH="/opt/venv/bin:/root/.nix-profile/bin:$PATH"
+
+    # pip cache
+    pip cache purge 2>/dev/null || true
+    rm -rf /root/.cache/pip /root/.cache/uv 2>/dev/null || true
+
+    # npm cache
+    npm cache clean --force 2>/dev/null || true
+    rm -rf /root/.npm/_cacache 2>/dev/null || true
+
+    # Nix garbage collection — remove unreferenced store paths
+    nix-collect-garbage -d 2>/dev/null || true
+
+    # Remove old NixOS system generations (keeps current only)
+    nix-env --delete-generations old 2>/dev/null || true
+
+    # Nix channel cache / tarballs
+    rm -rf /root/.cache/nix 2>/dev/null || true
+    rm -rf /nix/var/nix/temproots/* 2>/dev/null || true
+
+    # Python bytecache — regenerates on import
+    find /opt/venv -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+    # Misc caches
+    rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+    rm -rf /root/.cache/pip /root/.cache/fontconfig 2>/dev/null || true
+
+    # Strip .pyc from site-packages (saves ~5-10% of venv)
+    find /opt/venv -name "*.pyc" -delete 2>/dev/null || true
+
+    echo "Cleanup done."
+'
+
+# Stop and publish as image
 echo "Stopping container and creating image..."
 incus stop "$BUILD_CONTAINER"
 incus publish "$BUILD_CONTAINER" --alias "$IMAGE_ALIAS" \

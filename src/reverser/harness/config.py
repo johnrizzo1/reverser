@@ -33,6 +33,11 @@ class Config:
     # Results upload
     results_s3_prefix: str | None = None
 
+    # Backend settings
+    backend: str = "claude"
+    model: str | None = None
+    api_base: str | None = None
+
     # Secrets (env-only)
     anthropic_api_key: str = ""
 
@@ -44,6 +49,8 @@ class Config:
             errors.append("ANTHROPIC_API_KEY environment variable is required")
         if self.analysis_mode not in ("triage", "analyze", "solve"):
             errors.append(f"analysis_mode must be triage/analyze/solve, got: {self.analysis_mode}")
+        if self.backend != "claude" and not self.model:
+            errors.append("model is required when backend is not 'claude'")
         if errors:
             raise ValueError("\n".join(errors))
 
@@ -85,6 +92,11 @@ def load_config(config_path: str | None = None) -> Config:
         results = data.get("results", {})
         cfg.results_s3_prefix = results.get("s3_prefix", cfg.results_s3_prefix)
 
+        backend = data.get("backend", {})
+        cfg.backend = backend.get("name", cfg.backend)
+        cfg.model = backend.get("model", cfg.model)
+        cfg.api_base = backend.get("api_base", cfg.api_base)
+
     # Environment variable overrides
     env_map = {
         "HARNESS_S3_BUCKET": "s3_bucket",
@@ -100,6 +112,9 @@ def load_config(config_path: str | None = None) -> Config:
         "HARNESS_RESULTS_DIR": "results_dir",
         "HARNESS_DB_PATH": "db_path",
         "HARNESS_RESULTS_S3_PREFIX": "results_s3_prefix",
+        "HARNESS_BACKEND": "backend",
+        "HARNESS_MODEL": "model",
+        "HARNESS_API_BASE": "api_base",
     }
 
     for env_key, attr in env_map.items():

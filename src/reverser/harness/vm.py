@@ -38,10 +38,15 @@ def _container_name(s3_key: str) -> str:
 
 
 class IncusVMManager:
-    def __init__(self, image: str, profile: str, anthropic_api_key: str):
+    def __init__(self, image: str, profile: str, anthropic_api_key: str,
+                 backend: str = "claude", model: str | None = None,
+                 api_base: str | None = None):
         self.image = image
         self.profile = profile
         self.anthropic_api_key = anthropic_api_key
+        self.backend = backend
+        self.model = model
+        self.api_base = api_base
 
     def ensure_image_exists(self) -> bool:
         result = _run_incus("image", "list", "--format=json")
@@ -97,18 +102,52 @@ class IncusVMManager:
         log.info("Container %s ready", name)
         return name
 
+    def _get_host_ip(self, container_name: str) -> str | None:
+        """Get the host's IP as seen from inside the container (default gateway)."""
+        try:
+            result = _run_incus(
+                "exec", container_name, "--", "bash", "-c",
+                "ip route show default | awk '{print $3}'",
+                check=False, timeout=10,
+            )
+            ip = result.stdout.strip()
+            if ip and result.returncode == 0:
+                return ip
+        except (subprocess.TimeoutExpired, Exception):
+            pass
+        log.warning("Could not determine host IP for container %s", container_name)
+        return None
+
     def run_analysis(
         self, name: str, mode: str, budget: float, timeout: int,
         verbose: int = 0,
     ) -> tuple[int, str]:
         verbose_flags = " -" + "v" * verbose if verbose > 0 else ""
         log.info("Running 'reverser %s' in container %s (timeout=%ds)", mode, name, timeout)
+
+        backend_flags = ""
+        if self.backend != "claude":
+            backend_flags += f" --backend {self.backend}"
+            if self.model:
+                backend_flags += f" --model {self.model}"
+            api_base = self.api_base
+            if api_base is None and self.backend == "ollama":
+                # Resolve the host IP so the container can reach ollama.
+                # localhost inside the container is the container itself.
+                host_ip = self._get_host_ip(name)
+                if host_ip:
+                    api_base = f"http://{host_ip}:11434/v1"
+                    log.info("Resolved host IP for ollama: %s", host_ip)
+            if api_base:
+                backend_flags += f" --api-base {api_base}"
+
         cmd = [
             "exec", name, "--user", "1000", "--group", "1000",
             "--env", "HOME=/home/reverser", "--",
             "bash", "-lc",
-            f"reverser {mode} /tmp/target --budget {budget} "
-            f"--log /tmp/results/session.jsonl --log-dir /tmp/results{verbose_flags}",
+            f"reverser{verbose_flags} {mode} /tmp/target --budget {budget} "
+            f"--log /tmp/results/session.jsonl --log-dir /tmp/results"
+            f"{backend_flags}",
         ]
         try:
             result = _run_incus(*cmd, timeout=timeout, check=False)
