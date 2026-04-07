@@ -5,11 +5,16 @@ import asyncio
 import os
 import sys
 
+from .tools._common import is_url
+
+# Profiles that operate on web targets rather than binary files
+_WEB_PROFILES = {"webpentest", "webapi", "webrecon"}
+
 
 def main():
     parser = argparse.ArgumentParser(
         prog="reverser",
-        description="AI-powered reverse engineering agent (Claude or local models via Ollama/vLLM)",
+        description="AI-powered reverse engineering and web penetration testing agent",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -53,9 +58,11 @@ def main():
         aliases=["i"],
         help="Launch interactive TUI for guided analysis",
     )
-    interactive_parser.add_argument("binary", nargs="?", default="", help="Path to the binary to analyze")
+    interactive_parser.add_argument("target", nargs="?", default="",
+                                    help="Path to binary or target URL for web pentest")
     interactive_parser.add_argument("--profile", "-p", default="general",
-                                    help="Agent profile (general, linux, windows, android, chrome, managed, api, ctf)")
+                                    help="Agent profile (general, linux, windows, android, chrome, managed, "
+                                         "api, ctf, webpentest, webapi, webrecon)")
     interactive_parser.add_argument("--budget", type=float, default=5.0, help="Max USD budget (default: 5.0)")
     interactive_parser.add_argument("--max-turns", type=int, default=50, help="Max agent turns per interaction (default: 50)")
     interactive_parser.add_argument("--list-profiles", action="store_true", help="List available profiles and exit")
@@ -111,17 +118,25 @@ def _run_interactive(args):
             print()
         return
 
-    binary = ""
-    if args.binary:
-        binary = os.path.abspath(args.binary)
-        if not os.path.isfile(binary):
-            print(f"Error: file not found: {binary}", file=sys.stderr)
-            sys.exit(1)
+    target = getattr(args, "target", "") or ""
+    profile_key = args.profile
+    is_web_profile = profile_key in _WEB_PROFILES
+
+    if target:
+        if is_url(target):
+            # URL target — valid for web profiles (and we'll allow it for any profile)
+            pass
+        else:
+            # File path — resolve and validate
+            target = os.path.abspath(target)
+            if not os.path.isfile(target):
+                print(f"Error: file not found: {target}", file=sys.stderr)
+                sys.exit(1)
 
     from .tui.app import run_tui
     run_tui(
-        binary_path=binary,
-        profile=args.profile,
+        binary_path=target,
+        profile=profile_key,
         budget=args.budget,
         max_turns=args.max_turns,
         backend=args.backend,

@@ -5,6 +5,38 @@ import subprocess
 
 DEFAULT_MAX_OUTPUT = 8000  # characters (~2k tokens)
 DEFAULT_TIMEOUT = 30  # seconds
+WEB_TOOL_TIMEOUT = 120  # seconds — web scanners can be slow
+
+
+def is_url(target: str) -> bool:
+    """Check if a target string looks like a URL or domain (not a file path)."""
+    if not target:
+        return False
+    if target.startswith(("http://", "https://")):
+        return True
+    # Looks like a domain: contains a dot, doesn't start with / or .
+    if target[0] in ("/", "."):
+        return False
+    # Must have a dot-separated domain-like structure (e.g. example.com)
+    parts = target.split(".", 1)
+    return len(parts) == 2 and len(parts[0]) > 0 and len(parts[1]) > 0
+
+
+def check_web_authorized() -> dict | None:
+    """Return an error dict if web pentest is not authorized, None otherwise.
+
+    Authorization requires REVERSER_PENTEST_AUTHORIZED=1 env var
+    or a .reverser-authorized file in the working directory.
+    """
+    if os.environ.get("REVERSER_PENTEST_AUTHORIZED") == "1":
+        return None
+    if os.path.exists(".reverser-authorized"):
+        return None
+    return format_error(
+        "Web pentest tools require explicit authorization.\n"
+        "Set REVERSER_PENTEST_AUTHORIZED=1 or create .reverser-authorized in the working directory.\n"
+        "This confirms you have written authorization to test the target."
+    )
 
 # PE magic bytes: MZ header
 _PE_MAGIC = b"MZ"

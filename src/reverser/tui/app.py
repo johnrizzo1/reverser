@@ -94,7 +94,8 @@ from rich.markup import escape as markup_escape
 
 from ..profiles import Profile, Skill, get_profile, list_profiles
 from ..backends import AgentEvent
-from .session import AgentSession
+from ..tools._common import is_url
+from .session import AgentSession, _WEB_PROFILES
 
 
 # ── Modal screens ───────────────────────────────────────────────────
@@ -216,13 +217,13 @@ class SkillScreen(ModalScreen[str]):
         self.dismiss(key)
 
 
-class LoadBinaryScreen(ModalScreen[str]):
-    """Simple input for loading a binary path."""
+class LoadTargetScreen(ModalScreen[str]):
+    """Simple input for loading a binary path or target URL."""
 
     BINDINGS = [Binding("escape", "dismiss('')", "Cancel")]
 
     DEFAULT_CSS = """
-    LoadBinaryScreen {
+    LoadTargetScreen {
         align: center middle;
     }
     #load-dialog {
@@ -246,11 +247,11 @@ class LoadBinaryScreen(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="load-dialog"):
-            yield Label("Load Binary")
+            yield Label("Load Target")
             yield Input(
                 value=self.current_path,
-                placeholder="Path to binary...",
-                id="binary-path-input",
+                placeholder="Path to binary or target URL...",
+                id="target-input",
             )
 
     @on(Input.Submitted)
@@ -320,6 +321,14 @@ class ReverserApp(App):
         self.profile = get_profile(profile_key)
         self.session: AgentSession | None = None
 
+    @property
+    def _is_web_profile(self) -> bool:
+        return self.profile_key in _WEB_PROFILES
+
+    @property
+    def _is_web_target(self) -> bool:
+        return is_url(self.binary_path) if self.binary_path else False
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield SelectableRichLog(id="chat-log", highlight=True, markup=True, wrap=True)
@@ -340,10 +349,16 @@ class ReverserApp(App):
 
         if self.binary_path:
             self._init_session()
-            log.write(f"Binary loaded: [green]{self.binary_path}[/green]")
+            if self._is_web_target:
+                log.write(f"Target: [green]{self.binary_path}[/green]")
+            else:
+                log.write(f"Binary loaded: [green]{self.binary_path}[/green]")
             log.write(f"Session log: {self.session.log_path}")
         else:
-            log.write("No binary loaded. Press [bold]F3[/bold] to load one, or enter a path.")
+            if self._is_web_profile:
+                log.write("No target set. Press [bold]F3[/bold] to set one, or enter a URL.")
+            else:
+                log.write("No binary loaded. Press [bold]F3[/bold] to load one, or enter a path.")
 
         log.write(
             "Press [bold]F1[/bold] for skills, [bold]F2[/bold] to change profile. "
@@ -373,18 +388,26 @@ class ReverserApp(App):
         except NoMatches:
             return
 
-        binary_name = Path(self.binary_path).name if self.binary_path else "(none)"
+        if self._is_web_target:
+            from urllib.parse import urlparse
+            parsed = urlparse(self.binary_path)
+            target_name = parsed.hostname or self.binary_path or "(none)"
+            target_label = "Target"
+        else:
+            target_name = Path(self.binary_path).name if self.binary_path else "(none)"
+            target_label = "Binary"
+
         if self.session:
             s = self.session.stats
             cost_str = f"${s.total_cost:.4f}" if s.total_cost else "$0.00"
             status.update(
-                f"Binary: {binary_name}  |  Profile: {self.profile.name}  |  "
+                f"{target_label}: {target_name}  |  Profile: {self.profile.name}  |  "
                 f"Turns: {s.turns}/{s.max_turns}  |  Cost: {cost_str}  |  "
                 f"Budget: ${s.budget:.2f}"
             )
         else:
             status.update(
-                f"Binary: {binary_name}  |  Profile: {self.profile.name}  |  "
+                f"{target_label}: {target_name}  |  Profile: {self.profile.name}  |  "
                 f"Budget: ${self.budget:.2f}"
             )
 
@@ -406,18 +429,29 @@ class ReverserApp(App):
             self._handle_command(text, log)
             return
 
-        # Handle bare path input when no binary is loaded
-        if not self.binary_path and Path(text).is_file():
-            self.binary_path = str(Path(text).resolve())
-            self._init_session()
-            log.write(f"Binary loaded: [green]{self.binary_path}[/green]")
-            log.write(f"Session log: {self.session.log_path}")
-            log.write("")
-            return
+        # Handle bare path/URL input when no target is loaded
+        if not self.binary_path:
+            if is_url(text):
+                self.binary_path = text
+                self._init_session()
+                log.write(f"Target set: [green]{self.binary_path}[/green]")
+                log.write(f"Session log: {self.session.log_path}")
+                log.write("")
+                return
+            elif Path(text).is_file():
+                self.binary_path = str(Path(text).resolve())
+                self._init_session()
+                log.write(f"Binary loaded: [green]{self.binary_path}[/green]")
+                log.write(f"Session log: {self.session.log_path}")
+                log.write("")
+                return
 
-        # Need a binary loaded
+        # Need a target loaded
         if not self.session:
-            log.write("[red]No binary loaded. Press F3 or enter a file path.[/red]")
+            if self._is_web_profile:
+                log.write("[red]No target set. Press F3 or enter a URL.[/red]")
+            else:
+                log.write("[red]No binary loaded. Press F3 or enter a file path.[/red]")
             return
 
         if self.session.is_running:
@@ -437,7 +471,7 @@ class ReverserApp(App):
             log.write("[bold]Commands:[/bold]")
             log.write("  /help           — Show this help")
             log.write("  /profile <key>  — Switch profile (or F2)")
-            log.write("  /load <path>    — Load a binary (or F3)")
+            log.write("  /load <path|url> — Load a binary or set target URL (or F3)")
             log.write("  /skills         — Show available skills (or F1)")
             log.write("  /budget <amt>   — Set budget in USD")
             log.write("  /turns <n>      — Set max turns")
@@ -458,7 +492,7 @@ class ReverserApp(App):
 
         elif cmd == "/load":
             if arg:
-                self._load_binary(arg, log)
+                self._load_target(arg, log)
             else:
                 self.action_load_binary()
 
@@ -520,15 +554,21 @@ class ReverserApp(App):
             self._init_session()
             log.write(f"Session restarted with new profile.")
 
-    def _load_binary(self, path: str, log: RichLog) -> None:
-        resolved = Path(path).expanduser().resolve()
-        if not resolved.is_file():
-            log.write(f"[red]File not found: {path}[/red]")
-            return
-        self.binary_path = str(resolved)
-        self._init_session()
-        log.write(f"Binary loaded: [green]{self.binary_path}[/green]")
-        log.write(f"Session log: {self.session.log_path}")
+    def _load_target(self, path: str, log: RichLog) -> None:
+        if is_url(path):
+            self.binary_path = path
+            self._init_session()
+            log.write(f"Target set: [green]{self.binary_path}[/green]")
+            log.write(f"Session log: {self.session.log_path}")
+        else:
+            resolved = Path(path).expanduser().resolve()
+            if not resolved.is_file():
+                log.write(f"[red]File not found: {path}[/red]")
+                return
+            self.binary_path = str(resolved)
+            self._init_session()
+            log.write(f"Binary loaded: [green]{self.binary_path}[/green]")
+            log.write(f"Session log: {self.session.log_path}")
 
     # ── Agent execution ─────────────────────────────────────────────
 
@@ -586,7 +626,10 @@ class ReverserApp(App):
     def action_show_skills(self) -> None:
         if not self.session:
             log = self.query_one("#chat-log", SelectableRichLog)
-            log.write("[red]Load a binary first (F3).[/red]")
+            if self._is_web_profile:
+                log.write("[red]Set a target URL first (F3).[/red]")
+            else:
+                log.write("[red]Load a binary first (F3).[/red]")
             return
 
         async def handle_skill(key: str) -> None:
@@ -615,9 +658,9 @@ class ReverserApp(App):
             if not path:
                 return
             log = self.query_one("#chat-log", SelectableRichLog)
-            self._load_binary(path, log)
+            self._load_target(path, log)
 
-        self.push_screen(LoadBinaryScreen(self.binary_path), handle_path)
+        self.push_screen(LoadTargetScreen(self.binary_path), handle_path)
 
     def action_clear_log(self) -> None:
         log = self.query_one("#chat-log", SelectableRichLog)

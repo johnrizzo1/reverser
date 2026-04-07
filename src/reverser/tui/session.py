@@ -3,11 +3,15 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..prompts import SYSTEM_PROMPT
+from ..prompts import SYSTEM_PROMPT, WEB_SYSTEM_PROMPT  # noqa: F401
 from ..profiles import Profile
 from ..tools import ALL_TOOLS
+from ..tools._common import is_url
 from ..backends import AgentEvent, create_backend
 from ..session_log import SessionLog, session_log_path
+
+# Profiles that operate on web targets rather than binary files
+_WEB_PROFILES = {"webpentest", "webapi", "webrecon"}
 
 
 @dataclass
@@ -18,7 +22,12 @@ class TurnStats:
     budget: float = 5.0
     max_turns: int = 50
     binary_path: str = ""
+    target: str = ""
     profile_key: str = "general"
+
+    @property
+    def is_web(self) -> bool:
+        return self.profile_key in _WEB_PROFILES
 
 
 class AgentSession:
@@ -35,7 +44,17 @@ class AgentSession:
         model: str | None = None,
         api_base: str | None = None,
     ):
-        self.binary_path = str(Path(binary_path).resolve())
+        self._is_web = profile.key in _WEB_PROFILES
+        self._is_url_target = is_url(binary_path) if binary_path else False
+
+        if binary_path and not self._is_url_target:
+            self.target = str(Path(binary_path).resolve())
+        else:
+            self.target = binary_path  # URL or empty
+
+        # Keep binary_path for backward compat
+        self.binary_path = self.target
+
         self.profile = profile
         self.budget = budget
         self.max_turns = max_turns
@@ -43,7 +62,8 @@ class AgentSession:
         self.stats = TurnStats(
             budget=budget,
             max_turns=max_turns,
-            binary_path=self.binary_path,
+            binary_path=self.target,
+            target=self.target,
             profile_key=profile.key,
         )
         self._backend = create_backend(
@@ -57,11 +77,11 @@ class AgentSession:
         self._cancel = False
 
         if log_path is None:
-            log_path = session_log_path(binary_path)
+            log_path = session_log_path(binary_path, is_url=self._is_url_target)
         self._log_path = log_path
         self._slog = SessionLog(log_path)
         self._slog.log_session_start(
-            binary_path, f"interactive/{profile.key}", budget,
+            self.target, f"interactive/{profile.key}", budget,
         )
 
     @property
@@ -73,22 +93,57 @@ class AgentSession:
         return self._running
 
     def _build_system_prompt(self) -> str:
-        base = SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
+        if self._is_web or self._is_url_target:
+            base = WEB_SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
+        else:
+            base = SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
+
         addendum = self.profile.system_addendum
         if addendum:
             base += "\n" + addendum
 
-        base += f"""
+        if self._is_web or self._is_url_target:
+            base += f"""
+
+## Interactive Mode
+
+You are in interactive mode. The user will send you messages and you should respond helpfully.
+
+**CRITICAL: The target being tested is:**
+**{self.target}**
+
+You MUST use this target for ALL tool calls. Every tool that takes a `target` or `url` \
+argument MUST use: {self.target}
+Do NOT scan or test any domains/hosts outside the target scope without user confirmation.
+
+You have access to all web penetration testing tools. Use them when the user asks you to \
+investigate the target. Be conversational but efficient — use tools proactively when \
+they would help answer the user's question.
+
+You also have access to the `bash` tool for running arbitrary commands, and `write_file` \
+and `read_file` for filesystem operations.
+
+**IMPORTANT: Complete all your analysis before giving your final response.** Keep making \
+tool calls until you have gathered enough information to fully answer the user's request. \
+Only give your text response after all tool calls are done.
+
+When the user asks you to write a report, document findings, or save output to a file, \
+you MUST use the `write_file` tool to create the file.
+
+When you respond, present your findings clearly with relevant details.
+"""
+        else:
+            base += f"""
 
 ## Interactive Mode
 
 You are in interactive mode. The user will send you messages and you should respond helpfully.
 
 **CRITICAL: The binary being analyzed is located at this exact path:**
-**{self.binary_path}**
+**{self.target}**
 
 You MUST use this exact path for ALL tool calls. Do NOT guess, invent, or modify the path.
-Every tool that takes a `path` argument MUST receive exactly: {self.binary_path}
+Every tool that takes a `path` argument MUST receive exactly: {self.target}
 
 You have access to all reverse engineering tools. Use them when the user asks you to
 investigate the binary. Be conversational but efficient — use tools proactively when
@@ -118,7 +173,11 @@ When you respond, present your findings clearly with relevant details.
             parts.append("---\n")
 
         parts.append(user_message)
-        parts.append(f"\n\n[IMPORTANT: The binary path is exactly: {self.binary_path} — use this path for all tool calls]")
+
+        if self._is_web or self._is_url_target:
+            parts.append(f"\n\n[IMPORTANT: The target is exactly: {self.target} — use this for all tool calls]")
+        else:
+            parts.append(f"\n\n[IMPORTANT: The binary path is exactly: {self.target} — use this path for all tool calls]")
         return "\n".join(parts)
 
     def cancel(self):

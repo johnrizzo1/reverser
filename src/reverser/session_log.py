@@ -64,9 +64,15 @@ def load_session_log(path: str) -> list[dict]:
     return entries
 
 
-def session_log_path(binary_path: str, log_dir: str | None = None) -> str:
-    """Generate a default log file path based on binary name and timestamp."""
-    binary_name = os.path.splitext(os.path.basename(binary_path))[0]
+def session_log_path(binary_path: str, log_dir: str | None = None, is_url: bool = False) -> str:
+    """Generate a default log file path based on binary/target name and timestamp."""
+    if is_url and binary_path:
+        # Extract domain from URL for the filename
+        from urllib.parse import urlparse
+        parsed = urlparse(binary_path if "://" in binary_path else f"https://{binary_path}")
+        binary_name = (parsed.hostname or "target").replace(".", "_")
+    else:
+        binary_name = os.path.splitext(os.path.basename(binary_path))[0]
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{binary_name}_{ts}.jsonl"
 

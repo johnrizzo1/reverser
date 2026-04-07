@@ -383,6 +383,190 @@ Common patterns:
 ))
 
 
+# ── Web pentest skills ─────────────────────────────────────────────
+
+SKILL_WEB_RECON = Skill(
+    name="Web Recon",
+    key="r",
+    description="Reconnaissance: subdomain enum, port scan, fingerprinting, WAF detection",
+    prompt="Perform web reconnaissance on the target. Run in parallel: nmap_scan for open "
+           "ports, subfinder_enum for subdomains, whatweb_fingerprint for technology stack, "
+           "and wafw00f_detect for WAF detection. Summarize the attack surface.",
+)
+
+SKILL_WEB_SCAN = Skill(
+    name="Vuln Scan",
+    key="v",
+    description="Run vulnerability scanners (Nuclei, Nikto) against the target",
+    prompt="Run vulnerability scanners against the target. Use nuclei_scan with "
+           "severity=critical,high first, then nikto_scan. Summarize all findings by severity.",
+)
+
+SKILL_WEB_DISCOVER = Skill(
+    name="Discover",
+    key="d",
+    description="Directory and file discovery with fuzzing",
+    prompt="Discover hidden directories, files, and endpoints on the target. Use ffuf_fuzz "
+           "with the default wordlist first, then try with extensions "
+           ".php,.html,.js,.json,.xml,.bak,.old. Report all interesting findings.",
+)
+
+SKILL_WEB_SSL = Skill(
+    name="TLS/SSL",
+    key="l",
+    description="Analyze TLS/SSL configuration and certificates",
+    prompt="Analyze the target's TLS/SSL configuration using testssl_analyze. Report on "
+           "protocol support, cipher suites, certificate details, and any vulnerabilities.",
+)
+
+SKILL_WEB_SQLI = Skill(
+    name="SQLi Test",
+    key="q",
+    description="Test for SQL injection vulnerabilities",
+    prompt="Test the target for SQL injection. Start by using http_request to identify "
+           "forms and parameters, then use sqlmap_test on promising endpoints. Report findings.",
+)
+
+SKILL_WEB_MANUAL = Skill(
+    name="Manual Test",
+    key="m",
+    description="Manual HTTP probing: headers, cookies, auth, CORS",
+    prompt="Perform manual HTTP testing on the target. Use http_request to: check security "
+           "headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, etc.), test CORS "
+           "configuration, examine cookies (HttpOnly, Secure, SameSite flags), check for "
+           "information disclosure in headers and error pages. Report all findings.",
+)
+
+SKILL_WEB_REPORT = Skill(
+    name="Report",
+    key="w",
+    description="Generate a penetration test report of findings",
+    prompt="Based on everything discovered so far, write a structured penetration test "
+           "report: Executive summary, scope, methodology, findings (sorted by severity "
+           "with CVSS where applicable), evidence, and remediation recommendations. "
+           "Use markdown formatting.",
+)
+
+
+_WEB_SKILLS = [
+    SKILL_WEB_RECON, SKILL_WEB_SCAN, SKILL_WEB_DISCOVER, SKILL_WEB_SSL,
+    SKILL_WEB_SQLI, SKILL_WEB_MANUAL, SKILL_WEB_REPORT,
+]
+
+_WEB_API_SKILLS = [
+    SKILL_WEB_RECON, SKILL_WEB_SCAN, SKILL_WEB_DISCOVER,
+    SKILL_WEB_MANUAL, SKILL_WEB_SQLI, SKILL_WEB_REPORT,
+]
+
+_WEB_RECON_SKILLS = [
+    SKILL_WEB_RECON, SKILL_WEB_DISCOVER, SKILL_WEB_SSL,
+    SKILL_WEB_MANUAL, SKILL_WEB_REPORT,
+]
+
+
+# ── Web pentest profiles ──────────────────────────────────────────
+
+_register(Profile(
+    name="Web Pentest",
+    key="webpentest",
+    description="Full OWASP-methodology web application penetration testing",
+    system_addendum="""\
+
+## Profile: Web Application Penetration Testing
+
+You are performing a web application penetration test. Follow OWASP Testing Guide methodology:
+1. **Reconnaissance**: Fingerprint technologies, enumerate subdomains, scan ports, detect WAFs
+2. **Enumeration**: Discover directories, files, hidden endpoints, API routes
+3. **Vulnerability scanning**: Run automated scanners (nuclei, nikto), check TLS
+4. **Manual testing**: Focus on OWASP Top 10 — injection, broken access control, misconfig, auth failures
+5. **Exploitation**: Confirm vulnerabilities with proof-of-concept when safe to do so
+6. **Reporting**: Document findings with severity, evidence, and remediation
+
+Key priorities:
+- Always start with passive recon before active scanning
+- Check security headers, CORS, cookies on every target
+- Test authentication and session management thoroughly
+- Look for IDOR, path traversal, and privilege escalation
+- Check for information disclosure in error pages, headers, and comments
+- Test input validation on all user-controllable parameters
+""",
+    skills=_WEB_SKILLS,
+))
+
+_register(Profile(
+    name="Web API Pentest",
+    key="webapi",
+    description="REST/GraphQL API penetration testing — auth bypass, BOLA, injection",
+    system_addendum="""\
+
+## Profile: API Penetration Testing
+
+You are testing a web API (REST, GraphQL, or similar). Focus on API-specific vulnerabilities:
+
+### Authentication & Authorization
+- Test JWT handling: algorithm confusion, weak secrets, token expiry, none algorithm
+- Test OAuth flows: redirect_uri manipulation, state parameter, scope escalation
+- Check API key security: key in URL vs header, key rotation, key scope
+- Test for BOLA/IDOR: modify object IDs in requests to access other users' data
+
+### API-Specific Vulnerabilities
+- **BOLA (Broken Object Level Authorization)**: Change IDs in /api/users/{id}, /api/orders/{id}
+- **Mass Assignment**: Send extra fields in PUT/PATCH requests (role, isAdmin, balance)
+- **Excessive Data Exposure**: Check if API returns more data than the frontend uses
+- **Rate Limiting**: Test for missing rate limits on sensitive endpoints (login, password reset)
+- **Injection**: SQL injection in query parameters, NoSQL injection in JSON bodies
+
+### GraphQL-Specific
+- Test introspection query: `{__schema{types{name,fields{name}}}}`
+- Test for query depth/complexity limits
+- Check for batching attacks
+- Test field-level authorization
+
+### Methodology
+1. Map all API endpoints using ffuf_fuzz and manual probing
+2. Analyze authentication mechanism
+3. Test authorization on every endpoint with different user contexts
+4. Test input validation and injection on all parameters
+5. Check rate limiting and resource consumption
+""",
+    skills=_WEB_API_SKILLS,
+))
+
+_register(Profile(
+    name="Web Recon",
+    key="webrecon",
+    description="Non-intrusive web reconnaissance only — no active exploitation",
+    system_addendum="""\
+
+## Profile: Web Reconnaissance (Non-Intrusive)
+
+You are performing reconnaissance ONLY. Do NOT attempt active exploitation, SQL injection, \
+or other attacks. Your goal is to map the attack surface and identify potential areas of \
+concern without causing any impact.
+
+Allowed activities:
+- Technology fingerprinting (whatweb)
+- Subdomain enumeration (subfinder — passive only)
+- Port scanning (nmap — service detection OK)
+- TLS/SSL analysis (testssl)
+- Security header review (http_request with HEAD/GET)
+- Directory discovery (ffuf with small wordlists)
+- Cookie and session analysis (http_request)
+- WAF detection (wafw00f)
+- robots.txt, sitemap.xml, .well-known analysis
+- Public information gathering
+
+NOT allowed:
+- SQL injection testing
+- XSS payload injection
+- Authentication brute-forcing
+- Active exploitation of any kind
+- Heavy scanning that could cause service impact
+""",
+    skills=_WEB_RECON_SKILLS,
+))
+
+
 def get_profile(key: str) -> Profile:
     """Get a profile by key, defaulting to 'general'."""
     return PROFILES.get(key, PROFILES["general"])

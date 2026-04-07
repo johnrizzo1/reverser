@@ -2,6 +2,7 @@
 
 {
   env.REVERSER_HOME = "${config.devenv.root}";
+  env.SECLISTS_PATH = "${pkgs.seclists}/share/wordlists/seclists";
 
   dotenv.enable = true;
 
@@ -40,6 +41,17 @@
     tcpdump
     mitmproxy
     ngrep
+
+    # Web penetration testing
+    nmap
+    nikto
+    nuclei
+    subfinder
+    ffuf
+    sqlmap
+    testssl
+    # whatweb               # broken on Ruby 3.4 (missing getoptlong gem)
+    httpie
 
     # Binary analysis / File identification
     binwalk
@@ -129,6 +141,7 @@
         malduck
         flare-floss
         pyhidra
+        wafw00f
       '';
     };
   };
@@ -214,12 +227,15 @@
     echo "  reverser triage <binary>                Quick file/security assessment"
     echo "  reverser analyze <binary>               Full RE analysis"
     echo "  reverser solve <binary>                 Solve a crackme/CTF challenge"
-    echo "  reverser interactive <binary>           Launch interactive TUI (alias: i)"
+    echo "  reverser interactive <binary|url>       Launch interactive TUI (alias: i)"
     echo "  reverser writeup <log.jsonl>            Generate markdown from session log"
     echo ""
     echo "  Options: -v (verbose) -vv (thinking) --budget N --profile P"
     echo "  Backend: -b ollama -m <model>  (or claude by default)"
-    echo "  Profiles: general linux windows android chrome managed api ctf"
+    echo "  RE Profiles: general linux windows android chrome managed api ctf"
+    echo "  Web Profiles: webpentest webapi webrecon"
+    echo ""
+    echo "  Web pentest: REVERSER_PENTEST_AUTHORIZED=1 reverser i -p webpentest https://target.com"
     echo ""
     echo "Shell helpers:"
     echo "  re-info                                 Tool summary"
@@ -249,6 +265,15 @@
     python3 -c "import unicorn" > /dev/null 2>&1 && echo "✓ unicorn" || echo "✗ unicorn"
     python3 -c "import pwn" > /dev/null 2>&1 && echo "✓ pwntools" || echo "✗ pwntools"
     python3 -c "import pyhidra" > /dev/null 2>&1 && echo "✓ pyhidra" || echo "✗ pyhidra"
+    echo "Testing web pentest tools..."
+    nmap --version > /dev/null 2>&1 && echo "✓ nmap" || echo "✗ nmap"
+    nikto -Version > /dev/null 2>&1 && echo "✓ nikto" || echo "✗ nikto"
+    nuclei -version > /dev/null 2>&1 && echo "✓ nuclei" || echo "✗ nuclei"
+    subfinder -version > /dev/null 2>&1 && echo "✓ subfinder" || echo "✗ subfinder"
+    ffuf -V > /dev/null 2>&1 && echo "✓ ffuf" || echo "✗ ffuf"
+    sqlmap --version > /dev/null 2>&1 && echo "✓ sqlmap" || echo "✗ sqlmap"
+    testssl.sh --help > /dev/null 2>&1 && echo "✓ testssl" || echo "✗ testssl"
+    python3 -c "import wafw00f" > /dev/null 2>&1 && echo "✓ wafw00f" || echo "✗ wafw00f"
     echo "Testing harness dependencies..."
     python3 -c "import boto3" > /dev/null 2>&1 && echo "✓ boto3" || echo "✗ boto3"
     python3 -c "import click" > /dev/null 2>&1 && echo "✓ click" || echo "✗ click"
