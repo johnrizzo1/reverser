@@ -3,7 +3,6 @@
 {
   env.REVERSER_HOME = "${config.devenv.root}";
   env.SECLISTS_PATH = "${pkgs.seclists}/share/wordlists/seclists";
-  env.SECLISTS_PATH = "${pkgs.seclists}/share/wordlists/seclists";
 
   dotenv.enable = true;
 
