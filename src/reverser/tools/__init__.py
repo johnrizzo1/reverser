@@ -8,9 +8,10 @@ from .dynamic import TOOLS as dynamic_tools
 from .python_analysis import TOOLS as python_tools
 from .exploit import TOOLS as exploit_tools
 from .util import TOOLS as util_tools
+from .network import TOOLS as network_tools
 from .web import TOOLS as web_tools
 
-ALL_TOOLS = triage_tools + static_tools + dynamic_tools + python_tools + exploit_tools + util_tools + web_tools
+ALL_TOOLS = triage_tools + static_tools + dynamic_tools + python_tools + exploit_tools + util_tools + network_tools + web_tools
 
 
 def create_re_mcp_server():

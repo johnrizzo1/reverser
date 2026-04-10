@@ -1,5 +1,6 @@
 """Interactive TUI application for the reverser agent."""
 
+import asyncio
 from pathlib import Path
 
 from textual import on, work
@@ -9,7 +10,6 @@ from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key
 from textual.screen import ModalScreen
-from textual.strip import Strip
 from textual.widgets import (
     Footer,
     Header,
@@ -23,7 +23,12 @@ from textual.widgets import (
 
 
 class SelectableRichLog(RichLog):
-    """RichLog with working text selection and smart auto-scroll."""
+    """RichLog with smart auto-scroll that doesn't yank the user away.
+
+    Inherits text selection from Textual's built-in ALLOW_SELECT.
+    Uses highlight=False (we supply our own Rich markup) and
+    delegates rendering entirely to the base RichLog for cache efficiency.
+    """
 
     def write(self, content=None, width=None, expand=False, shrink=True, scroll_end=None, animate=False):
         # Only auto-scroll if the user is already at the bottom.
@@ -32,21 +37,6 @@ class SelectableRichLog(RichLog):
         if scroll_end is None:
             scroll_end = self.is_vertical_scroll_end
         return super().write(content, width=width, expand=expand, shrink=shrink, scroll_end=scroll_end, animate=animate)
-
-    def render_line(self, y: int) -> Strip:
-        scroll_x, scroll_y = self.scroll_offset
-        strip = super().render_line(y)
-        return strip.apply_offsets(scroll_x, scroll_y + y)
-
-    def get_selection(self, selection):
-        total = len(self.lines)
-        text = "\n".join(
-            self.lines[i].text.rstrip() for i in range(total)
-        )
-        extracted = selection.extract(text)
-        if extracted:
-            return extracted, "\n"
-        return None
 
 
 class HistoryInput(Input):
@@ -217,6 +207,54 @@ class SkillScreen(ModalScreen[str]):
         self.dismiss(key)
 
 
+class SudoPasswordScreen(ModalScreen[str]):
+    """Modal for entering the sudo password (masked input)."""
+
+    BINDINGS = [Binding("escape", "dismiss('')", "Cancel")]
+
+    DEFAULT_CSS = """
+    SudoPasswordScreen {
+        align: center middle;
+    }
+    #sudo-dialog {
+        width: 60;
+        height: auto;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #sudo-dialog Label {
+        width: 100%;
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #sudo-hint {
+        width: 100%;
+        text-align: center;
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="sudo-dialog"):
+            yield Label("Sudo Password")
+            yield Static(
+                "Required for privileged scans (nmap SYN/UDP, OS detection, etc.)",
+                id="sudo-hint",
+            )
+            yield Input(
+                placeholder="Enter sudo password...",
+                password=True,
+                id="sudo-password-input",
+            )
+
+    @on(Input.Submitted)
+    def on_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
+
 class LoadTargetScreen(ModalScreen[str]):
     """Simple input for loading a binary path or target URL."""
 
@@ -296,6 +334,7 @@ class ReverserApp(App):
         Binding("f1", "show_skills", "Skills", show=True),
         Binding("f2", "show_profiles", "Profile", show=True),
         Binding("f3", "load_binary", "Load", show=True),
+        Binding("f4", "set_sudo", "Sudo", show=True),
         Binding("f5", "clear_log", "Clear", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
@@ -331,7 +370,7 @@ class ReverserApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield SelectableRichLog(id="chat-log", highlight=True, markup=True, wrap=True)
+        yield SelectableRichLog(id="chat-log", highlight=False, markup=True, wrap=True)
         with Horizontal(id="status-bar"):
             yield Static(id="status-text")
         with Vertical(id="input-container"):
@@ -366,6 +405,10 @@ class ReverserApp(App):
         )
         log.write("")
         self.query_one("#user-input", HistoryInput).focus()
+
+        # Auto-prompt for sudo password when starting with pentest profile
+        if self.profile_key == "pentest":
+            self.action_set_sudo()
 
     def _init_session(self):
         if self.session:
@@ -476,6 +519,7 @@ class ReverserApp(App):
             log.write("  /budget <amt>   — Set budget in USD")
             log.write("  /turns <n>      — Set max turns")
             log.write("  /status         — Show session stats")
+            log.write("  /sudo           — Set sudo password for privileged scans (or F4)")
             log.write("  /clear          — Clear the chat log (or F5)")
             log.write("  /cancel         — Cancel running agent")
             log.write("")
@@ -531,6 +575,9 @@ class ReverserApp(App):
         elif cmd == "/clear":
             self.action_clear_log()
 
+        elif cmd == "/sudo":
+            self.action_set_sudo()
+
         elif cmd == "/cancel":
             if self.session and self.session.is_running:
                 self.session.cancel()
@@ -543,6 +590,7 @@ class ReverserApp(App):
 
     def _switch_profile(self, key: str, log: RichLog) -> None:
         from ..profiles import PROFILES
+        from ..tools._common import get_sudo_password
         if key not in PROFILES:
             log.write(f"[red]Unknown profile: {key}[/red]")
             log.write(f"Available: {', '.join(PROFILES.keys())}")
@@ -553,6 +601,9 @@ class ReverserApp(App):
         if self.binary_path:
             self._init_session()
             log.write(f"Session restarted with new profile.")
+        # Auto-prompt for sudo password when switching to pentest profile
+        if key == "pentest" and get_sudo_password() is None:
+            self.action_set_sudo()
 
     def _load_target(self, path: str, log: RichLog) -> None:
         if is_url(path):
@@ -582,6 +633,10 @@ class ReverserApp(App):
         try:
             async for event in self.session.send(message):
                 self._handle_event(event, log)
+                # Yield to the event loop after every event so Textual can
+                # process scroll / key / mouse messages.  Without this the
+                # UI freezes while the backend streams events in rapid bursts.
+                await asyncio.sleep(0)
         except Exception as e:
             log.write(f"\n[red bold]Error:[/red bold] {markup_escape(str(e))}")
         finally:
@@ -667,7 +722,8 @@ class ReverserApp(App):
         log.clear()
         log.write(f"[bold]Reverser Agent[/bold] — Profile: [cyan]{self.profile.name}[/cyan]")
         if self.binary_path:
-            log.write(f"Binary: [green]{self.binary_path}[/green]")
+            label = "Target" if is_network_target(self.binary_path) else "Binary"
+            log.write(f"{label}: [green]{self.binary_path}[/green]")
         log.write("")
 
 

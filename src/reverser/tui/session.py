@@ -1,5 +1,6 @@
 """Agent session manager — runs the agent and streams events to the TUI."""
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 

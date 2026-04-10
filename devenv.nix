@@ -3,6 +3,7 @@
 {
   env.REVERSER_HOME = "${config.devenv.root}";
   env.SECLISTS_PATH = "${pkgs.seclists}/share/wordlists/seclists";
+  env.SECLISTS_PATH = "${pkgs.seclists}/share/wordlists/seclists";
 
   dotenv.enable = true;
 
@@ -42,16 +43,17 @@
     mitmproxy
     ngrep
 
-    # Web penetration testing
+    # Penetration testing / Network recon
     nmap
     nikto
-    nuclei
-    subfinder
-    ffuf
-    sqlmap
-    testssl
-    # whatweb               # broken on Ruby 3.4 (missing getoptlong gem)
-    httpie
+    gobuster
+    sslscan
+    whatweb
+    nbtscan
+    krb5                   # kinit, klist, krb5-config
+    dnsutils               # dig, nslookup, host
+    samba                  # smbclient, rpcclient, nmblookup
+    seclists               # wordlists for gobuster, kerberos, etc.
 
     # Binary analysis / File identification
     binwalk
@@ -141,7 +143,8 @@
         malduck
         flare-floss
         pyhidra
-        wafw00f
+        ldap3
+        impacket
       '';
     };
   };
@@ -232,7 +235,7 @@
     echo ""
     echo "  Options: -v (verbose) -vv (thinking) --budget N --profile P"
     echo "  Backend: -b ollama -m <model>  (or claude by default)"
-    echo "  RE Profiles: general linux windows android chrome managed api ctf"
+    echo "  RE Profiles: general linux windows android chrome managed api pentest ctf"
     echo "  Web Profiles: webpentest webapi webrecon"
     echo ""
     echo "  Web pentest: REVERSER_PENTEST_AUTHORIZED=1 reverser i -p webpentest https://target.com"

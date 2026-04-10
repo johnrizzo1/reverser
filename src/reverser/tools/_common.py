@@ -41,6 +41,20 @@ def check_web_authorized() -> dict | None:
 # PE magic bytes: MZ header
 _PE_MAGIC = b"MZ"
 
+# ── Sudo password store ─────────────────────────────────────────────
+_sudo_password: str | None = None
+
+
+def set_sudo_password(password: str | None) -> None:
+    """Store the sudo password for use by tools that need root."""
+    global _sudo_password
+    _sudo_password = password
+
+
+def get_sudo_password() -> str | None:
+    """Retrieve the stored sudo password."""
+    return _sudo_password
+
 
 def is_pe(path: str) -> bool:
     """Detect if a file is a Windows PE executable (MZ header)."""
