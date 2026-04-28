@@ -726,6 +726,17 @@ class ReverserApp(App):
             log.write(f"{label}: [green]{self.binary_path}[/green]")
         log.write("")
 
+    def action_set_sudo(self) -> None:
+        from ..tools._common import set_sudo_password
+
+        async def handle_password(password: str) -> None:
+            if password:
+                set_sudo_password(password)
+                log = self.query_one("#chat-log", SelectableRichLog)
+                log.write("[green]Sudo password set.[/green]")
+
+        self.push_screen(SudoPasswordScreen(), handle_password)
+
 
 def run_tui(
     binary_path: str = "",

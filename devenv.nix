@@ -51,7 +51,6 @@
     nbtscan
     krb5                   # kinit, klist, krb5-config
     dnsutils               # dig, nslookup, host
-    samba                  # smbclient, rpcclient, nmblookup
     seclists               # wordlists for gobuster, kerberos, etc.
 
     # Binary analysis / File identification
@@ -95,11 +94,14 @@
 
     # Malware analysis
     # yargen
+    inetutils
+    sshpass
   ]
 
   # ── Linux-only packages ────────────────────────────────────────────
   ++ lib.optionals stdenv.isLinux [
     gdb
+    samba
     strace
     ltrace
     elfutils
@@ -144,6 +146,9 @@
         pyhidra
         ldap3
         impacket
+	invoke
+	pynacl
+	paramiko
       '';
     };
   };

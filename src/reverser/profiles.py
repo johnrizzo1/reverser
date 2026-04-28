@@ -223,6 +223,34 @@ SKILL_SYSCALLS = Skill(
            "the syscall patterns.",
 )
 
+SKILL_EXPLOIT = Skill(
+    name="Exploit",
+    key="x",
+    description="Search for and attempt known exploits against discovered services",
+    prompt="Based on previously discovered service versions, attempt exploitation:\n"
+           "1. Run `searchsploit <service> <version>` via bash for each discovered service\n"
+           "2. Prioritize unauthenticated remote exploits with critical/high severity\n"
+           "3. For promising exploits, review the exploit code, stage it, and attempt execution via bash\n"
+           "4. Check Metasploit modules with `msfconsole -q -x 'search <service>'` if available\n"
+           "5. Document each attempt: exploit used, target, outcome, and any obtained access\n\n"
+           "Focus on confirmed vulnerabilities from the vuln scan phase first. "
+           "Do not attempt DoS or destructive exploits.",
+)
+
+SKILL_CREDS = Skill(
+    name="Cred Attack",
+    key="c",
+    description="Credential attacks: brute force, default creds, hash cracking",
+    prompt="Perform credential attacks against discovered services:\n"
+           "1. Test default credentials on all services (admin/admin, root/root, service-specific defaults)\n"
+           "2. For SSH, FTP, SMB, HTTP Basic — run `hydra -L top-usernames-shortlist.txt -P rockyou.txt "
+           "<target> <service>` via bash (use small wordlists first)\n"
+           "3. For Kerberos: use kerberos_enum for AS-REP roasting and kerberoasting\n"
+           "4. If hashes were obtained, attempt cracking with `hashcat` or `john` via bash\n"
+           "5. Test password reuse across all discovered services\n\n"
+           "Document all valid credentials found and the services they grant access to.",
+)
+
 
 # ── Common skill sets ───────────────────────────────────────────────
 
@@ -237,13 +265,13 @@ _SOLVE_SKILLS = [
 ]
 
 _API_SKILLS = [
-    SKILL_TRIAGE, SKILL_API_MAP, SKILL_STRINGS, SKILL_DECOMPILE,
+    SKILL_TRIAGE, SKILL_ANALYZE, SKILL_API_MAP, SKILL_STRINGS, SKILL_DECOMPILE,
     SKILL_IMPORTS, SKILL_RUN, SKILL_SYSCALLS, SKILL_WRITEUP,
 ]
 
 _PENTEST_SKILLS = [
     SKILL_RECON, SKILL_PORTSCAN, SKILL_WEBSCAN, SKILL_SSLCHECK,
-    SKILL_ENUM, SKILL_VULNSCAN, SKILL_PENTEST_WRITEUP,
+    SKILL_ENUM, SKILL_VULNSCAN, SKILL_EXPLOIT, SKILL_CREDS, SKILL_PENTEST_WRITEUP,
 ]
 
 
@@ -624,7 +652,7 @@ _WEB_SKILLS = [
 ]
 
 _WEB_API_SKILLS = [
-    SKILL_WEB_RECON, SKILL_WEB_SCAN, SKILL_WEB_DISCOVER,
+    SKILL_WEB_RECON, SKILL_WEB_SCAN, SKILL_WEB_DISCOVER, SKILL_WEB_SSL,
     SKILL_WEB_MANUAL, SKILL_WEB_SQLI, SKILL_WEB_REPORT,
 ]
 
