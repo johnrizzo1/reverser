@@ -90,3 +90,32 @@ def test_parse_nmap_host_unreachable():
     text = (FIXTURES / "nmap" / "host_unreachable.txt").read_text()
     results = parse_nmap_output(text)
     assert results == []
+
+
+from reverser.kb.parsers import parse_ldap_entries
+
+
+def test_parse_ldap_anonymous_rootdse():
+    text = (FIXTURES / "ldap_entries" / "anonymous_rootdse.txt").read_text()
+    out = parse_ldap_entries(text)
+    assert "hosts" in out and "note" in out
+    hostnames = [h.hostname for h in out["hosts"] if h.hostname]
+    assert "dc01.corp.local" in hostnames
+    assert "DC=corp,DC=local" in out["note"]
+
+
+def test_parse_ldap_empty():
+    text = (FIXTURES / "ldap_entries" / "empty_search.txt").read_text()
+    out = parse_ldap_entries(text)
+    assert out["hosts"] == []
+    assert "0" in out["note"] or "empty" in out["note"].lower()
+
+
+def test_parse_ldap_dc_with_users():
+    text = (FIXTURES / "ldap_entries" / "dc_with_users.txt").read_text()
+    out = parse_ldap_entries(text)
+    hostnames = sorted(h.hostname for h in out["hosts"] if h.hostname)
+    assert hostnames == ["dc01.corp.local", "ws01.corp.local", "ws02.corp.local"]
+    dc01 = next(h for h in out["hosts"] if h.hostname == "dc01.corp.local")
+    assert dc01.is_dc is True
+    assert dc01.os and "Windows Server 2019" in dc01.os

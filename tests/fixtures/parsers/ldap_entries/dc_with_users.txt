@@ -1,0 +1,22 @@
+Search base: DC=corp,DC=local
+Filter: (objectClass=computer)
+Results: 3
+
+DN: CN=DC01,OU=Domain Controllers,DC=corp,DC=local - STATUS: Read
+    cn: DC01
+    dNSHostName: dc01.corp.local
+    operatingSystem: Windows Server 2019 Standard
+    sAMAccountName: DC01$
+    userAccountControl: 532480
+---
+DN: CN=WS01,CN=Computers,DC=corp,DC=local - STATUS: Read
+    cn: WS01
+    dNSHostName: ws01.corp.local
+    operatingSystem: Windows 10 Enterprise
+    sAMAccountName: WS01$
+---
+DN: CN=WS02,CN=Computers,DC=corp,DC=local - STATUS: Read
+    cn: WS02
+    dNSHostName: ws02.corp.local
+    operatingSystem: Windows 10 Enterprise
+    sAMAccountName: WS02$

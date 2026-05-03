@@ -1,0 +1,5 @@
+Search base: DC=corp,DC=local
+Filter: (sAMAccountName=nonexistent)
+Results: 0
+
+(no results)
