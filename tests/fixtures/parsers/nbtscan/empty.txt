@@ -1,0 +1,4 @@
+Doing NBT name scan for addresses from 10.10.10.99
+
+IP address       NetBIOS Name     Server    User             MAC address
+------------------------------------------------------------------------------

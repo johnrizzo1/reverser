@@ -11,6 +11,7 @@ unrecognised lines — the worst case is an empty list.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .store import HostFact, ServiceFact
@@ -21,3 +22,27 @@ class NmapHostResult:
     """Wrapper for a single nmap host with its discovered services."""
     host: HostFact
     services: list[ServiceFact]
+
+
+_NBTSCAN_LINE_RE = re.compile(
+    r"^\s*(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s+(?P<name>\S+)\s+"
+)
+
+
+def parse_nbtscan_output(text: str) -> list[HostFact]:
+    """Parse nbtscan column output into HostFact entries.
+
+    Lines like ``10.10.10.5    DC01    <server>  <unknown>    00:50:...``
+    yield a HostFact(ip="10.10.10.5", hostname="DC01"). Header rows and
+    blank lines are skipped. Hostnames of "<unknown>" are dropped.
+    """
+    hosts: list[HostFact] = []
+    for line in text.splitlines():
+        m = _NBTSCAN_LINE_RE.match(line)
+        if not m:
+            continue
+        name = m.group("name")
+        if name in ("<unknown>", "<server>", "NetBIOS"):
+            continue
+        hosts.append(HostFact(ip=m.group("ip"), hostname=name))
+    return hosts
