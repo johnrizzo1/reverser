@@ -193,3 +193,48 @@ class KB:
                 )
                 for r in cursor.fetchall()
             ]
+
+    def record_service(self, svc: ServiceFact) -> None:
+        with self._connect() as conn:
+            now = _now_iso()
+            conn.execute(
+                "INSERT INTO services "
+                "(target_id, host_ip, port, proto, service, version, banner, scan_source, scanned_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (target_id, host_ip, port, proto) DO UPDATE SET "
+                "  service = COALESCE(excluded.service, service), "
+                "  version = COALESCE(excluded.version, version), "
+                "  banner = COALESCE(excluded.banner, banner), "
+                "  scan_source = COALESCE(excluded.scan_source, scan_source), "
+                "  scanned_at = excluded.scanned_at",
+                (
+                    self.target_id, svc.host_ip, svc.port, svc.proto,
+                    svc.service, svc.version, svc.banner, svc.scan_source, now,
+                ),
+            )
+            conn.commit()
+
+    def get_services(
+        self, host_ip: str | None = None, port: int | None = None,
+    ) -> list[ServiceFact]:
+        sql = (
+            "SELECT host_ip, port, proto, service, version, banner, scan_source "
+            "FROM services WHERE target_id = ?"
+        )
+        params: list = [self.target_id]
+        if host_ip is not None:
+            sql += " AND host_ip = ?"
+            params.append(host_ip)
+        if port is not None:
+            sql += " AND port = ?"
+            params.append(port)
+        sql += " ORDER BY host_ip, port"
+        with self._connect() as conn:
+            cursor = conn.execute(sql, params)
+            return [
+                ServiceFact(
+                    host_ip=r[0], port=r[1], proto=r[2],
+                    service=r[3], version=r[4], banner=r[5], scan_source=r[6],
+                )
+                for r in cursor.fetchall()
+            ]

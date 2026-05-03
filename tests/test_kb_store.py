@@ -125,3 +125,48 @@ def test_record_host_preserves_fields_when_none(tmp_targets_dir):
     assert hosts[0].hostname == "dc01"
     assert hosts[0].os == "Windows"
     assert hosts[0].domain == "CORP.LOCAL"
+
+
+def test_record_service_basic(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    kb.record_service(ServiceFact(
+        host_ip="10.10.10.5", port=445, proto="tcp",
+        service="microsoft-ds", version="Windows Server 2019",
+        scan_source="nmap_scan",
+    ))
+    svcs = kb.get_services()
+    assert len(svcs) == 1
+    assert svcs[0].port == 445
+    assert svcs[0].service == "microsoft-ds"
+
+
+def test_record_service_idempotent(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    s1 = ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp", service="smb")
+    s2 = ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp", service="microsoft-ds", version="2019")
+    kb.record_service(s1)
+    kb.record_service(s2)
+    svcs = kb.get_services()
+    assert len(svcs) == 1
+    assert svcs[0].service == "microsoft-ds"
+    assert svcs[0].version == "2019"
+
+
+def test_get_services_filter_by_host(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    kb.record_host(HostFact(ip="10.10.10.6"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.6", port=22, proto="tcp"))
+    assert len(kb.get_services(host_ip="10.10.10.5")) == 1
+    assert kb.get_services(host_ip="10.10.10.5")[0].port == 445
+
+
+def test_get_services_filter_by_port(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=22, proto="tcp"))
+    assert len(kb.get_services(port=445)) == 1
