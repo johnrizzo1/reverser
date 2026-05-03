@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 
@@ -410,7 +411,6 @@ async def whatweb_fingerprint(args: dict) -> dict:
     aggression = args.get("aggression", 1)
 
     # Try whatweb first
-    import shutil
     if shutil.which("whatweb"):
         cmd = ["whatweb", f"--aggression={aggression}", "--log-json=-", target]
         result = run_cmd(cmd, timeout=30)
@@ -418,6 +418,7 @@ async def whatweb_fingerprint(args: dict) -> dict:
         if result["returncode"] != 0 and "LoadError" in (result["stderr"] + result["stdout"]):
             pass  # fall through to curl fallback
         else:
+            _kb_write_whatweb(target, result["stdout"])
             return cmd_result_to_tool_result(result)
 
     # Fallback: curl-based fingerprinting
@@ -486,7 +487,9 @@ async def whatweb_fingerprint(args: dict) -> dict:
     else:
         lines.append("## No specific technologies detected from headers/body")
 
-    return format_tool_result("\n".join(lines))
+    final = "\n".join(lines)
+    _kb_write_whatweb(target, final)
+    return format_tool_result(final)
 
 
 # ── Web server scanning ──────────────────────────────────────────
@@ -678,3 +681,24 @@ TOOLS = [
     subfinder_enum,
     wafw00f_detect,
 ]
+
+
+def _kb_write_whatweb(target: str, stdout: str) -> None:
+    """KB write tail for whatweb_fingerprint — host_ip/port derived from URL."""
+    try:
+        from urllib.parse import urlparse
+        from ..kb import for_target, HostFact
+        from ..kb.parsers import parse_whatweb_plugins
+        parsed = urlparse(target if "://" in target else f"http://{target}")
+        host_ip = parsed.hostname or target
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        kb = for_target(target)
+        out = parse_whatweb_plugins(stdout, host_ip=host_ip, port=port)
+        if out.get("service"):
+            kb.record_host(HostFact(ip=host_ip))
+            kb.record_service(out["service"])
+        if out.get("note"):
+            kb.record_note(out["note"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in whatweb_fingerprint: %s", e)

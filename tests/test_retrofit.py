@@ -140,3 +140,19 @@ def test_smb_enum_writes_host_signing_to_kb(tmp_targets_dir, monkeypatch):
     assert target_host.smb_signing == "required"
     notes = kb.get_notes()
     assert any("ADMIN" in n or "SCCM_Source" in n for n in notes)
+
+
+def test_whatweb_fingerprint_writes_service_to_kb(tmp_targets_dir, monkeypatch):
+    from reverser.tools import web as webmod
+    text = (FIXTURES / "whatweb" / "wordpress_site.txt").read_text()
+    monkeypatch.setattr(webmod, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(webmod, "shutil",
+                        type("S", (), {"which": staticmethod(lambda _: "/usr/bin/whatweb")})(),
+                        raising=False)
+
+    _call(webmod.whatweb_fingerprint, {"target": "http://10.10.10.5"})
+    kb = for_target("http://10.10.10.5")
+    services = kb.get_services()
+    assert any(s.service == "http" for s in services)
+    notes = kb.get_notes()
+    assert any("WordPress" in n or "wordpress" in n.lower() for n in notes)
