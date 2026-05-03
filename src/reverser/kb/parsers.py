@@ -67,3 +67,72 @@ def parse_banner_first_line(
                 scan_source="banner_grab",
             )
     return None
+
+
+_NMAP_HOST_LINE_RE = re.compile(
+    r"^Nmap scan report for (?:(?P<host>[\w.\-]+)\s+\((?P<ip1>\d{1,3}(?:\.\d{1,3}){3})\)"
+    r"|(?P<ip2>\d{1,3}(?:\.\d{1,3}){3}))"
+)
+_NMAP_PORT_LINE_RE = re.compile(
+    r"^(?P<port>\d+)/(?P<proto>tcp|udp)\s+(?P<state>open|filtered|closed)\s+"
+    r"(?P<service>\S+)(?:\s+(?P<version>.+))?$"
+)
+_NMAP_SERVICE_INFO_OS_RE = re.compile(r"OS:\s*([^;]+)")
+_NMAP_DOMAIN_RE = re.compile(r"Domain:\s*([\w.\-]+)", re.IGNORECASE)
+
+
+def parse_nmap_output(text: str) -> list[NmapHostResult]:
+    """Parse human-readable nmap output into per-host results.
+
+    Each Nmap "Nmap scan report for..." section becomes a NmapHostResult
+    with .host (HostFact) and .services (list[ServiceFact]). Hosts that
+    nmap reports as down (no scan-report block) are omitted entirely.
+    """
+    results: list[NmapHostResult] = []
+    current_host: HostFact | None = None
+    current_services: list[ServiceFact] = []
+    domain_hint: str | None = None
+
+    def flush():
+        if current_host is not None:
+            if domain_hint and not current_host.domain:
+                current_host.domain = domain_hint
+            results.append(NmapHostResult(host=current_host, services=current_services))
+
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        m = _NMAP_HOST_LINE_RE.match(line)
+        if m:
+            flush()
+            ip = m.group("ip1") or m.group("ip2")
+            hostname = m.group("host")
+            current_host = HostFact(ip=ip, hostname=hostname)
+            current_services = []
+            domain_hint = None
+            continue
+        if current_host is None:
+            continue
+        port_m = _NMAP_PORT_LINE_RE.match(line)
+        if port_m and port_m.group("state") == "open":
+            ver = port_m.group("version") or None
+            current_services.append(
+                ServiceFact(
+                    host_ip=current_host.ip,
+                    port=int(port_m.group("port")),
+                    proto=port_m.group("proto"),
+                    service=port_m.group("service"),
+                    version=ver,
+                    scan_source="nmap_scan",
+                )
+            )
+            d = _NMAP_DOMAIN_RE.search(line)
+            if d:
+                domain_hint = d.group(1)
+            continue
+        if line.startswith("Service Info:"):
+            os_m = _NMAP_SERVICE_INFO_OS_RE.search(line)
+            if os_m:
+                current_host.os = os_m.group(1).strip()
+
+    flush()
+    return results

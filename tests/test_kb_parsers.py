@@ -57,3 +57,36 @@ def test_parse_banner_http_head():
     assert svc is not None
     assert svc.banner is not None
     assert svc.banner.startswith("HTTP/1.1 200 OK")
+
+
+from reverser.kb.parsers import parse_nmap_output, NmapHostResult
+
+
+def test_parse_nmap_host_with_smb_and_winrm():
+    text = (FIXTURES / "nmap" / "host_with_smb_and_winrm.txt").read_text()
+    results = parse_nmap_output(text)
+    assert len(results) == 1
+    r = results[0]
+    assert isinstance(r, NmapHostResult)
+    assert r.host.ip == "10.10.10.5"
+    assert r.host.hostname == "dc01.corp.local"
+    assert r.host.os and "Windows" in r.host.os
+    ports = {s.port for s in r.services}
+    assert {53, 88, 135, 389, 445, 5985}.issubset(ports)
+    smb = next(s for s in r.services if s.port == 445)
+    assert smb.service == "microsoft-ds"
+    assert smb.version and "Windows Server 2019" in smb.version
+
+
+def test_parse_nmap_no_open_ports():
+    text = (FIXTURES / "nmap" / "no_open_ports.txt").read_text()
+    results = parse_nmap_output(text)
+    assert len(results) == 1
+    assert results[0].host.ip == "10.10.10.99"
+    assert results[0].services == []
+
+
+def test_parse_nmap_host_unreachable():
+    text = (FIXTURES / "nmap" / "host_unreachable.txt").read_text()
+    results = parse_nmap_output(text)
+    assert results == []
