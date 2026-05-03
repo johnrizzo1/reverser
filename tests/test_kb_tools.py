@@ -1,0 +1,62 @@
+"""Tests for KB read-side and editorial MCP tools."""
+
+import asyncio
+import pytest
+
+from reverser.kb import for_target, HostFact, ServiceFact, CredentialFact, FindingFact
+
+
+@pytest.fixture(autouse=True)
+def authorize(monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+
+
+def _call_tool(tool_obj, args):
+    """Invoke an SDK tool object's underlying coroutine.
+
+    The claude_agent_sdk @tool decorator returns an SdkMcpTool whose callable
+    lives on .handler. Fall back to .fn or calling the object directly for
+    forward/backward compatibility.
+    """
+    fn = getattr(tool_obj, "handler", None) or getattr(tool_obj, "fn", None) or tool_obj
+    return asyncio.new_event_loop().run_until_complete(fn(args))
+
+
+def test_kb_show_with_explicit_target(tmp_targets_dir):
+    from reverser.tools.kb import kb_show
+    kb = for_target("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5", os="Windows", is_dc=True))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp"))
+    kb.record_credential(CredentialFact(username="jdoe", password="x", status="valid"))
+    kb.record_finding(FindingFact(title="t", severity="high", description="x"))
+    result = _call_tool(kb_show, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "10.10.10.5" in text
+    assert "Hosts: 1" in text
+    assert "Credentials:" in text
+    assert "valid" in text
+    assert "high" in text
+
+
+def test_kb_show_defaults_to_sole_target(tmp_targets_dir):
+    from reverser.tools.kb import kb_show
+    for_target("10.10.10.5")
+    result = _call_tool(kb_show, {"target": ""})
+    text = result["content"][0]["text"]
+    assert "10.10.10.5" in text
+
+
+def test_kb_show_errors_on_no_targets(tmp_targets_dir):
+    from reverser.tools.kb import kb_show
+    result = _call_tool(kb_show, {"target": ""})
+    assert result.get("is_error")
+
+
+def test_kb_show_errors_on_multiple_no_target(tmp_targets_dir):
+    from reverser.tools.kb import kb_show
+    for_target("10.10.10.5")
+    for_target("10.10.10.6")
+    result = _call_tool(kb_show, {"target": ""})
+    assert result.get("is_error")
+    assert "10.10.10.5" in result["content"][0]["text"]
+    assert "10.10.10.6" in result["content"][0]["text"]

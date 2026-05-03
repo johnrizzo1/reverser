@@ -9,6 +9,12 @@ def tmp_targets_dir(tmp_path, monkeypatch):
     targets_dir = tmp_path / "targets"
     targets_dir.mkdir()
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(targets_dir))
+    # Clear the per-process KB cache so for_target() inside the test sees the fresh dir.
+    try:
+        import reverser.kb
+        reverser.kb._kb_cache.clear()
+    except ImportError:
+        pass  # reverser.kb not yet importable in very-early-Plan-1 tests
     return targets_dir
 
 
