@@ -83,3 +83,45 @@ def test_kb_list_hosts_empty(tmp_targets_dir):
     result = _call_tool(kb_list_hosts, {"target": "10.10.10.5"})
     text = result["content"][0]["text"]
     assert "No hosts" in text or "0 hosts" in text or "(no rows)" in text or "0 rows" in text
+
+
+def test_kb_list_services_all(tmp_targets_dir):
+    from reverser.tools.kb import kb_list_services
+    kb = for_target("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp",
+                                  service="microsoft-ds", version="Windows Server 2019",
+                                  scan_source="nmap_scan"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=22, proto="tcp",
+                                  service="ssh", version="OpenSSH 8.4"))
+    result = _call_tool(kb_list_services, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "445" in text
+    assert "microsoft-ds" in text
+    assert "22" in text
+    assert "ssh" in text
+
+
+def test_kb_list_services_filter_by_port(tmp_targets_dir):
+    from reverser.tools.kb import kb_list_services
+    kb = for_target("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=22, proto="tcp"))
+    result = _call_tool(kb_list_services, {"target": "10.10.10.5", "port": 445})
+    text = result["content"][0]["text"]
+    assert "445" in text
+    assert "22" not in text
+
+
+def test_kb_list_services_filter_by_host(tmp_targets_dir):
+    from reverser.tools.kb import kb_list_services
+    kb = for_target("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    kb.record_host(HostFact(ip="10.10.10.6"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp"))
+    kb.record_service(ServiceFact(host_ip="10.10.10.6", port=22, proto="tcp"))
+    result = _call_tool(kb_list_services, {"target": "10.10.10.5", "host": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "445" in text
+    assert "10.10.10.6" not in text or "22" not in text

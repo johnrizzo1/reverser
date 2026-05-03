@@ -152,3 +152,41 @@ async def kb_list_hosts(args: dict) -> dict:
 
 
 TOOLS.append(kb_list_hosts)
+
+
+@tool(
+    "kb_list_services",
+    "List every service in the KB for `target`. Optional `host` and `port` filters.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Normalized target identifier."},
+            "host": {"type": "string", "description": "Filter by host IP.", "default": ""},
+            "port": {"type": "integer", "description": "Filter by port.", "default": 0},
+        },
+        "required": ["target"],
+    },
+)
+async def kb_list_services(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    target = args["target"]
+    host = args.get("host", "") or None
+    port = args.get("port", 0) or None
+    kb = for_target(target)
+    services = kb.get_services(host_ip=host, port=port)
+    if not services:
+        return format_tool_result(f"No services match for {target} (0 rows)")
+    lines = [f"# Services for {target} ({len(services)} rows)", ""]
+    lines.append(f"{'HOST':<18}{'PORT':<6}{'PROTO':<6}{'SERVICE':<20}{'VERSION':<40}SOURCE")
+    lines.append("-" * 100)
+    for s in services:
+        lines.append(
+            f"{s.host_ip:<18}{s.port:<6}{s.proto:<6}{(s.service or '-'):<20}"
+            f"{(s.version or '-')[:39]:<40}{s.scan_source or '-'}"
+        )
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(kb_list_services)
