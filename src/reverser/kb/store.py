@@ -271,6 +271,7 @@ class KB:
                     ),
                 )
                 conn.commit()
+                assert cursor.lastrowid is not None  # AUTOINCREMENT guarantees this
                 return cursor.lastrowid
             cred_id, current_status = existing
             new_status = (
