@@ -207,3 +207,15 @@ def test_kb_add_finding_invalid_severity(tmp_targets_dir):
         "description": "x",
     })
     assert result.get("is_error")
+
+
+def test_kb_add_note(tmp_targets_dir):
+    from reverser.tools.kb import kb_add_note
+    for_target("10.10.10.5")
+    result = _call_tool(kb_add_note, {
+        "target": "10.10.10.5",
+        "body": "Hypothesis: WS01 likely shares creds with DC01.",
+    })
+    assert not result.get("is_error")
+    notes = for_target("10.10.10.5").get_notes()
+    assert any("Hypothesis" in n for n in notes)

@@ -306,3 +306,27 @@ async def kb_add_finding(args: dict) -> dict:
 
 
 TOOLS.append(kb_add_finding)
+
+
+@tool(
+    "kb_add_note",
+    "Append a free-form note to the KB scratchpad for `target`. Use for "
+    "hypotheses, leads, observations, methodology decisions.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Normalized target identifier."},
+            "body": {"type": "string", "description": "Note body (any length)."},
+        },
+        "required": ["target", "body"],
+    },
+)
+async def kb_add_note(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    for_target(args["target"]).record_note(args["body"])
+    return format_tool_result("Note recorded.")
+
+
+TOOLS.append(kb_add_note)
