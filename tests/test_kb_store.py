@@ -73,7 +73,7 @@ def test_normalize_target_empty_raises():
 
 
 def test_kb_creates_target_dir(tmp_targets_dir):
-    kb = KB("10.10.10.5")
+    KB("10.10.10.5")
     assert (tmp_targets_dir / "10.10.10.5").is_dir()
     assert (tmp_targets_dir / "10.10.10.5" / "state.db").is_file()
 

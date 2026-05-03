@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
+
+from .schema import apply_schema
 
 
 _VALID_CRED_STATUS = {"untested", "invalid", "valid"}
@@ -81,15 +88,6 @@ class CredResult:
     target_host: str
     success: bool
     error_msg: Optional[str] = None
-
-
-import os
-import sqlite3
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from pathlib import Path
-
-from .schema import apply_schema
 
 
 def normalize_target(target: str) -> str:
