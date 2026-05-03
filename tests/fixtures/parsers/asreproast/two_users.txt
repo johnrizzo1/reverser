@@ -1,0 +1,6 @@
+Impacket v0.11.0 - Copyright 2023 Fortra
+
+[*] Getting TGT for alice
+$krb5asrep$23$alice@CORP.LOCAL:9c3f...truncated...:8a7b1d4e3f2c0918a7b6c5d4e3f2a1b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3
+[*] Getting TGT for bob
+$krb5asrep$23$bob@CORP.LOCAL:b1e7...truncated...:0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0

@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .store import HostFact, ServiceFact
+from .store import HostFact, ServiceFact, CredentialFact
 
 
 @dataclass
@@ -211,3 +211,35 @@ def parse_ldap_entries(text: str) -> dict:
         note = "LDAP search produced no naming-context info"
 
     return {"hosts": cleaned, "note": note}
+
+
+_ASREP_LINE_RE = re.compile(
+    r"^\$krb5asrep\$\d+\$(?P<user>[^@]+)@(?P<domain>[^:]+):.*"
+)
+
+
+def parse_asreproast_hashes(text: str) -> list[CredentialFact]:
+    """Extract AS-REP hashes from impacket GetNPUsers output.
+
+    Each ``$krb5asrep$...`` line becomes a CredentialFact with
+    kerberos_ticket=<full hash>, status='untested', source_tool=
+    'kerberos_enum'. The username and domain are extracted from the
+    principal in the hash header.
+    """
+    creds: list[CredentialFact] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("$krb5asrep$"):
+            continue
+        m = _ASREP_LINE_RE.match(line)
+        if not m:
+            continue
+        creds.append(CredentialFact(
+            username=m.group("user"),
+            domain=m.group("domain"),
+            kerberos_ticket=line,
+            status="untested",
+            source_tool="kerberos_enum",
+            source_context="asreproast",
+        ))
+    return creds

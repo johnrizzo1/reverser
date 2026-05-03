@@ -119,3 +119,33 @@ def test_parse_ldap_dc_with_users():
     dc01 = next(h for h in out["hosts"] if h.hostname == "dc01.corp.local")
     assert dc01.is_dc is True
     assert dc01.os and "Windows Server 2019" in dc01.os
+
+
+from reverser.kb.parsers import parse_asreproast_hashes
+
+
+def test_parse_asreproast_two_users():
+    text = (FIXTURES / "asreproast" / "two_users.txt").read_text()
+    creds = parse_asreproast_hashes(text)
+    assert len(creds) == 2
+    usernames = sorted(c.username for c in creds)
+    assert usernames == ["alice", "bob"]
+    for c in creds:
+        assert c.kerberos_ticket and c.kerberos_ticket.startswith("$krb5asrep$")
+        assert c.status == "untested"
+        assert c.domain == "CORP.LOCAL"
+
+
+def test_parse_asreproast_empty():
+    text = (FIXTURES / "asreproast" / "empty.txt").read_text()
+    creds = parse_asreproast_hashes(text)
+    assert creds == []
+
+
+def test_parse_asreproast_single_user_no_preauth():
+    text = (FIXTURES / "asreproast" / "single_user_no_preauth.txt").read_text()
+    creds = parse_asreproast_hashes(text)
+    assert len(creds) == 1
+    assert creds[0].username == "svc_backup"
+    assert creds[0].kerberos_ticket
+    assert creds[0].kerberos_ticket.startswith("$krb5asrep$")
