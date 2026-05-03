@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+Date: Sun, 03 May 2026 12:34:56 GMT
+Server: Apache/2.4.46 (FreeBSD) PHP/7.4.15
+Last-Modified: Thu, 20 Feb 2020 22:12:44 GMT
+Content-Type: text/html
+Connection: close

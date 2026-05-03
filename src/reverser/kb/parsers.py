@@ -46,3 +46,24 @@ def parse_nbtscan_output(text: str) -> list[HostFact]:
             continue
         hosts.append(HostFact(ip=m.group("ip"), hostname=name))
     return hosts
+
+
+def parse_banner_first_line(
+    text: str, host_ip: str, port: int, proto: str = "tcp",
+) -> ServiceFact | None:
+    """Return a ServiceFact whose banner is the first non-empty line of text.
+
+    Returns None if text is empty or all-whitespace. The scan_source field is
+    set to "banner_grab".
+    """
+    for line in text.splitlines():
+        line = line.rstrip("\r")
+        if line.strip():
+            return ServiceFact(
+                host_ip=host_ip,
+                port=port,
+                proto=proto,
+                banner=line,
+                scan_source="banner_grab",
+            )
+    return None
