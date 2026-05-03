@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -335,3 +336,80 @@ class KB:
                 )
                 for r in cursor.fetchall()
             ]
+
+    def record_finding(self, finding: FindingFact) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO findings "
+                "(target_id, title, severity, cvss, description, evidence_paths, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self.target_id, finding.title, finding.severity, finding.cvss,
+                    finding.description, json.dumps(finding.evidence_paths), _now_iso(),
+                ),
+            )
+            conn.commit()
+            assert cursor.lastrowid is not None  # AUTOINCREMENT guarantees this
+            return cursor.lastrowid
+
+    def get_findings(self, severity: str | None = None) -> list[FindingFact]:
+        sql = (
+            "SELECT title, severity, cvss, description, evidence_paths "
+            "FROM findings WHERE target_id = ?"
+        )
+        params: list = [self.target_id]
+        if severity is not None:
+            sql += " AND severity = ?"
+            params.append(severity)
+        sql += " ORDER BY id"
+        with self._connect() as conn:
+            cursor = conn.execute(sql, params)
+            return [
+                FindingFact(
+                    title=r[0], severity=r[1], cvss=r[2], description=r[3] or "",
+                    evidence_paths=json.loads(r[4]) if r[4] else [],
+                )
+                for r in cursor.fetchall()
+            ]
+
+    def record_artifact(self, artifact: ArtifactFact) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO artifacts (target_id, kind, path, sha256, source_tool, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    self.target_id, artifact.kind, artifact.path,
+                    artifact.sha256, artifact.source_tool, _now_iso(),
+                ),
+            )
+            conn.commit()
+            assert cursor.lastrowid is not None  # AUTOINCREMENT guarantees this
+            return cursor.lastrowid
+
+    def get_artifacts(self) -> list[ArtifactFact]:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT kind, path, sha256, source_tool FROM artifacts "
+                "WHERE target_id = ? ORDER BY id",
+                (self.target_id,),
+            )
+            return [
+                ArtifactFact(kind=r[0], path=r[1], sha256=r[2], source_tool=r[3])
+                for r in cursor.fetchall()
+            ]
+
+    def record_note(self, body: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO notes (target_id, body, created_at) VALUES (?, ?, ?)",
+                (self.target_id, body, _now_iso()),
+            )
+            conn.commit()
+
+    def get_notes(self) -> list[str]:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT body FROM notes WHERE target_id = ? ORDER BY id",
+                (self.target_id,),
+            )
+            return [r[0] for r in cursor.fetchall()]

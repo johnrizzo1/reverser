@@ -2,7 +2,7 @@
 
 import pytest
 
-from reverser.kb.store import HostFact, ServiceFact, CredentialFact, FindingFact, CredResult
+from reverser.kb.store import HostFact, ServiceFact, CredentialFact, FindingFact, CredResult, ArtifactFact
 
 
 def test_host_fact_minimal():
@@ -249,3 +249,58 @@ def test_get_cred_results_for_cred(tmp_targets_dir):
     kb.record_cred_result(cid, CredResult(service_kind="winrm", target_host="10.10.10.5", success=False, error_msg="STATUS_LOGON_FAILURE"))
     results = kb.get_cred_results(cid)
     assert len(results) == 2
+
+
+def test_record_finding(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    fid = kb.record_finding(FindingFact(
+        title="Anonymous SMB share access",
+        severity="medium",
+        description="The IPC$ share allows anonymous enumeration.",
+        evidence_paths=["findings/smb_anon.txt"],
+    ))
+    assert fid > 0
+    findings = kb.get_findings()
+    assert len(findings) == 1
+    assert findings[0].title == "Anonymous SMB share access"
+    assert findings[0].severity == "medium"
+    assert findings[0].evidence_paths == ["findings/smb_anon.txt"]
+
+
+def test_record_finding_with_cvss(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_finding(FindingFact(
+        title="CVE-2020-1472", severity="critical",
+        description="Zerologon", cvss=10.0,
+    ))
+    f = kb.get_findings()[0]
+    assert f.cvss == 10.0
+
+
+def test_record_artifact(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    aid = kb.record_artifact(ArtifactFact(
+        kind="asreproast_hashes", path="loot/asrep_hashes.txt",
+        sha256="abc123", source_tool="kerberos_enum",
+    ))
+    assert aid > 0
+    arts = kb.get_artifacts()
+    assert len(arts) == 1
+    assert arts[0].kind == "asreproast_hashes"
+
+
+def test_record_note(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_note("Initial recon — saw OpenSSH 7.9 on FreeBSD")
+    notes = kb.get_notes()
+    assert len(notes) == 1
+    assert "OpenSSH" in notes[0]
+
+
+def test_get_findings_filter_by_severity(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_finding(FindingFact(title="a", severity="low", description="x"))
+    kb.record_finding(FindingFact(title="b", severity="high", description="x"))
+    high = kb.get_findings(severity="high")
+    assert len(high) == 1
+    assert high[0].title == "b"
