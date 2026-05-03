@@ -21,6 +21,7 @@ from .authz import require_pentest_auth, AuthorizationError
 
 __all__ = [
     "for_target",
+    "list_targets",
     "KB",
     "HostFact",
     "ServiceFact",
@@ -47,3 +48,18 @@ def for_target(target: str) -> KB:
     if target_id not in _kb_cache:
         _kb_cache[target_id] = KB(target_id)
     return _kb_cache[target_id]
+
+
+from pathlib import Path
+import os
+
+
+def list_targets() -> list[str]:
+    """Return all target IDs that have a state.db on disk."""
+    root = Path(os.environ.get("REVERSER_TARGETS_DIR", "targets"))
+    if not root.is_dir():
+        return []
+    return sorted(
+        d.name for d in root.iterdir()
+        if d.is_dir() and (d / "state.db").is_file()
+    )

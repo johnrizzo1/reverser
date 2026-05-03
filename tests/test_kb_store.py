@@ -326,3 +326,29 @@ def test_for_target_normalizes(tmp_targets_dir):
     kb1 = for_target("10.10.10.5")
     kb2 = for_target("  10.10.10.5  ")
     assert kb1 is kb2
+
+
+def test_list_targets_empty(tmp_targets_dir):
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+    from reverser.kb import list_targets
+    assert list_targets() == []
+
+
+def test_list_targets_returns_existing(tmp_targets_dir):
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+    from reverser.kb import for_target, list_targets
+    for_target("10.10.10.5")
+    for_target("dc01.corp.local")
+    targets = list_targets()
+    assert sorted(targets) == ["10.10.10.5", "dc01.corp.local"]
+
+
+def test_list_targets_ignores_non_target_dirs(tmp_targets_dir):
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+    from reverser.kb import for_target, list_targets
+    for_target("10.10.10.5")
+    (tmp_targets_dir / "junk").mkdir()
+    assert list_targets() == ["10.10.10.5"]
