@@ -156,3 +156,15 @@ def test_whatweb_fingerprint_writes_service_to_kb(tmp_targets_dir, monkeypatch):
     assert any(s.service == "http" for s in services)
     notes = kb.get_notes()
     assert any("WordPress" in n or "wordpress" in n.lower() for n in notes)
+
+
+def test_nikto_scan_writes_findings_to_kb(tmp_targets_dir, monkeypatch):
+    from reverser.tools import web as webmod
+    text = (FIXTURES / "nikto" / "multiple_findings.txt").read_text()
+    monkeypatch.setattr(webmod, "run_cmd", _stub_run_cmd(text))
+
+    _call(webmod.nikto_scan, {"target": "http://10.10.10.5"})
+    kb = for_target("http://10.10.10.5")
+    findings = kb.get_findings()
+    assert len(findings) >= 5
+    assert any("OSVDB" in f.title for f in findings)

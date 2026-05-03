@@ -520,6 +520,17 @@ async def nikto_scan(args: dict) -> dict:
         cmd.extend(["-Tuning", tuning])
 
     result = run_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT)
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_nikto_findings
+        kb = for_target(target)
+        for finding in parse_nikto_findings(result["stdout"]):
+            kb.record_finding(finding)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in nikto_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
