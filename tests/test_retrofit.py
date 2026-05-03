@@ -168,3 +168,51 @@ def test_nikto_scan_writes_findings_to_kb(tmp_targets_dir, monkeypatch):
     findings = kb.get_findings()
     assert len(findings) >= 5
     assert any("OSVDB" in f.title for f in findings)
+
+
+def test_gobuster_scan_records_artifact(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    text = (FIXTURES / "gobuster" / "found_paths.txt").read_text()
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "_resolve_wordlist", lambda req, default: ("/tmp/fake.txt", None))
+
+    _call(net.gobuster_scan, {"target": "http://10.10.10.5"})
+    kb = for_target("http://10.10.10.5")
+    arts = kb.get_artifacts()
+    assert any(a.kind == "discovered_paths" for a in arts)
+    notes = kb.get_notes()
+    assert any("/admin" in n for n in notes)
+
+
+def test_nikto_scan_in_network_writes_findings(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    text = (FIXTURES / "nikto" / "cve_finding.txt").read_text()
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+
+    _call(net.nikto_scan, {"target": "10.10.10.5"})
+    findings = for_target("10.10.10.5").get_findings()
+    assert any("CVE-" in f.title for f in findings)
+
+
+def test_ssl_scan_writes_findings(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    text = (FIXTURES / "ssl" / "expired_cert.txt").read_text()
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(
+        net, "_run_sudo_cmd",
+        lambda cmd, sudo, **kw: {"stdout": text, "stderr": "", "returncode": 0, "truncated": False},
+    )
+
+    _call(net.ssl_scan, {"target": "10.13.38.23"})
+    findings = for_target("10.13.38.23").get_findings()
+    assert any("expired" in f.title.lower() for f in findings)
+
+
+def test_whatweb_scan_in_network_writes_service(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    text = (FIXTURES / "whatweb" / "plain_apache.txt").read_text()
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+
+    _call(net.whatweb_scan, {"target": "http://10.10.10.7"})
+    services = for_target("http://10.10.10.7").get_services()
+    assert any(s.service == "http" for s in services)

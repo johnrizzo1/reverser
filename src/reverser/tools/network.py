@@ -301,6 +301,17 @@ async def nikto_scan(args: dict) -> dict:
 
     # Nikto can be slow; give it 3 minutes
     result = run_cmd(cmd, timeout=180, max_output=16000)
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_nikto_findings
+        kb = for_target(target)
+        for finding in parse_nikto_findings(result["stdout"]):
+            kb.record_finding(finding)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in nikto_scan (network): %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
@@ -362,6 +373,31 @@ async def gobuster_scan(args: dict) -> dict:
         cmd.extend(extra_args.split())
 
     result = run_cmd(cmd, timeout=180, max_output=16000)
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        import json
+        from pathlib import Path
+        from ..kb import for_target, ArtifactFact
+        from ..kb.parsers import parse_gobuster_paths
+        kb = for_target(target)
+        paths = parse_gobuster_paths(result["stdout"])
+        if paths:
+            artifact_path = str(kb.root / "loot" / "gobuster_paths.json")
+            Path(artifact_path).write_text(json.dumps(paths, indent=2))
+            kb.record_artifact(ArtifactFact(
+                kind="discovered_paths",
+                path=artifact_path,
+                source_tool="gobuster_scan",
+            ))
+            kb.record_note(
+                f"gobuster {target}: discovered {len(paths)} paths — "
+                + ", ".join(paths[:10])
+                + (" ..." if len(paths) > 10 else "")
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in gobuster_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
@@ -471,6 +507,20 @@ async def ssl_scan(args: dict) -> dict:
             True, timeout=60, max_output=16000,
         )
 
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_ssl_findings
+        kb = for_target(target)
+        out = parse_ssl_findings(result["stdout"])
+        for f in out["findings"]:
+            kb.record_finding(f)
+        if out["note"]:
+            kb.record_note(out["note"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in ssl_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
@@ -497,6 +547,25 @@ async def whatweb_scan(args: dict) -> dict:
 
     cmd = ["whatweb", "--color=never", f"-a{aggression}", target]
     result = run_cmd(cmd, timeout=60, max_output=16000)
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from urllib.parse import urlparse
+        from ..kb import for_target, HostFact
+        from ..kb.parsers import parse_whatweb_plugins
+        parsed_url = urlparse(target if "://" in target else f"http://{target}")
+        host_ip = parsed_url.hostname or target
+        port = parsed_url.port or (443 if parsed_url.scheme == "https" else 80)
+        kb = for_target(target)
+        out = parse_whatweb_plugins(result["stdout"], host_ip=host_ip, port=port)
+        if out.get("service"):
+            kb.record_host(HostFact(ip=host_ip))
+            kb.record_service(out["service"])
+        if out.get("note"):
+            kb.record_note(out["note"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in whatweb_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
