@@ -117,3 +117,38 @@ async def kb_show(args: dict) -> dict:
 
 
 TOOLS = [kb_show]
+
+
+@tool(
+    "kb_list_hosts",
+    "List every host in the KB for `target`: ip, hostname, OS, domain, "
+    "is_dc, smb_signing.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Normalized target identifier."},
+        },
+        "required": ["target"],
+    },
+)
+async def kb_list_hosts(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    target = args["target"]
+    kb = for_target(target)
+    hosts = kb.get_hosts()
+    if not hosts:
+        return format_tool_result(f"No hosts recorded for {target} (0 rows)")
+    lines = [f"# Hosts for {target} ({len(hosts)} rows)", ""]
+    lines.append(f"{'IP':<18}{'HOSTNAME':<28}{'OS':<32}{'DOMAIN':<20}{'DC':<5}SIGNING")
+    lines.append("-" * 110)
+    for h in hosts:
+        lines.append(
+            f"{h.ip:<18}{(h.hostname or '-'):<28}{(h.os or '-')[:31]:<32}"
+            f"{(h.domain or '-'):<20}{('yes' if h.is_dc else 'no'):<5}{h.smb_signing or '-'}"
+        )
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(kb_list_hosts)

@@ -60,3 +60,26 @@ def test_kb_show_errors_on_multiple_no_target(tmp_targets_dir):
     assert result.get("is_error")
     assert "10.10.10.5" in result["content"][0]["text"]
     assert "10.10.10.6" in result["content"][0]["text"]
+
+
+def test_kb_list_hosts(tmp_targets_dir):
+    from reverser.tools.kb import kb_list_hosts
+    kb = for_target("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5", hostname="dc01", os="Windows",
+                            domain="CORP", is_dc=True, smb_signing="required"))
+    kb.record_host(HostFact(ip="10.10.10.6", hostname="ws01", os="Windows 10"))
+    result = _call_tool(kb_list_hosts, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "10.10.10.5" in text
+    assert "dc01" in text
+    assert "10.10.10.6" in text
+    assert "ws01" in text
+    assert "required" in text
+
+
+def test_kb_list_hosts_empty(tmp_targets_dir):
+    from reverser.tools.kb import kb_list_hosts
+    for_target("10.10.10.5")
+    result = _call_tool(kb_list_hosts, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "No hosts" in text or "0 hosts" in text or "(no rows)" in text or "0 rows" in text
