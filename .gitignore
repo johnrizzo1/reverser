@@ -37,3 +37,6 @@ results/
 # Research artifacts
 nix-re-tools.md
 .env
+
+# Git worktrees
+.worktrees/
