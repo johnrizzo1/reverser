@@ -81,3 +81,66 @@ class CredResult:
     target_host: str
     success: bool
     error_msg: Optional[str] = None
+
+
+import os
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .schema import apply_schema
+
+
+def normalize_target(target: str) -> str:
+    """Normalize a target identifier (lowercase, strip)."""
+    if not target or not target.strip():
+        raise ValueError("target identifier must be non-empty")
+    return target.strip().lower()
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _targets_root() -> Path:
+    return Path(os.environ.get("REVERSER_TARGETS_DIR", "targets"))
+
+
+class KB:
+    """Per-target knowledge base. Construct via reverser.kb.for_target(target)."""
+
+    def __init__(self, target: str):
+        self.target_id = normalize_target(target)
+        self.root = _targets_root() / self.target_id
+        self._init_filesystem()
+        self._init_database()
+
+    def _init_filesystem(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "findings").mkdir(exist_ok=True)
+        (self.root / "loot").mkdir(exist_ok=True)
+
+    def _init_database(self) -> None:
+        self.db_path = self.root / "state.db"
+        with self._connect() as conn:
+            apply_schema(conn)
+            now = _now_iso()
+            conn.execute(
+                "INSERT OR IGNORE INTO targets (id, first_seen, last_active) VALUES (?, ?, ?)",
+                (self.target_id, now, now),
+            )
+            conn.execute(
+                "UPDATE targets SET last_active = ? WHERE id = ?",
+                (now, self.target_id),
+            )
+            conn.commit()
+
+    @contextmanager
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            yield conn
+        finally:
+            conn.close()
