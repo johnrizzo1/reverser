@@ -219,3 +219,43 @@ def test_kb_add_note(tmp_targets_dir):
     assert not result.get("is_error")
     notes = for_target("10.10.10.5").get_notes()
     assert any("Hypothesis" in n for n in notes)
+
+
+def test_kb_export_report_default_path(tmp_targets_dir):
+    from reverser.tools.kb import kb_export_report
+    from reverser.kb import CredResult
+    kb = for_target("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5", hostname="dc01", os="Windows", is_dc=True))
+    kb.record_service(ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp",
+                                  service="microsoft-ds"))
+    cid = kb.record_credential(CredentialFact(
+        username="jdoe", password="x", status="valid", source_tool="netexec_smb",
+    ))
+    kb.record_cred_result(cid, CredResult(service_kind="smb", target_host="10.10.10.5", success=True))
+    kb.record_finding(FindingFact(
+        title="SMB signing missing", severity="medium",
+        description="Allows NTLM relay.",
+    ))
+    result = _call_tool(kb_export_report, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "Report written" in text or "report" in text.lower()
+    expected_path = tmp_targets_dir / "10.10.10.5" / "report.md"
+    assert expected_path.exists()
+    body = expected_path.read_text()
+    assert "10.10.10.5" in body
+    assert "## Hosts" in body or "# Hosts" in body
+    assert "jdoe" in body
+    assert "SMB signing" in body
+
+
+def test_kb_export_report_custom_path(tmp_targets_dir, tmp_path):
+    from reverser.tools.kb import kb_export_report
+    for_target("10.10.10.5")
+    out = tmp_path / "out.md"
+    result = _call_tool(kb_export_report, {
+        "target": "10.10.10.5",
+        "output_path": str(out),
+    })
+    assert not result.get("is_error")
+    assert out.exists()
+    assert "10.10.10.5" in out.read_text()
