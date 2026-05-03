@@ -234,3 +234,32 @@ def test_parse_nmap_smb_signing_disabled():
     out = parse_nmap_smb_scripts(text)
     assert out["host"].smb_signing == "disabled"
     assert out["host"].hostname == "ws01.corp.local"
+
+
+from reverser.kb.parsers import parse_whatweb_plugins
+
+
+def test_parse_whatweb_wordpress():
+    text = (FIXTURES / "whatweb" / "wordpress_site.txt").read_text()
+    out = parse_whatweb_plugins(text, host_ip="10.10.10.5", port=80)
+    assert "service" in out and "note" in out
+    svc = out["service"]
+    assert svc.host_ip == "10.10.10.5"
+    assert svc.port == 80
+    assert svc.proto == "tcp"
+    assert svc.service == "http"
+    assert "WordPress" in out["note"]
+    assert "Apache" in out["note"]
+
+
+def test_parse_whatweb_empty():
+    text = (FIXTURES / "whatweb" / "empty.txt").read_text()
+    out = parse_whatweb_plugins(text, host_ip="10.10.10.5", port=80)
+    assert out["service"] is None or out["note"] == ""
+
+
+def test_parse_whatweb_plain_apache():
+    text = (FIXTURES / "whatweb" / "plain_apache.txt").read_text()
+    out = parse_whatweb_plugins(text, host_ip="10.10.10.7", port=80)
+    assert "Apache" in out["note"]
+    assert out["service"].version is None or "Apache" in out["service"].version

@@ -375,3 +375,37 @@ def parse_nmap_smb_scripts(text: str) -> dict:
     note = "\n".join(note_parts) if note_parts else "nmap SMB scripts: no shares enumerated"
 
     return {"host": host, "services": services, "note": note}
+
+
+_WHATWEB_PLUGIN_RE = re.compile(r"([A-Za-z0-9._\-]+)\[([^\]]+)\]")
+
+
+def parse_whatweb_plugins(text: str, host_ip: str, port: int) -> dict:
+    """Parse a single-line whatweb output into a service + free-text note.
+
+    Returns ``{"service": ServiceFact | None, "note": str}``. The
+    HTTPServer plugin populates the service.version when present; the
+    full plugin list (joined ", ") becomes the note. Returns
+    {"service": None, "note": ""} for empty input.
+    """
+    line = text.strip()
+    if not line:
+        return {"service": None, "note": ""}
+
+    plugins = _WHATWEB_PLUGIN_RE.findall(line)
+    plugin_dict = {name: value for name, value in plugins}
+
+    version = plugin_dict.get("HTTPServer") or plugin_dict.get("Apache") or plugin_dict.get("nginx")
+    note = ", ".join(f"{n}={v}" for n, v in plugins) if plugins else line
+
+    return {
+        "service": ServiceFact(
+            host_ip=host_ip,
+            port=port,
+            proto="tcp",
+            service="http",
+            version=version,
+            scan_source="whatweb",
+        ),
+        "note": f"whatweb {host_ip}:{port}: {note}",
+    }
