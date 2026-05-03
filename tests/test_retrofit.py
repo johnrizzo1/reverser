@@ -216,3 +216,13 @@ def test_whatweb_scan_in_network_writes_service(tmp_targets_dir, monkeypatch):
     _call(net.whatweb_scan, {"target": "http://10.10.10.7"})
     services = for_target("http://10.10.10.7").get_services()
     assert any(s.service == "http" for s in services)
+
+
+def test_testssl_analyze_writes_findings(tmp_targets_dir, monkeypatch):
+    from reverser.tools import web as webmod
+    text = (FIXTURES / "ssl" / "sslscan_full.txt").read_text()
+    monkeypatch.setattr(webmod, "run_cmd", _stub_run_cmd(text))
+
+    _call(webmod.testssl_analyze, {"target": "10.10.10.5:443"})
+    findings = for_target("10.10.10.5:443").get_findings()
+    assert any("TLS" in f.title for f in findings)

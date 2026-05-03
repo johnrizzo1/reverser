@@ -556,6 +556,20 @@ async def testssl_analyze(args: dict) -> dict:
 
     cmd = ["testssl.sh", "--color", "0", target]
     result = run_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT * 2)
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_ssl_findings
+        kb = for_target(target)
+        out = parse_ssl_findings(result["stdout"])
+        for f in out["findings"]:
+            kb.record_finding(f)
+        if out["note"]:
+            kb.record_note(out["note"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in testssl_analyze: %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
