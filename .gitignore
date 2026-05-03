@@ -50,3 +50,4 @@ targets/
 
 # Python test artifacts
 .pytest_cache/
+uv.lock

@@ -373,6 +373,19 @@ _DDL = [
     )
     """,
     """
+    -- Partial unique index: SQLite UNIQUE treats NULLs as distinct, so the
+    -- table-level constraint above does not dedupe rows where password or
+    -- nt_hash are NULL. COALESCE collapses NULLs to '' so dedup matches the
+    -- query in record_credential (Task 8).
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_credentials_unique
+        ON credentials (
+            target_id,
+            username,
+            COALESCE(password, ''),
+            COALESCE(nt_hash, '')
+        )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS cred_results (
         cred_id      INTEGER NOT NULL REFERENCES credentials(id),
         service_kind TEXT NOT NULL,
