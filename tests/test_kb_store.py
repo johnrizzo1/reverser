@@ -96,3 +96,32 @@ def test_kb_records_target_row(tmp_targets_dir):
         row = conn.execute("SELECT id FROM targets WHERE id = ?", ("10.10.10.5",)).fetchone()
         assert row is not None
         assert row[0] == "10.10.10.5"
+
+
+def test_record_host_basic(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5", hostname="dc01", os="Windows", is_dc=True))
+    hosts = kb.get_hosts()
+    assert len(hosts) == 1
+    assert hosts[0].ip == "10.10.10.5"
+    assert hosts[0].hostname == "dc01"
+    assert hosts[0].is_dc is True
+
+
+def test_record_host_idempotent(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    kb.record_host(HostFact(ip="10.10.10.5", hostname="dc01"))
+    hosts = kb.get_hosts()
+    assert len(hosts) == 1
+    assert hosts[0].hostname == "dc01"
+
+
+def test_record_host_preserves_fields_when_none(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5", hostname="dc01", os="Windows"))
+    kb.record_host(HostFact(ip="10.10.10.5", domain="CORP.LOCAL"))
+    hosts = kb.get_hosts()
+    assert hosts[0].hostname == "dc01"
+    assert hosts[0].os == "Windows"
+    assert hosts[0].domain == "CORP.LOCAL"
