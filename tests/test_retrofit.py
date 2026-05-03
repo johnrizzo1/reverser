@@ -90,3 +90,32 @@ def test_ldap_search_has_kb_tail_block():
     assert "parse_ldap_entries" in src
     assert "kb.record_host" in src
     assert "logging.getLogger" in src
+
+
+def test_kerberos_enum_asreproast_writes_creds(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    text = (FIXTURES / "asreproast" / "two_users.txt").read_text()
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+
+    _call(net.kerberos_enum, {
+        "target": "10.10.10.5", "domain": "CORP.LOCAL", "mode": "asreproast",
+        "username": "alice",
+    })
+    creds = for_target("10.10.10.5").get_credentials()
+    usernames = sorted(c.username for c in creds)
+    assert "alice" in usernames and "bob" in usernames
+    assert all(c.kerberos_ticket and c.status == "untested" for c in creds)
+
+
+def test_kerberos_enum_kerberoast_writes_creds(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    text = (FIXTURES / "kerberoast" / "two_spns.txt").read_text()
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+
+    _call(net.kerberos_enum, {
+        "target": "10.10.10.5", "domain": "CORP.LOCAL", "mode": "kerberoast",
+        "username": "jdoe", "password": "x",
+    })
+    creds = for_target("10.10.10.5").get_credentials()
+    usernames = sorted(c.username for c in creds)
+    assert "svc_sql" in usernames and "svc_web" in usernames

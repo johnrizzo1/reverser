@@ -980,6 +980,19 @@ async def kerberos_enum(args: dict) -> dict:
                     "impacket GetNPUsers not found. Install impacket: pip install impacket"
                 )
 
+        # ── KB write (new — asreproast) ────────────────────────────────────
+        try:
+            from ..kb import for_target
+            from ..kb.parsers import parse_asreproast_hashes
+            kb = for_target(target)
+            for cred in parse_asreproast_hashes(result["stdout"]):
+                kb.record_credential(cred)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "KB write failed in kerberos_enum/asreproast: %s", e)
+        # ───────────────────────────────────────────────────────────────────
+
         return cmd_result_to_tool_result(result)
 
     elif mode == "kerberoast":
@@ -1003,6 +1016,19 @@ async def kerberos_enum(args: dict) -> dict:
                 return format_error(
                     "impacket GetUserSPNs not found. Install impacket: pip install impacket"
                 )
+
+        # ── KB write (new — kerberoast) ────────────────────────────────────
+        try:
+            from ..kb import for_target
+            from ..kb.parsers import parse_kerberoast_hashes
+            kb = for_target(target)
+            for cred in parse_kerberoast_hashes(result["stdout"]):
+                kb.record_credential(cred)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "KB write failed in kerberos_enum/kerberoast: %s", e)
+        # ───────────────────────────────────────────────────────────────────
 
         return cmd_result_to_tool_result(result)
 
