@@ -205,3 +205,32 @@ def test_parse_smbclient_auth_listing():
     assert "Backups" in out["shares_note"]
     assert "SCCM_Source" in out["shares_note"]
     assert out["host"].domain == "CORP" or "CORP" in out["shares_note"]
+
+
+from reverser.kb.parsers import parse_nmap_smb_scripts
+
+
+def test_parse_nmap_smb_dc01():
+    text = (FIXTURES / "nmap_smb_scripts" / "dc01_full.txt").read_text()
+    out = parse_nmap_smb_scripts(text)
+    assert out["host"].ip == "10.10.10.5"
+    assert out["host"].hostname == "dc01.corp.local"
+    assert out["host"].domain == "corp.local"
+    assert out["host"].smb_signing == "required"
+    ports = {s.port for s in out["services"]}
+    assert 445 in ports
+    assert "ADMIN$" in out["note"]
+
+
+def test_parse_nmap_smb_no_smb():
+    text = (FIXTURES / "nmap_smb_scripts" / "no_smb.txt").read_text()
+    out = parse_nmap_smb_scripts(text)
+    assert out["services"] == []
+    assert out["host"].ip == "10.10.10.99"
+
+
+def test_parse_nmap_smb_signing_disabled():
+    text = (FIXTURES / "nmap_smb_scripts" / "signing_disabled.txt").read_text()
+    out = parse_nmap_smb_scripts(text)
+    assert out["host"].smb_signing == "disabled"
+    assert out["host"].hostname == "ws01.corp.local"

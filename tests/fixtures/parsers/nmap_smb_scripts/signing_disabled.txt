@@ -1,0 +1,20 @@
+Starting Nmap 7.94 ( https://nmap.org )
+Nmap scan report for 10.10.10.20
+Host is up (0.0033s latency).
+
+PORT    STATE SERVICE      VERSION
+445/tcp open  microsoft-ds Windows 10 Enterprise 19045
+
+Host script results:
+| smb-security-mode:
+|   account_used: guest
+|   authentication_level: user
+|   challenge_response: supported
+|_  message_signing: disabled (dangerous, but default)
+| smb-os-discovery:
+|   OS: Windows 10 Enterprise 19045
+|   Computer name: WS01
+|   Domain name: corp.local
+|_  FQDN: ws01.corp.local
+
+Nmap done: 1 IP address (1 host up) scanned in 8.10 seconds

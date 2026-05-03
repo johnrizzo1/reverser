@@ -326,3 +326,52 @@ def parse_smbclient_shares(text: str) -> dict:
         "host": HostFact(ip="", domain=domain),
         "shares_note": "\n".join(note_parts),
     }
+
+
+_SMB_SIGNING_RE = re.compile(r"message_signing:\s*(\w+)")
+_SMB_FQDN_RE = re.compile(r"\|_?\s*FQDN:\s*(\S+)")
+_SMB_DOMAIN_RE = re.compile(r"\|_?\s*Domain name:\s*(\S+)")
+_SMB_OS_DISCOVERY_RE = re.compile(r"\|_?\s*OS:\s*(.+?)\s*$")
+
+
+def parse_nmap_smb_scripts(text: str) -> dict:
+    """Parse nmap SMB-script output (smb-os-discovery, -security-mode, -enum-shares).
+
+    Returns ``{"host": HostFact, "services": [ServiceFact], "note": str}``.
+    Pulls ip/hostname from the standard "Nmap scan report for ..." line,
+    smb_signing from message_signing, OS from smb-os-discovery, and
+    enumerated shares into the note text.
+    """
+    nmap_results = parse_nmap_output(text)
+    if nmap_results:
+        host = nmap_results[0].host
+        services = nmap_results[0].services
+    else:
+        host = HostFact(ip="")
+        services = []
+
+    sig_m = _SMB_SIGNING_RE.search(text)
+    if sig_m:
+        sig = sig_m.group(1).lower()
+        if sig in ("required", "enabled", "disabled"):
+            host.smb_signing = sig
+
+    fqdn_m = _SMB_FQDN_RE.search(text)
+    if fqdn_m:
+        host.hostname = fqdn_m.group(1)
+
+    dom_m = _SMB_DOMAIN_RE.search(text)
+    if dom_m:
+        host.domain = dom_m.group(1)
+
+    os_m = _SMB_OS_DISCOVERY_RE.search(text)
+    if os_m and not host.os:
+        host.os = os_m.group(1)
+
+    share_lines = re.findall(r"\\\\\S+\\(\S+):", text)
+    note_parts = []
+    if share_lines:
+        note_parts.append("nmap smb-enum-shares: " + ", ".join(sorted(set(share_lines))))
+    note = "\n".join(note_parts) if note_parts else "nmap SMB scripts: no shares enumerated"
+
+    return {"host": host, "services": services, "note": note}

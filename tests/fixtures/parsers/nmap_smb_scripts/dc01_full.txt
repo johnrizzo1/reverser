@@ -1,0 +1,35 @@
+Starting Nmap 7.94 ( https://nmap.org )
+Nmap scan report for 10.10.10.5
+Host is up (0.0021s latency).
+
+PORT    STATE SERVICE      VERSION
+139/tcp open  netbios-ssn  Microsoft Windows netbios-ssn
+445/tcp open  microsoft-ds Windows Server 2019 Standard 17763 microsoft-ds (workgroup: CORP)
+
+Host script results:
+| smb-os-discovery:
+|   OS: Windows Server 2019 Standard 17763 (Windows Server 2019 Standard 6.3)
+|   Computer name: dc01
+|   NetBIOS computer name: DC01\x00
+|   Domain name: corp.local
+|   Forest name: corp.local
+|   FQDN: dc01.corp.local
+|_  System time: 2026-05-03T12:00:00+00:00
+| smb-security-mode:
+|   account_used: guest
+|   authentication_level: user
+|   challenge_response: supported
+|_  message_signing: required (the most secure)
+| smb2-security-mode:
+|   3:1:1:
+|_    Message signing enabled and required
+| smb-enum-shares:
+|   account_used: guest
+|   \\10.10.10.5\ADMIN$:
+|     Type: STYPE_DISKTREE_HIDDEN
+|     Comment: Remote Admin
+|   \\10.10.10.5\IPC$:
+|     Type: STYPE_IPC_HIDDEN
+|_    Comment: Remote IPC
+
+Nmap done: 1 IP address (1 host up) scanned in 11.20 seconds
