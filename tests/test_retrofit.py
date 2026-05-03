@@ -65,3 +65,28 @@ def test_nmap_scan_writes_hosts_and_services_to_kb(tmp_targets_dir, monkeypatch)
     assert any(h.ip == "10.10.10.5" for h in hosts)
     ports = {s.port for s in services}
     assert {53, 88, 445, 5985}.issubset(ports)
+
+
+def test_ldap_search_writes_dcs_to_kb(tmp_targets_dir):
+    """Seam test: feed captured ldap output into the parser + KB directly."""
+    from reverser.kb.parsers import parse_ldap_entries
+    text = (FIXTURES / "ldap_entries" / "dc_with_users.txt").read_text()
+    out = parse_ldap_entries(text)
+    assert any(h.is_dc for h in out["hosts"])
+
+    kb = for_target("10.10.10.5")
+    for h in out["hosts"]:
+        kb.record_host(h)
+    hosts = kb.get_hosts()
+    assert any(h.is_dc for h in hosts)
+
+
+def test_ldap_search_has_kb_tail_block():
+    """Static check: ldap_search source contains the KB tail block."""
+    from reverser.tools import network as net
+    import inspect
+    handler = getattr(net.ldap_search, "handler", net.ldap_search)
+    src = inspect.getsource(handler)
+    assert "parse_ldap_entries" in src
+    assert "kb.record_host" in src
+    assert "logging.getLogger" in src

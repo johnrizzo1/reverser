@@ -722,6 +722,22 @@ async def ldap_search(args: dict) -> dict:
             output += f"\n\n[Results limited to {size_limit} entries — increase size_limit for more]"
 
         conn.unbind()
+
+        # ── KB write (new) ─────────────────────────────────────────────────
+        try:
+            from ..kb import for_target
+            from ..kb.parsers import parse_ldap_entries
+            kb = for_target(target)
+            parsed = parse_ldap_entries(output)
+            for h in parsed["hosts"]:
+                kb.record_host(h)
+            if parsed["note"]:
+                kb.record_note(parsed["note"])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("KB write failed in ldap_search: %s", e)
+        # ───────────────────────────────────────────────────────────────────
+
         return format_tool_result(output)
 
     except ldap3.core.exceptions.LDAPBindError as e:
