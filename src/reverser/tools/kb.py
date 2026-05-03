@@ -190,3 +190,65 @@ async def kb_list_services(args: dict) -> dict:
 
 
 TOOLS.append(kb_list_services)
+
+
+@tool(
+    "kb_list_creds",
+    "List credentials in the KB for `target`. Optional `status` filter "
+    "(untested|invalid|valid). For each cred, shows username, status, "
+    "source tool, and the services where it has been validated.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Normalized target identifier."},
+            "status": {
+                "type": "string",
+                "description": "Filter by status.",
+                "enum": ["untested", "invalid", "valid"],
+                "default": "",
+            },
+        },
+        "required": ["target"],
+    },
+)
+async def kb_list_creds(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    target = args["target"]
+    status = args.get("status", "") or None
+    kb = for_target(target)
+    creds = kb.get_credentials(status=status)
+    if not creds:
+        return format_tool_result(f"No credentials match for {target} (0 rows)")
+
+    rows_with_id = []
+    with kb._connect() as conn:
+        cursor = conn.execute(
+            "SELECT id, username, password, nt_hash, kerberos_ticket, domain, "
+            "source_tool, source_context, status FROM credentials WHERE target_id = ?"
+            + (" AND status = ?" if status else "") + " ORDER BY id",
+            ([kb.target_id, status] if status else [kb.target_id]),
+        )
+        rows_with_id = cursor.fetchall()
+
+    lines = [f"# Credentials for {target} ({len(rows_with_id)} rows)", ""]
+    lines.append(f"{'USER':<24}{'DOMAIN':<16}{'STATUS':<10}{'MATERIAL':<14}"
+                 f"{'SOURCE':<18}WORKS-ON")
+    lines.append("-" * 110)
+    for row in rows_with_id:
+        cid, user, pw, nt, krb, domain, source_tool, source_ctx, st = row
+        material = "password" if pw else ("nt_hash" if nt else ("krb" if krb else "-"))
+        results = kb.get_cred_results(cid)
+        works = ", ".join(
+            f"{r.service_kind}@{r.target_host}{'+' if r.success else '-'}"
+            for r in results
+        ) or "-"
+        lines.append(
+            f"{user[:23]:<24}{(domain or '-')[:15]:<16}{st:<10}{material:<14}"
+            f"{(source_tool or '-')[:17]:<18}{works}"
+        )
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(kb_list_creds)

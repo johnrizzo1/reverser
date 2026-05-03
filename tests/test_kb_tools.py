@@ -125,3 +125,40 @@ def test_kb_list_services_filter_by_host(tmp_targets_dir):
     text = result["content"][0]["text"]
     assert "445" in text
     assert "10.10.10.6" not in text or "22" not in text
+
+
+def test_kb_list_creds_all(tmp_targets_dir):
+    from reverser.tools.kb import kb_list_creds
+    from reverser.kb import CredResult
+    kb = for_target("10.10.10.5")
+    cid = kb.record_credential(CredentialFact(
+        username="jdoe", password="x", domain="CORP",
+        source_tool="netexec_smb", status="valid",
+    ))
+    kb.record_cred_result(cid, CredResult(service_kind="smb", target_host="10.10.10.5", success=True))
+    kb.record_credential(CredentialFact(username="bob", password="y", status="invalid"))
+    result = _call_tool(kb_list_creds, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "jdoe" in text
+    assert "bob" in text
+    assert "valid" in text
+    assert "smb" in text
+
+
+def test_kb_list_creds_filter_by_status(tmp_targets_dir):
+    from reverser.tools.kb import kb_list_creds
+    kb = for_target("10.10.10.5")
+    kb.record_credential(CredentialFact(username="jdoe", password="x", status="valid"))
+    kb.record_credential(CredentialFact(username="bob", password="y", status="invalid"))
+    result = _call_tool(kb_list_creds, {"target": "10.10.10.5", "status": "valid"})
+    text = result["content"][0]["text"]
+    assert "jdoe" in text
+    assert "bob" not in text
+
+
+def test_kb_list_creds_empty(tmp_targets_dir):
+    from reverser.tools.kb import kb_list_creds
+    for_target("10.10.10.5")
+    result = _call_tool(kb_list_creds, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "No credentials" in text or "(no rows)" in text or "0 rows" in text
