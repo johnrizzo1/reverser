@@ -304,3 +304,25 @@ def test_get_findings_filter_by_severity(tmp_targets_dir):
     high = kb.get_findings(severity="high")
     assert len(high) == 1
     assert high[0].title == "b"
+
+
+def test_for_target_returns_kb(tmp_targets_dir):
+    from reverser.kb import for_target
+    kb = for_target("10.10.10.5")
+    assert isinstance(kb, KB)
+    assert kb.target_id == "10.10.10.5"
+
+
+def test_for_target_caches_per_target(tmp_targets_dir):
+    """Calling for_target twice with the same target should return the same instance."""
+    from reverser.kb import for_target
+    kb1 = for_target("10.10.10.5")
+    kb2 = for_target("10.10.10.5")
+    assert kb1 is kb2
+
+
+def test_for_target_normalizes(tmp_targets_dir):
+    from reverser.kb import for_target
+    kb1 = for_target("10.10.10.5")
+    kb2 = for_target("  10.10.10.5  ")
+    assert kb1 is kb2
