@@ -170,3 +170,61 @@ def test_get_services_filter_by_port(tmp_targets_dir):
     kb.record_service(ServiceFact(host_ip="10.10.10.5", port=445, proto="tcp"))
     kb.record_service(ServiceFact(host_ip="10.10.10.5", port=22, proto="tcp"))
     assert len(kb.get_services(port=445)) == 1
+
+
+def test_record_credential_new(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    cred_id = kb.record_credential(CredentialFact(
+        username="jdoe", password="Summer2026!", domain="CORP",
+        source_tool="netexec_smb", status="valid",
+    ))
+    assert cred_id > 0
+    creds = kb.get_credentials()
+    assert len(creds) == 1
+    assert creds[0].username == "jdoe"
+    assert creds[0].status == "valid"
+
+
+def test_record_credential_dedup_returns_same_id(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    c = CredentialFact(username="jdoe", password="x", status="untested")
+    id1 = kb.record_credential(c)
+    id2 = kb.record_credential(c)
+    assert id1 == id2
+    assert len(kb.get_credentials()) == 1
+
+
+def test_record_credential_status_upgrade(tmp_targets_dir):
+    """Re-recording an existing cred with status=valid must upgrade from untested."""
+    kb = KB("10.10.10.5")
+    kb.record_credential(CredentialFact(username="jdoe", password="x", status="untested"))
+    kb.record_credential(CredentialFact(username="jdoe", password="x", status="valid"))
+    creds = kb.get_credentials()
+    assert len(creds) == 1
+    assert creds[0].status == "valid"
+
+
+def test_record_credential_status_no_downgrade(tmp_targets_dir):
+    """Once valid, must not be downgraded to untested or invalid by a later record."""
+    kb = KB("10.10.10.5")
+    kb.record_credential(CredentialFact(username="jdoe", password="x", status="valid"))
+    kb.record_credential(CredentialFact(username="jdoe", password="x", status="invalid"))
+    creds = kb.get_credentials()
+    assert creds[0].status == "valid"
+
+
+def test_get_credentials_filter_by_status(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    kb.record_credential(CredentialFact(username="a", password="x", status="valid"))
+    kb.record_credential(CredentialFact(username="b", password="y", status="invalid"))
+    valid = kb.get_credentials(status="valid")
+    assert len(valid) == 1
+    assert valid[0].username == "a"
+
+
+def test_credential_hash_distinct_from_password(tmp_targets_dir):
+    """Same user with different cred material is recorded as separate rows."""
+    kb = KB("10.10.10.5")
+    kb.record_credential(CredentialFact(username="jdoe", password="x"))
+    kb.record_credential(CredentialFact(username="jdoe", nt_hash="aad3..."))
+    assert len(kb.get_credentials()) == 2

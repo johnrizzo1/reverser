@@ -238,3 +238,71 @@ class KB:
                 )
                 for r in cursor.fetchall()
             ]
+
+    _STATUS_RANK = {"untested": 0, "invalid": 1, "valid": 2}
+
+    def record_credential(self, cred: CredentialFact) -> int:
+        """Record a credential. Returns the row id.
+
+        Behavior:
+        - Dedupes on (target, username, password, nt_hash). NULLs collapse via COALESCE.
+        - Status only moves up the ladder untested → invalid → valid (never down).
+        """
+        with self._connect() as conn:
+            now = _now_iso()
+            existing = conn.execute(
+                "SELECT id, status FROM credentials WHERE "
+                "target_id = ? AND username = ? AND "
+                "COALESCE(password, '') = COALESCE(?, '') AND "
+                "COALESCE(nt_hash, '') = COALESCE(?, '')",
+                (self.target_id, cred.username, cred.password, cred.nt_hash),
+            ).fetchone()
+            if existing is None:
+                cursor = conn.execute(
+                    "INSERT INTO credentials "
+                    "(target_id, username, password, nt_hash, lm_hash, kerberos_ticket, "
+                    " domain, source_tool, source_context, status, first_seen, last_tested) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        self.target_id, cred.username, cred.password, cred.nt_hash,
+                        cred.lm_hash, cred.kerberos_ticket, cred.domain,
+                        cred.source_tool, cred.source_context, cred.status,
+                        now, now if cred.status != "untested" else None,
+                    ),
+                )
+                conn.commit()
+                return cursor.lastrowid
+            cred_id, current_status = existing
+            new_status = (
+                cred.status
+                if self._STATUS_RANK[cred.status] > self._STATUS_RANK[current_status]
+                else current_status
+            )
+            conn.execute(
+                "UPDATE credentials SET status = ?, last_tested = ? WHERE id = ?",
+                (new_status, now, cred_id),
+            )
+            conn.commit()
+            return cred_id
+
+    def get_credentials(self, status: str | None = None) -> list[CredentialFact]:
+        sql = (
+            "SELECT username, password, nt_hash, lm_hash, kerberos_ticket, domain, "
+            "       source_tool, source_context, status "
+            "FROM credentials WHERE target_id = ?"
+        )
+        params: list = [self.target_id]
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY id"
+        with self._connect() as conn:
+            cursor = conn.execute(sql, params)
+            return [
+                CredentialFact(
+                    username=r[0], password=r[1], nt_hash=r[2], lm_hash=r[3],
+                    kerberos_ticket=r[4], domain=r[5],
+                    source_tool=r[6], source_context=r[7], status=r[8],
+                )
+                for r in cursor.fetchall()
+            ]
