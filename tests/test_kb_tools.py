@@ -162,3 +162,48 @@ def test_kb_list_creds_empty(tmp_targets_dir):
     result = _call_tool(kb_list_creds, {"target": "10.10.10.5"})
     text = result["content"][0]["text"]
     assert "No credentials" in text or "(no rows)" in text or "0 rows" in text
+
+
+def test_kb_add_finding_basic(tmp_targets_dir):
+    from reverser.tools.kb import kb_add_finding
+    for_target("10.10.10.5")
+    result = _call_tool(kb_add_finding, {
+        "target": "10.10.10.5",
+        "title": "SMB signing not required",
+        "severity": "medium",
+        "description": "Allows NTLM relay attacks.",
+    })
+    text = result["content"][0]["text"]
+    assert "added" in text.lower() or "id=" in text.lower()
+    findings = for_target("10.10.10.5").get_findings()
+    assert len(findings) == 1
+    assert findings[0].title == "SMB signing not required"
+
+
+def test_kb_add_finding_with_evidence_and_cvss(tmp_targets_dir):
+    from reverser.tools.kb import kb_add_finding
+    for_target("10.10.10.5")
+    result = _call_tool(kb_add_finding, {
+        "target": "10.10.10.5",
+        "title": "Zerologon",
+        "severity": "critical",
+        "description": "CVE-2020-1472",
+        "evidence_paths": ["findings/zerologon.txt"],
+        "cvss": 10.0,
+    })
+    assert not result.get("is_error")
+    f = for_target("10.10.10.5").get_findings()[0]
+    assert f.cvss == 10.0
+    assert f.evidence_paths == ["findings/zerologon.txt"]
+
+
+def test_kb_add_finding_invalid_severity(tmp_targets_dir):
+    from reverser.tools.kb import kb_add_finding
+    for_target("10.10.10.5")
+    result = _call_tool(kb_add_finding, {
+        "target": "10.10.10.5",
+        "title": "x",
+        "severity": "emergency",
+        "description": "x",
+    })
+    assert result.get("is_error")
