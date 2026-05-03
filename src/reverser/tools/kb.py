@@ -237,7 +237,7 @@ async def kb_list_creds(args: dict) -> dict:
                  f"{'SOURCE':<18}WORKS-ON")
     lines.append("-" * 110)
     for row in rows_with_id:
-        cid, user, pw, nt, krb, domain, source_tool, source_ctx, st = row
+        cid, user, pw, nt, krb, domain, source_tool, _source_ctx, st = row
         material = "password" if pw else ("nt_hash" if nt else ("krb" if krb else "-"))
         results = kb.get_cred_results(cid)
         works = ", ".join(
