@@ -240,6 +240,21 @@ async def nmap_scan(args: dict) -> dict:
     cmd.append(target)
 
     result = _run_sudo_cmd(cmd, needs_root, timeout=120, max_output=16000)
+
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_nmap_output
+        kb = for_target(target)
+        for nmap_host in parse_nmap_output(result["stdout"]):
+            kb.record_host(nmap_host.host)
+            for svc in nmap_host.services:
+                kb.record_service(svc)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in nmap_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
+
     return cmd_result_to_tool_result(result)
 
 

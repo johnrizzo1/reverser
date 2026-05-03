@@ -50,3 +50,18 @@ def test_banner_grab_writes_service_to_kb(tmp_targets_dir, monkeypatch):
     _call(net.banner_grab, {"target": "10.10.10.5", "port": 22})
     services = for_target("10.10.10.5").get_services()
     assert any(s.port == 22 and "OpenSSH" in (s.banner or "") for s in services)
+
+
+def test_nmap_scan_writes_hosts_and_services_to_kb(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    text = (FIXTURES / "nmap" / "host_with_smb_and_winrm.txt").read_text()
+    monkeypatch.setattr(net, "_run_sudo_cmd",
+                        lambda cmd, sudo, **kw: {"stdout": text, "stderr": "", "returncode": 0, "truncated": False})
+
+    _call(net.nmap_scan, {"target": "10.10.10.5"})
+    kb = for_target("10.10.10.5")
+    hosts = kb.get_hosts()
+    services = kb.get_services()
+    assert any(h.ip == "10.10.10.5" for h in hosts)
+    ports = {s.port for s in services}
+    assert {53, 88, 445, 5985}.issubset(ports)
