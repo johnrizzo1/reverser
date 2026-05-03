@@ -476,3 +476,57 @@ def parse_nikto_findings(text: str) -> list[FindingFact]:
             description=body,
         ))
     return findings
+
+
+def parse_ssl_findings(text: str) -> dict:
+    """Convert sslscan-style output into TLS findings + a summary note.
+
+    Returns ``{"findings": [FindingFact], "note": str}``. Findings are
+    raised for: TLSv1.0 enabled, TLSv1.1 enabled, SSLv2 enabled,
+    SSLv3 enabled, expired certificate, self-signed certificate.
+    """
+    findings: list[FindingFact] = []
+
+    if re.search(r"^SSLv2\s+enabled", text, re.MULTILINE):
+        findings.append(FindingFact(
+            title="SSLv2 enabled",
+            severity="high",
+            description="The server accepts SSLv2 connections (DROWN attack surface).",
+        ))
+    if re.search(r"^SSLv3\s+enabled", text, re.MULTILINE):
+        findings.append(FindingFact(
+            title="SSLv3 enabled",
+            severity="high",
+            description="The server accepts SSLv3 connections (POODLE attack surface).",
+        ))
+    if re.search(r"^TLSv1\.0\s+enabled", text, re.MULTILINE):
+        findings.append(FindingFact(
+            title="TLSv1.0 enabled",
+            severity="medium",
+            description="TLS 1.0 is deprecated by all major standards bodies.",
+        ))
+    if re.search(r"^TLSv1\.1\s+enabled", text, re.MULTILINE):
+        findings.append(FindingFact(
+            title="TLSv1.1 enabled",
+            severity="medium",
+            description="TLS 1.1 is deprecated by all major standards bodies.",
+        ))
+    if "Certificate has expired" in text:
+        findings.append(FindingFact(
+            title="Expired TLS certificate",
+            severity="medium",
+            description="The presented X.509 certificate is past its 'Not valid after' date.",
+        ))
+
+    subj_m = re.search(r"^\s*Subject:\s*(.+?)\s*$", text, re.MULTILINE)
+    iss_m = re.search(r"^\s*Issuer:\s*(.+?)\s*$", text, re.MULTILINE)
+    if subj_m and iss_m and subj_m.group(1).strip() == iss_m.group(1).strip():
+        findings.append(FindingFact(
+            title="Self-signed TLS certificate",
+            severity="low",
+            description=f"Subject == Issuer ({subj_m.group(1).strip()}) — self-signed.",
+        ))
+
+    cipher_count = len(re.findall(r"^Accepted\s+TLSv", text, re.MULTILINE))
+    note = f"sslscan: {cipher_count} accepted ciphers, {len(findings)} findings"
+    return {"findings": findings, "note": note}

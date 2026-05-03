@@ -314,3 +314,30 @@ def test_parse_nikto_cve():
     assert cves and cves[0].severity in ("medium", "high")
     creds = [f for f in findings if "default credentials" in f.title.lower()]
     assert creds and creds[0].severity in ("medium", "high")
+
+
+from reverser.kb.parsers import parse_ssl_findings
+
+
+def test_parse_ssl_full():
+    text = (FIXTURES / "ssl" / "sslscan_full.txt").read_text()
+    out = parse_ssl_findings(text)
+    assert "findings" in out and "note" in out
+    titles = " | ".join(f.title for f in out["findings"])
+    assert "TLS" in titles
+    assert out["note"]
+
+
+def test_parse_ssl_no_findings():
+    text = (FIXTURES / "ssl" / "no_findings.txt").read_text()
+    out = parse_ssl_findings(text)
+    assert out["findings"] == []
+    assert "note" in out
+
+
+def test_parse_ssl_expired_cert():
+    text = (FIXTURES / "ssl" / "expired_cert.txt").read_text()
+    out = parse_ssl_findings(text)
+    titles_lower = " ".join(f.title.lower() for f in out["findings"])
+    assert "expired" in titles_lower
+    assert any(f.severity in ("medium", "high") for f in out["findings"])
