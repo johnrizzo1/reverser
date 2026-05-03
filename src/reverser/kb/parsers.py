@@ -181,7 +181,7 @@ def parse_ldap_entries(text: str) -> dict:
         if m:
             flush()
             current_dn = m.group("dn")
-            if "OU=Domain Controllers" in current_dn:
+            if current_dn and "OU=Domain Controllers" in current_dn:
                 current_is_dc = True
             continue
         nc_m = _LDAP_NAMING_CTX_RE.match(raw)
