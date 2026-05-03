@@ -63,9 +63,6 @@ asyncio_mode = "auto"
 ```python
 """Shared pytest fixtures for the reverser test suite."""
 
-import os
-from pathlib import Path
-
 import pytest
 
 
