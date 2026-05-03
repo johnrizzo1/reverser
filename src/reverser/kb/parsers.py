@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .store import HostFact, ServiceFact, CredentialFact
+from .store import HostFact, ServiceFact, CredentialFact, FindingFact
 
 
 @dataclass
@@ -429,3 +429,50 @@ def parse_gobuster_paths(text: str) -> list[str]:
         if m:
             paths.append(m.group("path"))
     return paths
+
+
+_NIKTO_NOISE_PREFIXES = (
+    "Target IP",
+    "Target Hostname",
+    "Target Port",
+    "Start Time",
+    "End Time",
+    "Server:",
+    "requests:",
+    "No web server",
+)
+
+
+def _nikto_severity_for(line: str) -> str:
+    lower = line.lower()
+    if "cve-" in lower or "default credentials" in lower:
+        return "high" if "default credentials" in lower else "medium"
+    if "osvdb" in lower:
+        return "medium"
+    if "outdated" in lower or "vulnerable" in lower:
+        return "medium"
+    return "info"
+
+
+def parse_nikto_findings(text: str) -> list[FindingFact]:
+    """Convert nikto report `+ ...` lines into FindingFact entries.
+
+    Lines starting with ``+`` and not matching header/footer noise become
+    findings. Severity is bumped (medium/high) when the line mentions
+    OSVDB-, CVE-, default credentials, or outdated/vulnerable.
+    """
+    findings: list[FindingFact] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("+ "):
+            continue
+        body = line[2:].strip()
+        if any(body.startswith(p) for p in _NIKTO_NOISE_PREFIXES):
+            continue
+        title = body if len(body) <= 200 else body[:197] + "..."
+        findings.append(FindingFact(
+            title=title,
+            severity=_nikto_severity_for(body),
+            description=body,
+        ))
+    return findings

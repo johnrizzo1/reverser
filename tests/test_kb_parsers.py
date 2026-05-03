@@ -286,3 +286,31 @@ def test_parse_gobuster_with_status_filter():
     text = (FIXTURES / "gobuster" / "with_status_filter.txt").read_text()
     paths = parse_gobuster_paths(text)
     assert paths == ["/api", "/api/v1", "/dashboard"]
+
+
+from reverser.kb.parsers import parse_nikto_findings
+
+
+def test_parse_nikto_multiple():
+    text = (FIXTURES / "nikto" / "multiple_findings.txt").read_text()
+    findings = parse_nikto_findings(text)
+    assert len(findings) >= 5
+    titles = [f.title for f in findings]
+    assert all("Target IP" not in t for t in titles)
+    osvdb = [f for f in findings if "OSVDB" in f.title]
+    assert osvdb and all(f.severity in ("medium", "high") for f in osvdb)
+
+
+def test_parse_nikto_empty():
+    text = (FIXTURES / "nikto" / "empty.txt").read_text()
+    findings = parse_nikto_findings(text)
+    assert findings == []
+
+
+def test_parse_nikto_cve():
+    text = (FIXTURES / "nikto" / "cve_finding.txt").read_text()
+    findings = parse_nikto_findings(text)
+    cves = [f for f in findings if "CVE-" in f.title]
+    assert cves and cves[0].severity in ("medium", "high")
+    creds = [f for f in findings if "default credentials" in f.title.lower()]
+    assert creds and creds[0].severity in ("medium", "high")
