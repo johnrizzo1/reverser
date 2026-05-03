@@ -40,3 +40,13 @@ def test_nbtscan_writes_hosts_to_kb(tmp_targets_dir, monkeypatch):
     _call(net.nbtscan_scan, {"target": "10.10.10.5"})
     hosts = for_target("10.10.10.5").get_hosts()
     assert any(h.ip == "10.10.10.5" and h.hostname == "DC01" for h in hosts)
+
+
+def test_banner_grab_writes_service_to_kb(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    text = (FIXTURES / "banner" / "ssh_banner.txt").read_text()
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+
+    _call(net.banner_grab, {"target": "10.10.10.5", "port": 22})
+    services = for_target("10.10.10.5").get_services()
+    assert any(s.port == 22 and "OpenSSH" in (s.banner or "") for s in services)

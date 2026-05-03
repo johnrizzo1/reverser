@@ -551,6 +551,21 @@ async def banner_grab(args: dict) -> dict:
         cmd.append(f"nc -w 5 {target} {port}")
 
     result = run_cmd(cmd, timeout=10, max_output=8000)
+
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target, HostFact
+        from ..kb.parsers import parse_banner_first_line
+        kb = for_target(target)
+        svc = parse_banner_first_line(result["stdout"], host_ip=target, port=int(port))
+        if svc is not None:
+            kb.record_host(HostFact(ip=target))
+            kb.record_service(svc)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in banner_grab: %s", e)
+    # ───────────────────────────────────────────────────────────────────
+
     return cmd_result_to_tool_result(result)
 
 
