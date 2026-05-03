@@ -16,7 +16,7 @@ def require_pentest_auth() -> None:
     """
     if os.environ.get("REVERSER_PENTEST_AUTHORIZED") == "1":
         return
-    if os.path.exists(".reverser-authorized"):
+    if os.path.isfile(".reverser-authorized"):
         return
     raise AuthorizationError(
         "Pentest authorization required. "
