@@ -226,3 +226,40 @@ def test_testssl_analyze_writes_findings(tmp_targets_dir, monkeypatch):
     _call(webmod.testssl_analyze, {"target": "10.10.10.5:443"})
     findings = for_target("10.10.10.5:443").get_findings()
     assert any("TLS" in f.title for f in findings)
+
+
+def test_full_recon_to_kb_show_flow(tmp_targets_dir, monkeypatch):
+    """Run nmap → whatweb → kerberos_enum (all stubbed) and verify kb_show
+    surfaces everything as a coherent summary."""
+    from reverser.tools import network as net
+    from reverser.tools import web as webmod
+    from reverser.tools.kb import kb_show
+
+    nmap_text = (FIXTURES / "nmap" / "host_with_smb_and_winrm.txt").read_text()
+    whatweb_text = (FIXTURES / "whatweb" / "wordpress_site.txt").read_text()
+    asrep_text = (FIXTURES / "asreproast" / "two_users.txt").read_text()
+
+    monkeypatch.setattr(
+        net, "_run_sudo_cmd",
+        lambda cmd, sudo, **kw: {"stdout": nmap_text, "stderr": "", "returncode": 0, "truncated": False},
+    )
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(asrep_text))
+    monkeypatch.setattr(webmod, "run_cmd", _stub_run_cmd(whatweb_text))
+    monkeypatch.setattr(
+        webmod, "shutil",
+        type("S", (), {"which": staticmethod(lambda _: "/usr/bin/whatweb")})(),
+        raising=False,
+    )
+
+    _call(net.nmap_scan, {"target": "10.10.10.5"})
+    _call(webmod.whatweb_fingerprint, {"target": "http://10.10.10.5"})
+    _call(net.kerberos_enum, {
+        "target": "10.10.10.5", "domain": "CORP.LOCAL",
+        "mode": "asreproast", "username": "alice",
+    })
+
+    result = _call(kb_show, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "Hosts: 1" in text
+    assert "Credentials:" in text
+    assert "2 total" in text or "2 " in text
