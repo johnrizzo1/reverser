@@ -243,3 +243,34 @@ def parse_asreproast_hashes(text: str) -> list[CredentialFact]:
             source_context="asreproast",
         ))
     return creds
+
+
+_TGS_LINE_RE = re.compile(
+    r"^\$krb5tgs\$\d+\$\*(?P<user>[^$]+)\$(?P<domain>[^$]+)\$.*"
+)
+
+
+def parse_kerberoast_hashes(text: str) -> list[CredentialFact]:
+    """Extract TGS hashes from impacket GetUserSPNs output.
+
+    Each ``$krb5tgs$...`` line becomes a CredentialFact with
+    kerberos_ticket=<full hash>, status='untested', source_tool=
+    'kerberos_enum', source_context='kerberoast'.
+    """
+    creds: list[CredentialFact] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("$krb5tgs$"):
+            continue
+        m = _TGS_LINE_RE.match(line)
+        if not m:
+            continue
+        creds.append(CredentialFact(
+            username=m.group("user"),
+            domain=m.group("domain"),
+            kerberos_ticket=line,
+            status="untested",
+            source_tool="kerberos_enum",
+            source_context="kerberoast",
+        ))
+    return creds

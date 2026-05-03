@@ -149,3 +149,32 @@ def test_parse_asreproast_single_user_no_preauth():
     assert creds[0].username == "svc_backup"
     assert creds[0].kerberos_ticket
     assert creds[0].kerberos_ticket.startswith("$krb5asrep$")
+
+
+from reverser.kb.parsers import parse_kerberoast_hashes
+
+
+def test_parse_kerberoast_two_spns():
+    text = (FIXTURES / "kerberoast" / "two_spns.txt").read_text()
+    creds = parse_kerberoast_hashes(text)
+    assert len(creds) == 2
+    usernames = sorted(c.username for c in creds)
+    assert usernames == ["svc_sql", "svc_web"]
+    for c in creds:
+        assert c.kerberos_ticket and c.kerberos_ticket.startswith("$krb5tgs$")
+        assert c.status == "untested"
+        assert c.domain == "CORP.LOCAL"
+
+
+def test_parse_kerberoast_empty():
+    text = (FIXTURES / "kerberoast" / "empty.txt").read_text()
+    assert parse_kerberoast_hashes(text) == []
+
+
+def test_parse_kerberoast_sql_service():
+    text = (FIXTURES / "kerberoast" / "sql_service.txt").read_text()
+    creds = parse_kerberoast_hashes(text)
+    assert len(creds) == 1
+    assert creds[0].username == "svc_sql"
+    assert creds[0].kerberos_ticket
+    assert "MSSQLSvc" in creds[0].kerberos_ticket
