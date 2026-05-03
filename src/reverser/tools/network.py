@@ -813,6 +813,37 @@ async def smb_enum(args: dict) -> dict:
         if nmap_result.get("stderr") and nmap_result["returncode"] != 0:
             outputs.append(f"[stderr]: {nmap_result['stderr'][:500]}")
 
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target, HostFact
+        from ..kb.parsers import parse_smbclient_shares, parse_nmap_smb_scripts
+        kb = for_target(target)
+        kb.record_host(HostFact(ip=target))
+        joined = "\n\n".join(outputs)
+        smb_out = parse_smbclient_shares(joined)
+        if smb_out["host"].domain:
+            kb.record_host(HostFact(ip=target, domain=smb_out["host"].domain))
+        if smb_out["shares_note"]:
+            kb.record_note(smb_out["shares_note"])
+        nmap_out = parse_nmap_smb_scripts(joined)
+        if nmap_out["host"].ip == target or nmap_out["host"].ip == "":
+            merged = HostFact(
+                ip=target,
+                hostname=nmap_out["host"].hostname,
+                os=nmap_out["host"].os,
+                domain=nmap_out["host"].domain,
+                smb_signing=nmap_out["host"].smb_signing,
+            )
+            kb.record_host(merged)
+        for svc in nmap_out["services"]:
+            kb.record_service(svc)
+        if nmap_out["note"]:
+            kb.record_note(nmap_out["note"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in smb_enum: %s", e)
+    # ───────────────────────────────────────────────────────────────────
+
     return format_tool_result("\n\n".join(outputs))
 
 

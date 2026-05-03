@@ -119,3 +119,24 @@ def test_kerberos_enum_kerberoast_writes_creds(tmp_targets_dir, monkeypatch):
     creds = for_target("10.10.10.5").get_credentials()
     usernames = sorted(c.username for c in creds)
     assert "svc_sql" in usernames and "svc_web" in usernames
+
+
+def test_smb_enum_writes_host_signing_to_kb(tmp_targets_dir, monkeypatch):
+    from reverser.tools import network as net
+    smbclient_text = (FIXTURES / "smbclient_shares" / "auth_listing.txt").read_text()
+    nmap_text = (FIXTURES / "nmap_smb_scripts" / "dc01_full.txt").read_text()
+
+    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(smbclient_text))
+    monkeypatch.setattr(
+        net, "_run_sudo_cmd",
+        lambda cmd, sudo, **kw: {"stdout": nmap_text, "stderr": "", "returncode": 0, "truncated": False},
+    )
+
+    _call(net.smb_enum, {"target": "10.10.10.5", "mode": "all"})
+    kb = for_target("10.10.10.5")
+    hosts = kb.get_hosts()
+    target_host = next((h for h in hosts if h.ip == "10.10.10.5"), None)
+    assert target_host is not None
+    assert target_host.smb_signing == "required"
+    notes = kb.get_notes()
+    assert any("ADMIN" in n or "SCCM_Source" in n for n in notes)
