@@ -2,7 +2,7 @@
 
 from reverser.kb import (
     for_target, list_targets,
-    HostFact, ServiceFact, CredentialFact, FindingFact, ArtifactFact, CredResult,
+    HostFact, ServiceFact, CredentialFact, FindingFact, CredResult,
 )
 import reverser.kb
 
