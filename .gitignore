@@ -40,3 +40,13 @@ nix-re-tools.md
 
 # Git worktrees
 .worktrees/
+
+# Per-target engagement data (sensitive)
+targets/
+
+# SQLite WAL/SHM files
+*.db-wal
+*.db-shm
+
+# Python test artifacts
+.pytest_cache/
