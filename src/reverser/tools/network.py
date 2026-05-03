@@ -801,6 +801,19 @@ async def nbtscan_scan(args: dict) -> dict:
     cmd.append(target)
 
     result = run_cmd(cmd, timeout=60, max_output=16000)
+
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_nbtscan_output
+        kb = for_target(target)
+        for host in parse_nbtscan_output(result["stdout"]):
+            kb.record_host(host)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in nbtscan_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
+
     return cmd_result_to_tool_result(result)
 
 
