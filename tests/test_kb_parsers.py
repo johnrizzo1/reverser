@@ -263,3 +263,26 @@ def test_parse_whatweb_plain_apache():
     out = parse_whatweb_plugins(text, host_ip="10.10.10.7", port=80)
     assert "Apache" in out["note"]
     assert out["service"].version is None or "Apache" in out["service"].version
+
+
+from reverser.kb.parsers import parse_gobuster_paths
+
+
+def test_parse_gobuster_found():
+    text = (FIXTURES / "gobuster" / "found_paths.txt").read_text()
+    paths = parse_gobuster_paths(text)
+    assert "/admin" in paths
+    assert "/index.html" in paths
+    assert "/robots.txt" in paths
+    assert len(paths) == 5
+
+
+def test_parse_gobuster_empty():
+    text = (FIXTURES / "gobuster" / "empty.txt").read_text()
+    assert parse_gobuster_paths(text) == []
+
+
+def test_parse_gobuster_with_status_filter():
+    text = (FIXTURES / "gobuster" / "with_status_filter.txt").read_text()
+    paths = parse_gobuster_paths(text)
+    assert paths == ["/api", "/api/v1", "/dashboard"]

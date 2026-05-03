@@ -409,3 +409,23 @@ def parse_whatweb_plugins(text: str, host_ip: str, port: int) -> dict:
         ),
         "note": f"whatweb {host_ip}:{port}: {note}",
     }
+
+
+_GOBUSTER_LINE_RE = re.compile(
+    r"^(?P<path>/\S+)\s+\(Status:\s*\d+\)"
+)
+
+
+def parse_gobuster_paths(text: str) -> list[str]:
+    """Extract discovered paths from gobuster `dir` mode output.
+
+    Each ``/path  (Status: ...)`` line yields the path. Returns an
+    empty list if no paths were found (or the run was aborted before
+    enumeration began).
+    """
+    paths: list[str] = []
+    for raw in text.splitlines():
+        m = _GOBUSTER_LINE_RE.match(raw)
+        if m:
+            paths.append(m.group("path"))
+    return paths
