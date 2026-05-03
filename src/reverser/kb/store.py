@@ -307,3 +307,31 @@ class KB:
                 )
                 for r in cursor.fetchall()
             ]
+
+    def record_cred_result(self, cred_id: int, result: CredResult) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO cred_results "
+                "(cred_id, service_kind, target_host, success, error_msg, attempted_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    cred_id, result.service_kind, result.target_host,
+                    int(result.success), result.error_msg, _now_iso(),
+                ),
+            )
+            conn.commit()
+
+    def get_cred_results(self, cred_id: int) -> list[CredResult]:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT service_kind, target_host, success, error_msg "
+                "FROM cred_results WHERE cred_id = ? ORDER BY attempted_at",
+                (cred_id,),
+            )
+            return [
+                CredResult(
+                    service_kind=r[0], target_host=r[1],
+                    success=bool(r[2]), error_msg=r[3],
+                )
+                for r in cursor.fetchall()
+            ]

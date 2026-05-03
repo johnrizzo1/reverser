@@ -2,7 +2,7 @@
 
 import pytest
 
-from reverser.kb.store import HostFact, ServiceFact, CredentialFact, FindingFact
+from reverser.kb.store import HostFact, ServiceFact, CredentialFact, FindingFact, CredResult
 
 
 def test_host_fact_minimal():
@@ -228,3 +228,24 @@ def test_credential_hash_distinct_from_password(tmp_targets_dir):
     kb.record_credential(CredentialFact(username="jdoe", password="x"))
     kb.record_credential(CredentialFact(username="jdoe", nt_hash="aad3..."))
     assert len(kb.get_credentials()) == 2
+
+
+def test_record_cred_result(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    cred_id = kb.record_credential(CredentialFact(username="jdoe", password="x", status="valid"))
+    kb.record_cred_result(cred_id, CredResult(
+        service_kind="smb", target_host="10.10.10.5", success=True,
+    ))
+    results = kb.get_cred_results(cred_id)
+    assert len(results) == 1
+    assert results[0].service_kind == "smb"
+    assert results[0].success is True
+
+
+def test_get_cred_results_for_cred(tmp_targets_dir):
+    kb = KB("10.10.10.5")
+    cid = kb.record_credential(CredentialFact(username="jdoe", password="x"))
+    kb.record_cred_result(cid, CredResult(service_kind="smb", target_host="10.10.10.5", success=True))
+    kb.record_cred_result(cid, CredResult(service_kind="winrm", target_host="10.10.10.5", success=False, error_msg="STATUS_LOGON_FAILURE"))
+    results = kb.get_cred_results(cid)
+    assert len(results) == 2
