@@ -274,3 +274,55 @@ def parse_kerberoast_hashes(text: str) -> list[CredentialFact]:
             source_context="kerberoast",
         ))
     return creds
+
+
+_SMBCLIENT_SHARE_RE = re.compile(
+    r"^\s*(?P<name>\S+)\s+(?P<type>Disk|IPC|Printer)\s*(?P<comment>.*)$"
+)
+_SMBCLIENT_WORKGROUP_RE = re.compile(r"^\s*(?P<wg>\S+)\s+(?P<master>\S+)\s*$")
+
+
+def parse_smbclient_shares(text: str) -> dict:
+    """Parse `smbclient -L` output into host info + a shares note.
+
+    Returns ``{"host": HostFact, "shares_note": str}``. The HostFact has
+    ip="" (the retrofit caller fills it from the target arg) and may
+    carry a domain hint extracted from the workgroup table.
+    Failures (NT_STATUS_*) become a single-line shares_note.
+    """
+    if "NT_STATUS_" in text:
+        m = re.search(r"NT_STATUS_[A-Z_]+", text)
+        return {
+            "host": HostFact(ip=""),
+            "shares_note": f"smbclient failed: {m.group(0) if m else 'unknown error'}",
+        }
+
+    shares: list[str] = []
+    domain: str | None = None
+    in_workgroup_table = False
+    for raw in text.splitlines():
+        if "Workgroup" in raw and "Master" in raw:
+            in_workgroup_table = True
+            continue
+        if in_workgroup_table:
+            wg = _SMBCLIENT_WORKGROUP_RE.match(raw)
+            if wg and wg.group("wg") not in ("---------",):
+                domain = wg.group("wg")
+                in_workgroup_table = False
+            continue
+        m = _SMBCLIENT_SHARE_RE.match(raw)
+        if m and m.group("name") not in ("Sharename",):
+            shares.append(f"{m.group('name')} ({m.group('type')})")
+
+    note_parts = []
+    if shares:
+        note_parts.append("smbclient shares: " + ", ".join(shares))
+    if domain:
+        note_parts.append(f"workgroup/domain: {domain}")
+    if not note_parts:
+        note_parts.append("smbclient produced no parsable shares")
+
+    return {
+        "host": HostFact(ip="", domain=domain),
+        "shares_note": "\n".join(note_parts),
+    }

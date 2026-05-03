@@ -178,3 +178,30 @@ def test_parse_kerberoast_sql_service():
     assert creds[0].username == "svc_sql"
     assert creds[0].kerberos_ticket
     assert "MSSQLSvc" in creds[0].kerberos_ticket
+
+
+from reverser.kb.parsers import parse_smbclient_shares
+
+
+def test_parse_smbclient_anonymous():
+    text = (FIXTURES / "smbclient_shares" / "anonymous_listing.txt").read_text()
+    out = parse_smbclient_shares(text)
+    assert "host" in out and "shares_note" in out
+    assert "ADMIN$" in out["shares_note"]
+    assert "IPC$" in out["shares_note"]
+    assert out["host"].smb_signing in (None, "disabled", "enabled", "required")
+
+
+def test_parse_smbclient_access_denied():
+    text = (FIXTURES / "smbclient_shares" / "access_denied.txt").read_text()
+    out = parse_smbclient_shares(text)
+    assert out["shares_note"]
+    assert "ACCESS_DENIED" in out["shares_note"]
+
+
+def test_parse_smbclient_auth_listing():
+    text = (FIXTURES / "smbclient_shares" / "auth_listing.txt").read_text()
+    out = parse_smbclient_shares(text)
+    assert "Backups" in out["shares_note"]
+    assert "SCCM_Source" in out["shares_note"]
+    assert out["host"].domain == "CORP" or "CORP" in out["shares_note"]

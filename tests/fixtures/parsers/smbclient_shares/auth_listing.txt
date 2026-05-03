@@ -1,0 +1,16 @@
+Sharename       Type      Comment
+---------       ----      -------
+ADMIN$          Disk      Remote Admin
+C$              Disk      Default share
+IPC$            IPC       Remote IPC
+NETLOGON        Disk      Logon server share
+SYSVOL          Disk      Logon server share
+Backups         Disk      Daily backups
+SCCM_Source     Disk      Software deployment source
+
+	Server               Comment
+	---------            -------
+
+	Workgroup            Master
+	---------            -------
+	CORP                 DC01
