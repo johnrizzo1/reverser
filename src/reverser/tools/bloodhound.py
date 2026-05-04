@@ -1009,3 +1009,69 @@ async def bloodhound_query(args: dict) -> dict:
         f"Rows returned: {len(records)}\n\n"
         f"{_records_to_text(records)}"
     )
+
+
+@tool(
+    "bloodhound_canned",
+    "Run one of the 15 pre-canned BloodHound cypher queries against the per-target Neo4j. "
+    "Some queries take parameters (e.g. owned_to_high_value needs $username). "
+    "Available queries: " + ", ".join(sorted(CANNED_QUERIES.keys())),
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Target identifier"},
+            "query_name": {
+                "type": "string",
+                "description": "Canned query name (see tool description)",
+                "enum": sorted(CANNED_QUERIES.keys()),
+            },
+            "params": {
+                "type": "object",
+                "description": "Optional parameters dict for $name placeholders in the cypher",
+                "default": {},
+            },
+        },
+        "required": ["target", "query_name"],
+    },
+)
+async def bloodhound_canned(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    target_input = args["target"]
+    name = args["query_name"]
+    params = args.get("params") or {}
+
+    cypher = CANNED_QUERIES.get(name)
+    if cypher is None:
+        return format_error(
+            f"Unknown canned query: {name!r}. "
+            f"Available: {', '.join(sorted(CANNED_QUERIES.keys()))}"
+        )
+
+    kb = for_target(target_input)
+    target = kb.target_id
+    try:
+        driver = _get_neo4j_driver(target)
+    except RuntimeError as e:
+        return format_error(f"Could not open Neo4j driver: {e}")
+    try:
+        with driver.session() as session:
+            try:
+                records = list(session.run(cypher, params))
+            except Exception as e:
+                return format_error(f"Canned query {name!r} failed: {e}")
+    finally:
+        try:
+            driver.close()
+        except Exception:
+            pass
+
+    return format_tool_result(
+        f"Canned query: {name}\n"
+        f"Params: {params or '(none)'}\n"
+        f"Rows: {len(records)}\n\n"
+        f"{_records_to_text(records)}"
+    )

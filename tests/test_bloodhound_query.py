@@ -162,3 +162,64 @@ def test_bloodhound_query_allow_writes_passes(tmp_targets_dir, monkeypatch):
             "allow_writes": True,
         })
     assert result.get("is_error") is not True
+
+
+def test_bloodhound_canned_requires_auth(tmp_targets_dir, monkeypatch):
+    monkeypatch.delenv("REVERSER_PENTEST_AUTHORIZED", raising=False)
+    monkeypatch.chdir(tmp_targets_dir)
+    from reverser.tools.bloodhound import bloodhound_canned
+    result = _call(bloodhound_canned, {"target": "10.10.10.5", "query_name": "domain_admins"})
+    assert result.get("is_error") is True
+
+
+def test_bloodhound_canned_unknown_name(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.bloodhound import bloodhound_canned
+    result = _call(bloodhound_canned, {"target": "10.10.10.5", "query_name": "no_such_query"})
+    assert result.get("is_error") is True
+    assert "no_such_query" in result["content"][0]["text"]
+    assert "domain_admins" in result["content"][0]["text"]
+
+
+@pytest.mark.parametrize("name", EXPECTED_QUERY_NAMES)
+def test_bloodhound_canned_runs_each(name, tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    fake_session = MagicMock()
+    fake_session.run.return_value = []
+    fake_session.__enter__ = lambda s: s
+    fake_session.__exit__ = lambda *a: None
+    fake_driver = MagicMock()
+    fake_driver.session.return_value = fake_session
+    params = {}
+    if name in ("computers_where_user_admin", "owned_to_high_value"):
+        params = {"username": "jdoe@CORP.LOCAL"}
+    if name == "sessions_on_target":
+        params = {"computer": "WS01@CORP.LOCAL"}
+    with patch("reverser.tools.bloodhound._get_neo4j_driver", return_value=fake_driver):
+        from reverser.tools.bloodhound import bloodhound_canned
+        result = _call(bloodhound_canned, {
+            "target": "10.10.10.5",
+            "query_name": name,
+            "params": params,
+        })
+    assert result.get("is_error") is not True, f"{name}: {result['content'][0]['text']}"
+    fake_session.run.assert_called_once()
+
+
+def test_bloodhound_canned_passes_params(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    fake_session = MagicMock()
+    fake_session.run.return_value = []
+    fake_session.__enter__ = lambda s: s
+    fake_session.__exit__ = lambda *a: None
+    fake_driver = MagicMock()
+    fake_driver.session.return_value = fake_session
+    with patch("reverser.tools.bloodhound._get_neo4j_driver", return_value=fake_driver):
+        from reverser.tools.bloodhound import bloodhound_canned
+        _call(bloodhound_canned, {
+            "target": "10.10.10.5",
+            "query_name": "owned_to_high_value",
+            "params": {"username": "jdoe@CORP.LOCAL"},
+        })
+    call = fake_session.run.call_args
+    assert {"username": "jdoe@CORP.LOCAL"} in call.args or call.kwargs.get("parameters") == {"username": "jdoe@CORP.LOCAL"}
