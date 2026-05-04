@@ -1075,3 +1075,15 @@ async def bloodhound_canned(args: dict) -> dict:
         f"Rows: {len(records)}\n\n"
         f"{_records_to_text(records)}"
     )
+
+
+# ── Module-level tool registry ──────────────────────────────────────
+
+TOOLS = [
+    bloodhound_start,
+    bloodhound_stop,
+    bloodhound_status,
+    bloodhound_collect,
+    bloodhound_canned,
+    bloodhound_query,
+]
