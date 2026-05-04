@@ -9,6 +9,7 @@ double-start.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
@@ -16,6 +17,7 @@ import signal
 import socket
 import subprocess
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -661,3 +663,95 @@ async def bloodhound_status(args: dict) -> dict:
     else:
         lines.append("  Last collection: <never> (run bloodhound_collect)")
     return format_tool_result("\n".join(lines))
+
+
+# ── BloodHound JSON zip import ──────────────────────────────────────
+
+_CYPHER_BY_KIND: dict[str, str] = {
+    "users": """
+        MERGE (u:User {objectid: $oid})
+        SET u += $props
+    """.strip(),
+    "computers": """
+        MERGE (c:Computer {objectid: $oid})
+        SET c += $props
+    """.strip(),
+    "groups": """
+        MERGE (g:Group {objectid: $oid})
+        SET g += $props
+    """.strip(),
+    "ous": """
+        MERGE (o:OU {objectid: $oid})
+        SET o += $props
+    """.strip(),
+    "gpos": """
+        MERGE (g:GPO {objectid: $oid})
+        SET g += $props
+    """.strip(),
+    "domains": """
+        MERGE (d:Domain {objectid: $oid})
+        SET d += $props
+    """.strip(),
+}
+
+
+def _classify_bloodhound_json_file(filename: str) -> str | None:
+    """Map a bloodhound-python output filename to a kind key."""
+    base = os.path.basename(filename).lower()
+    if not base.endswith(".json"):
+        return None
+    stem = base[:-5]
+    for kind in ("users", "computers", "groups", "ous", "gpos", "domains"):
+        if stem == kind or stem.endswith(f"_{kind}"):
+            return kind
+    return None
+
+
+def _flatten_props(props: dict | None) -> dict:
+    """Flatten a BloodHound Properties dict into Neo4j-safe scalar/list types."""
+    if not isinstance(props, dict):
+        return {}
+    out = {}
+    for k, v in props.items():
+        if v is None:
+            continue
+        if isinstance(v, (str, int, float, bool)):
+            out[k] = v
+        elif isinstance(v, list):
+            if all(isinstance(x, (str, int, float, bool)) for x in v):
+                out[k] = v
+    return out
+
+
+def _import_bloodhound_zip(driver, zip_path: Path) -> dict[str, int]:
+    """Import a bloodhound-python output zip via the bolt driver."""
+    counts: dict[str, int] = {}
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        with driver.session() as session:
+            for member in zf.namelist():
+                kind = _classify_bloodhound_json_file(member)
+                if kind is None:
+                    continue
+                cypher = _CYPHER_BY_KIND[kind]
+                try:
+                    raw = zf.read(member).decode("utf-8")
+                    payload = json.loads(raw)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    counts.setdefault(kind, 0)
+                    continue
+                rows = payload.get("data", []) if isinstance(payload, dict) else []
+                imported = 0
+                for entry in rows:
+                    if not isinstance(entry, dict):
+                        continue
+                    oid = entry.get("ObjectIdentifier")
+                    if not oid:
+                        continue
+                    props = _flatten_props(entry.get("Properties"))
+                    try:
+                        session.run(cypher, {"oid": oid, "props": props})
+                        imported += 1
+                    except Exception:
+                        continue
+                counts[kind] = counts.get(kind, 0) + imported
+    return counts
