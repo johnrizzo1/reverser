@@ -72,3 +72,93 @@ def test_detect_writes_is_naive_about_strings():
     """Naive regex catches the literal word 'CREATE' inside a string. Documented behavior."""
     cypher = 'MATCH (n) WHERE n.note = "CREATE" RETURN n'
     assert _detect_writes(cypher) is True
+
+
+import asyncio
+from unittest.mock import patch, MagicMock
+
+
+def _call(tool_obj, args):
+    fn = getattr(tool_obj, "handler", None) or getattr(tool_obj, "fn", None) or tool_obj
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(fn(args))
+    finally:
+        loop.close()
+
+
+def test_bloodhound_query_requires_auth(tmp_targets_dir, monkeypatch):
+    monkeypatch.delenv("REVERSER_PENTEST_AUTHORIZED", raising=False)
+    monkeypatch.chdir(tmp_targets_dir)
+    from reverser.tools.bloodhound import bloodhound_query
+    result = _call(bloodhound_query, {"target": "10.10.10.5", "cypher": "MATCH (n) RETURN n"})
+    assert result.get("is_error") is True
+
+
+def test_bloodhound_query_rejects_writes_by_default(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.bloodhound import bloodhound_query
+    result = _call(bloodhound_query, {
+        "target": "10.10.10.5",
+        "cypher": "CREATE (n:Bogus)",
+    })
+    assert result.get("is_error") is True
+    assert "allow_writes" in result["content"][0]["text"]
+
+
+def test_bloodhound_query_runs_read(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    fake_session = MagicMock()
+    fake_record = MagicMock()
+    fake_record.data.return_value = {"name": "Alice"}
+    fake_session.run.return_value = [fake_record]
+    fake_session.__enter__ = lambda s: s
+    fake_session.__exit__ = lambda *a: None
+    fake_driver = MagicMock()
+    fake_driver.session.return_value = fake_session
+    with patch("reverser.tools.bloodhound._get_neo4j_driver", return_value=fake_driver):
+        from reverser.tools.bloodhound import bloodhound_query
+        result = _call(bloodhound_query, {
+            "target": "10.10.10.5",
+            "cypher": "MATCH (u:User) RETURN u.name AS name",
+        })
+    assert result.get("is_error") is not True
+    assert "Alice" in result["content"][0]["text"]
+
+
+def test_bloodhound_query_passes_params(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    fake_session = MagicMock()
+    fake_session.run.return_value = []
+    fake_session.__enter__ = lambda s: s
+    fake_session.__exit__ = lambda *a: None
+    fake_driver = MagicMock()
+    fake_driver.session.return_value = fake_session
+    with patch("reverser.tools.bloodhound._get_neo4j_driver", return_value=fake_driver):
+        from reverser.tools.bloodhound import bloodhound_query
+        _call(bloodhound_query, {
+            "target": "10.10.10.5",
+            "cypher": "MATCH (u:User {name: $name}) RETURN u",
+            "params": {"name": "jdoe"},
+        })
+    fake_session.run.assert_called_once()
+    call_args = fake_session.run.call_args
+    assert {"name": "jdoe"} in call_args.args or call_args.kwargs.get("parameters") == {"name": "jdoe"}
+
+
+def test_bloodhound_query_allow_writes_passes(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    fake_session = MagicMock()
+    fake_session.run.return_value = []
+    fake_session.__enter__ = lambda s: s
+    fake_session.__exit__ = lambda *a: None
+    fake_driver = MagicMock()
+    fake_driver.session.return_value = fake_session
+    with patch("reverser.tools.bloodhound._get_neo4j_driver", return_value=fake_driver):
+        from reverser.tools.bloodhound import bloodhound_query
+        result = _call(bloodhound_query, {
+            "target": "10.10.10.5",
+            "cypher": "CREATE (n:_Test)",
+            "allow_writes": True,
+        })
+    assert result.get("is_error") is not True

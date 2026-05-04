@@ -902,3 +902,110 @@ async def bloodhound_collect(args: dict) -> dict:
     except Exception:
         pass
     return format_tool_result("\n".join(summary_lines))
+
+
+# ── Formatting helpers for cypher result tables ─────────────────────
+
+def _records_to_text(records: list, max_rows: int = 50) -> str:
+    """Render a list of neo4j Record/dict-like objects as a simple table."""
+    if not records:
+        return "(no rows)"
+    rows = []
+    for r in records:
+        try:
+            rows.append(r.data())
+        except AttributeError:
+            try:
+                rows.append(dict(r))
+            except (TypeError, ValueError):
+                rows.append({"_": str(r)})
+    if not rows:
+        return "(no rows)"
+
+    keys: list[str] = []
+    for row in rows:
+        for k in row.keys():
+            if k not in keys:
+                keys.append(k)
+
+    truncated = False
+    if len(rows) > max_rows:
+        rows = rows[:max_rows]
+        truncated = True
+
+    header = " | ".join(keys)
+    sep = "-+-".join("-" * len(k) for k in keys)
+    lines = [header, sep]
+    for row in rows:
+        lines.append(" | ".join(str(row.get(k, "")) for k in keys))
+    if truncated:
+        lines.append(f"... ({len(records) - max_rows} more row(s) elided)")
+    return "\n".join(lines)
+
+
+@tool(
+    "bloodhound_query",
+    "Run a free-form cypher query against the per-target Neo4j. Read-only by default; "
+    "writes (CREATE/MERGE/DELETE/SET/REMOVE) require allow_writes=True.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Target identifier"},
+            "cypher": {"type": "string", "description": "Cypher query"},
+            "params": {
+                "type": "object",
+                "description": "Optional parameters dict for $name placeholders",
+                "default": {},
+            },
+            "allow_writes": {
+                "type": "boolean",
+                "description": "Permit write keywords (CREATE/MERGE/DELETE/SET/REMOVE). Default false.",
+                "default": False,
+            },
+        },
+        "required": ["target", "cypher"],
+    },
+)
+async def bloodhound_query(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    target_input = args["target"]
+    cypher = args["cypher"]
+    params = args.get("params") or {}
+    allow_writes = bool(args.get("allow_writes", False))
+
+    if not allow_writes and _detect_writes(cypher):
+        return format_error(
+            "Cypher contains a write keyword (CREATE/MERGE/DELETE/SET/REMOVE/DROP/CALL apoc.create...). "
+            "Pass `allow_writes=true` to permit. Note: this is intentionally over-broad — even "
+            "string literals containing these words will trip it."
+        )
+
+    kb = for_target(target_input)
+    target = kb.target_id
+    try:
+        driver = _get_neo4j_driver(target)
+    except RuntimeError as e:
+        return format_error(f"Could not open Neo4j driver: {e}")
+
+    try:
+        with driver.session() as session:
+            try:
+                result = session.run(cypher, params)
+                records = list(result)
+            except Exception as e:
+                return format_error(f"Cypher query failed: {e}")
+    finally:
+        try:
+            driver.close()
+        except Exception:
+            pass
+
+    return format_tool_result(
+        f"Query: {cypher.strip()[:200]}\n"
+        f"Rows returned: {len(records)}\n\n"
+        f"{_records_to_text(records)}"
+    )
