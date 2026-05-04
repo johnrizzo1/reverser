@@ -427,3 +427,77 @@ async def bloodhound_start(args: dict) -> dict:
         f"  Password file: {_password_file(target)}\n"
         f"\nNext: run bloodhound_collect to populate the graph."
     )
+
+
+# ── Neo4j shutdown ──────────────────────────────────────────────────
+
+def _kill_process_group(pid: int, timeout: float = 15.0) -> bool:
+    """Send SIGTERM to the process group of `pid`, waiting up to `timeout` for exit."""
+    if not _process_alive(pid):
+        return True
+    try:
+        pgid = os.getpgid(pid)
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            return not _process_alive(pid)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _process_alive(pid):
+            return True
+        time.sleep(0.5)
+
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    time.sleep(0.5)
+    return not _process_alive(pid)
+
+
+@tool(
+    "bloodhound_stop",
+    "Stop the Neo4j process for the given target. Data persists on disk.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Target identifier"},
+        },
+        "required": ["target"],
+    },
+)
+async def bloodhound_stop(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    target_input = args["target"]
+    kb = for_target(target_input)
+    target = kb.target_id
+    pid = _read_pid(target)
+    if pid is None:
+        return format_tool_result(f"Neo4j is not running for target {target} (no PID file).")
+
+    if not _process_alive(pid):
+        _clear_pid(target)
+        return format_tool_result(
+            f"Neo4j was not actually running for target {target} (stale PID {pid} cleared)."
+        )
+
+    success = _kill_process_group(pid)
+    _clear_pid(target)
+    if success:
+        return format_tool_result(
+            f"Neo4j stopped for target {target} (PID {pid} terminated). Data preserved at {_neo4j_dir(target)}."
+        )
+    return format_error(
+        f"Sent SIGTERM/SIGKILL to PID {pid} but the process appears to still be alive. "
+        f"Investigate manually."
+    )

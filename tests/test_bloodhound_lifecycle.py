@@ -129,3 +129,33 @@ def test_bloodhound_start_refuses_when_other_target_uses_port(tmp_targets_dir, m
         assert result.get("is_error") is True
         assert "7687" in result["content"][0]["text"]
         assert "another" in result["content"][0]["text"].lower() or "different" in result["content"][0]["text"].lower()
+
+
+def test_bloodhound_stop_requires_auth(tmp_targets_dir, monkeypatch):
+    monkeypatch.delenv("REVERSER_PENTEST_AUTHORIZED", raising=False)
+    monkeypatch.chdir(tmp_targets_dir)
+    from reverser.tools.bloodhound import bloodhound_stop
+    result = _call(bloodhound_stop, {"target": "10.10.10.5"})
+    assert result.get("is_error") is True
+
+
+def test_bloodhound_stop_no_pid_returns_message(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.bloodhound import bloodhound_stop
+    result = _call(bloodhound_stop, {"target": "10.10.10.5"})
+    assert result.get("is_error") is not True
+    assert "not running" in result["content"][0]["text"].lower()
+
+
+def test_bloodhound_stop_kills_pid_and_clears_pidfile(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    _write_pid("10.10.10.5", 12345)
+    with patch("reverser.tools.bloodhound._kill_process_group") as mock_kill, \
+         patch("reverser.tools.bloodhound._process_alive", return_value=True):
+        mock_kill.return_value = True
+        from reverser.tools.bloodhound import bloodhound_stop, _read_pid
+        result = _call(bloodhound_stop, {"target": "10.10.10.5"})
+        assert result.get("is_error") is not True
+        mock_kill.assert_called_once_with(12345)
+        assert _read_pid("10.10.10.5") is None
