@@ -18,6 +18,7 @@ from .store import (
     normalize_target,
 )
 from .authz import require_pentest_auth, AuthorizationError
+from .scope import Scope, ScopeError, load_scope
 
 __all__ = [
     "for_target",
@@ -32,6 +33,9 @@ __all__ = [
     "require_pentest_auth",
     "AuthorizationError",
     "normalize_target",
+    "Scope",
+    "ScopeError",
+    "load_scope",
 ]
 
 

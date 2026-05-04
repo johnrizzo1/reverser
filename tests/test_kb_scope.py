@@ -175,3 +175,11 @@ def test_load_scope_normalizes_target_id(tmp_targets_dir):
     )
     scope = load_scope("  10.10.10.5  ")
     assert scope is not None
+
+
+def test_scope_re_exported_from_package():
+    """Public API: `from reverser.kb import load_scope, Scope, ScopeError`."""
+    from reverser.kb import load_scope, Scope, ScopeError
+    assert callable(load_scope)
+    assert isinstance(Scope(), Scope)
+    assert issubclass(ScopeError, RuntimeError)
