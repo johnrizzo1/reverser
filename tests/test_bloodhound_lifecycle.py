@@ -159,3 +159,51 @@ def test_bloodhound_stop_kills_pid_and_clears_pidfile(tmp_targets_dir, monkeypat
         assert result.get("is_error") is not True
         mock_kill.assert_called_once_with(12345)
         assert _read_pid("10.10.10.5") is None
+
+
+def test_bloodhound_status_no_target_lists_known(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    (tmp_targets_dir / "10.10.10.6" / "neo4j").mkdir(parents=True)
+    (tmp_targets_dir / "junk").mkdir()
+    from reverser.tools.bloodhound import bloodhound_status
+    result = _call(bloodhound_status, {})
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "10.10.10.5" in text
+    assert "10.10.10.6" in text
+    assert "junk" not in text
+
+
+def test_bloodhound_status_with_target_no_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    from reverser.tools.bloodhound import bloodhound_status
+    result = _call(bloodhound_status, {"target": "10.10.10.5"})
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "not running" in text.lower() or "stopped" in text.lower()
+
+
+def test_bloodhound_status_with_target_running_queries_counts(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    _write_pid("10.10.10.5", os.getpid())
+    from reverser.tools.bloodhound import _ensure_bolt_password
+    _ensure_bolt_password("10.10.10.5")
+
+    fake_session = MagicMock()
+    fake_session.run.return_value = [{"count": 7}]
+    fake_session.__enter__ = lambda s: s
+    fake_session.__exit__ = lambda *a: None
+    fake_driver = MagicMock()
+    fake_driver.session.return_value = fake_session
+    fake_driver.close = MagicMock()
+    with patch("reverser.tools.bloodhound._get_neo4j_driver", return_value=fake_driver):
+        from reverser.tools.bloodhound import bloodhound_status
+        result = _call(bloodhound_status, {"target": "10.10.10.5"})
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "Users" in text
+    assert "Computers" in text
+    assert "7" in text
