@@ -109,3 +109,141 @@ sqlite3 targets/<BOX_IP>/state.db "SELECT kind, path FROM artifacts"
 
 For HTB Forest, you should see at least `svc-alfresco`. For Sauna, `fsmith` (after manual user
 discovery from the website).
+
+---
+
+## Step 5 — Crack the AS-REP hashes (manual; outside the agent)
+
+This step is OUT OF SCOPE for the LLM. Drop to your own shell.
+
+```sh
+hashcat -m 18200 targets/<BOX_IP>/loot/asreproast_hashes.txt /usr/share/wordlists/rockyou.txt
+```
+
+Expected: at least one hash cracks (HTB Forest: `svc-alfresco:s3rvice`).
+
+After cracking, manually record the cleartext into the KB so subsequent steps see it:
+
+```sh
+sqlite3 targets/<BOX_IP>/state.db <<SQL
+UPDATE credentials
+SET password = 's3rvice', status = 'untested'
+WHERE username = 'svc-alfresco' AND kerberos_ticket IS NOT NULL;
+SQL
+```
+
+(In a future plan we will surface a `kb_set_password` helper. For now, this manual
+update is the smoke-test compromise.)
+
+KB state after:
+- `kb_list_creds` shows the cracked cred with `password` set and `status='untested'`.
+
+---
+
+## Step 6 — Validate the cracked cred against SMB
+
+Trigger: tell the LLM "We cracked `svc-alfresco:s3rvice` — validate it everywhere."
+
+Expected tool call:
+- `netexec_smb` action=`check_auth` username=`svc-alfresco` password=`s3rvice` on the box IP.
+- Followed by `netexec_winrm`, `netexec_ldap` check_auth in parallel.
+
+KB state after:
+- `credentials.status = 'valid'` for `svc-alfresco`.
+- `cred_results` has at least one row with `success=1` for the working service.
+
+Verification:
+```sh
+sqlite3 targets/<BOX_IP>/state.db \
+  "SELECT c.username, cr.service_kind, cr.target_host, cr.success
+   FROM credentials c JOIN cred_results cr ON c.id = cr.cred_id"
+```
+
+---
+
+## Step 7 — Start BloodHound and collect
+
+Trigger: F1 → "Collect BloodHound".
+
+Expected tool calls (sequential):
+- `bloodhound_start(target=<BOX_IP>)` — spins up Neo4j on bolt port 7687 with data dir
+  at `targets/<BOX_IP>/neo4j/`.
+- `bloodhound_collect(target=<BOX_IP>, domain=<DOMAIN>, dc_ip=<BOX_IP>,
+   username='svc-alfresco', password='s3rvice', collection_methods='Default,LoggedOn')`
+- `bloodhound_status(target=<BOX_IP>)` — reports node counts.
+
+Expected output of `bloodhound_status`:
+- Users: ≥10
+- Computers: ≥1
+- Groups: ≥10
+- OUs: ≥1
+
+KB state after:
+- `targets/<BOX_IP>/neo4j/` directory populated with a `data/` subdir.
+- A note in the `notes` table recording the imported counts.
+
+Verification:
+```sh
+ls targets/<BOX_IP>/neo4j/data/
+sqlite3 targets/<BOX_IP>/state.db "SELECT body FROM notes ORDER BY id DESC LIMIT 1"
+```
+
+---
+
+## Step 8 — Find the shortest path to Domain Admin
+
+Trigger: F1 → "Find attack paths".
+
+Expected tool calls:
+- `bloodhound_canned(target=<BOX_IP>, query_name='shortest_path_to_da')`
+- `bloodhound_canned(target=<BOX_IP>, query_name='owned_to_high_value', params={'username': 'SVC-ALFRESCO@<DOMAIN>'})`
+- `bloodhound_canned(target=<BOX_IP>, query_name='kerberoastable_users')`
+
+For HTB Forest, the canned `shortest_path_to_da` query should reveal the
+`Account Operators → Exchange Windows Permissions → DCSync` path.
+
+KB state after:
+- A `notes` entry recording the discovered path (LLM should call `kb_add_note` with the result).
+
+Verification:
+```sh
+sqlite3 targets/<BOX_IP>/state.db "SELECT body FROM notes WHERE body LIKE '%path%' OR body LIKE '%DCSync%'"
+```
+
+---
+
+## Step 9 — Validate via LDAP from the same cred
+
+Trigger: tell the LLM "Confirm the cred works against LDAP and dump the user list."
+
+Expected tool calls:
+- `netexec_ldap` action=`check_auth`, then action=`users` (or action=`active_users`).
+
+KB state after:
+- `cred_results` has a `service_kind='ldap'` row with `success=1`.
+- New host rows are recorded for any computers discovered via LDAP enumeration.
+
+---
+
+## Step 10 — (HTB Forest specific) Dump NTDS via DCSync
+
+This step depends on the box. If your chosen box does not have a DCSync path from the
+foothold cred, skip and document why.
+
+Trigger: tell the LLM "We have DCSync rights — dump NTDS."
+
+Expected tool call:
+- `netexec_smb` action=`ntds` username=… password=… on the DC IP.
+
+KB state after:
+- An `artifacts` row with `kind='ntds_dump'` pointing at a file under
+  `targets/<BOX_IP>/loot/`.
+- Per-extracted credential rows in `credentials` with `nt_hash` populated and
+  `status='untested'`.
+
+Verification:
+```sh
+sqlite3 targets/<BOX_IP>/state.db "SELECT kind, path FROM artifacts WHERE kind = 'ntds_dump'"
+sqlite3 targets/<BOX_IP>/state.db \
+  "SELECT username, substr(nt_hash, 1, 12) FROM credentials WHERE nt_hash IS NOT NULL LIMIT 10"
+```
