@@ -1,6 +1,8 @@
 """Tests for bloodhound lifecycle helpers (PID tracking, bolt password, port-collision)."""
 
+import os
 import socket
+from unittest.mock import patch, MagicMock
 
 from reverser.tools.bloodhound import (
     _neo4j_dir,
@@ -13,6 +15,16 @@ from reverser.tools.bloodhound import (
     _is_port_in_use,
     _BOLT_PORT,
 )
+
+
+def _call(tool_obj, args):
+    fn = getattr(tool_obj, "handler", None) or getattr(tool_obj, "fn", None) or tool_obj
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(fn(args))
+    finally:
+        loop.close()
 
 
 def test_neo4j_dir_under_target(tmp_targets_dir):
@@ -73,3 +85,47 @@ def test_is_port_in_use_true_when_bound():
 
 def test_bolt_port_default():
     assert _BOLT_PORT == 7687
+
+
+def test_bloodhound_start_requires_auth(tmp_targets_dir, monkeypatch):
+    monkeypatch.delenv("REVERSER_PENTEST_AUTHORIZED", raising=False)
+    monkeypatch.chdir(tmp_targets_dir)
+    from reverser.tools.bloodhound import bloodhound_start
+    result = _call(bloodhound_start, {"target": "10.10.10.5"})
+    assert result.get("is_error") is True
+    assert "authoriz" in result["content"][0]["text"].lower()
+
+
+def test_bloodhound_start_idempotent_returns_existing_pid(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    _write_pid("10.10.10.5", os.getpid())
+    from reverser.tools.bloodhound import bloodhound_start
+    result = _call(bloodhound_start, {"target": "10.10.10.5"})
+    assert result.get("is_error") is not True
+    assert "already running" in result["content"][0]["text"].lower()
+    assert str(os.getpid()) in result["content"][0]["text"]
+
+
+def test_bloodhound_start_clears_stale_pid(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    _write_pid("10.10.10.5", 99999999)
+    with patch("reverser.tools.bloodhound._launch_neo4j") as mock_launch, \
+         patch("reverser.tools.bloodhound._is_port_in_use", return_value=False):
+        mock_launch.return_value = 12345
+        from reverser.tools.bloodhound import bloodhound_start, _read_pid
+        result = _call(bloodhound_start, {"target": "10.10.10.5"})
+        assert result.get("is_error") is not True
+        assert _read_pid("10.10.10.5") == 12345
+
+
+def test_bloodhound_start_refuses_when_other_target_uses_port(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    with patch("reverser.tools.bloodhound._is_port_in_use", return_value=True):
+        from reverser.tools.bloodhound import bloodhound_start
+        result = _call(bloodhound_start, {"target": "10.10.10.5"})
+        assert result.get("is_error") is True
+        assert "7687" in result["content"][0]["text"]
+        assert "another" in result["content"][0]["text"].lower() or "different" in result["content"][0]["text"].lower()

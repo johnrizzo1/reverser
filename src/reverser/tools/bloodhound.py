@@ -12,8 +12,12 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import signal
 import socket
+import subprocess
+import time
 from pathlib import Path
+from typing import Any
 
 from claude_agent_sdk import tool
 
@@ -285,3 +289,141 @@ CANNED_QUERIES: dict[str, str] = {
         ORDER BY kind, name
     """.strip(),
 }
+
+
+# ── Neo4j launch ────────────────────────────────────────────────────
+
+def _launch_neo4j(target: str) -> int:
+    """Launch Neo4j for `target` in the background. Returns the PID."""
+    data_dir = _neo4j_dir(target)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "data").mkdir(exist_ok=True)
+    (data_dir / "logs").mkdir(exist_ok=True)
+    (data_dir / "conf").mkdir(exist_ok=True)
+    (data_dir / "plugins").mkdir(exist_ok=True)
+    (data_dir / "import").mkdir(exist_ok=True)
+    (data_dir / "run").mkdir(exist_ok=True)
+
+    password = _ensure_bolt_password(target)
+
+    conf = data_dir / "conf" / "neo4j.conf"
+    if not conf.is_file():
+        conf.write_text(
+            f"server.default_listen_address={_BOLT_HOST}\n"
+            f"server.bolt.listen_address={_BOLT_HOST}:{_BOLT_PORT}\n"
+            f"server.http.listen_address={_BOLT_HOST}:{_HTTP_PORT}\n"
+            f"server.https.enabled=false\n"
+            f"dbms.security.auth_minimum_password_length=1\n"
+        )
+
+    env = os.environ.copy()
+    env["NEO4J_HOME"] = str(data_dir)
+    env["NEO4J_CONF"] = str(data_dir / "conf")
+
+    auth_marker = data_dir / "data" / "dbms" / "auth"
+    if not auth_marker.exists():
+        try:
+            subprocess.run(
+                ["neo4j-admin", "dbms", "set-initial-password", password],
+                env=env,
+                check=False,
+                capture_output=True,
+                timeout=30,
+            )
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+
+    log_file = data_dir / "logs" / "neo4j-launch.log"
+    log_fh = open(log_file, "ab")
+    proc = subprocess.Popen(
+        ["neo4j", "console"],
+        env=env,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            log_tail = log_file.read_text(errors="replace")[-2000:]
+            raise RuntimeError(
+                f"Neo4j exited during startup (rc={proc.returncode}). "
+                f"Log tail:\n{log_tail}"
+            )
+        if _is_port_in_use(_BOLT_PORT):
+            return proc.pid
+        time.sleep(0.5)
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        pass
+    log_tail = log_file.read_text(errors="replace")[-2000:]
+    raise RuntimeError(
+        f"Neo4j did not open bolt port {_BOLT_PORT} within 30s. "
+        f"Log tail:\n{log_tail}"
+    )
+
+
+@tool(
+    "bloodhound_start",
+    "Start a per-target Neo4j instance for BloodHound. Creates the data dir, "
+    "generates a random bolt password (stored at targets/<target>/neo4j/bolt_password), "
+    "and launches Neo4j on bolt port 7687. Idempotent — returns the existing PID if "
+    "already running for this target. Refuses if a different target's Neo4j is on 7687.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Target identifier (IP, hostname, CIDR)"},
+        },
+        "required": ["target"],
+    },
+)
+async def bloodhound_start(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    target_input = args["target"]
+    kb = for_target(target_input)
+    target = kb.target_id
+    data_dir = _neo4j_dir(target)
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    existing_pid = _read_pid(target)
+    if existing_pid is not None and _process_alive(existing_pid):
+        return format_tool_result(
+            f"Neo4j already running for target {target}.\n"
+            f"  PID: {existing_pid}\n"
+            f"  Bolt: bolt://{_BOLT_HOST}:{_BOLT_PORT}\n"
+            f"  Data dir: {data_dir}\n"
+            f"  Password file: {_password_file(target)}"
+        )
+
+    if existing_pid is not None and not _process_alive(existing_pid):
+        _clear_pid(target)
+
+    if _is_port_in_use(_BOLT_PORT):
+        return format_error(
+            f"Bolt port {_BOLT_PORT} is already in use, but no PID file exists for "
+            f"target {target}. Another target's Neo4j (or an unrelated process) is "
+            f"running on this port. Stop it first with `bloodhound_stop <other_target>` "
+            f"or kill the process manually."
+        )
+
+    try:
+        pid = _launch_neo4j(target)
+    except RuntimeError as e:
+        return format_error(f"Failed to start Neo4j for {target}: {e}")
+
+    _write_pid(target, pid)
+    return format_tool_result(
+        f"Neo4j started for target {target}.\n"
+        f"  PID: {pid}\n"
+        f"  Bolt: bolt://{_BOLT_HOST}:{_BOLT_PORT}\n"
+        f"  Data dir: {data_dir}\n"
+        f"  Password file: {_password_file(target)}\n"
+        f"\nNext: run bloodhound_collect to populate the graph."
+    )
