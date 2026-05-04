@@ -116,3 +116,172 @@ def _is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
         return False
     finally:
         s.close()
+
+
+# ── Neo4j driver session ────────────────────────────────────────────
+
+def _get_neo4j_driver(target: str):
+    """Return a neo4j.GraphDatabase driver bound to the per-target instance.
+
+    The caller is responsible for closing the driver. Reads the password from
+    `targets/<target>/neo4j/bolt_password`.
+    """
+    try:
+        from neo4j import GraphDatabase
+    except ImportError as e:
+        raise RuntimeError(
+            "neo4j Python driver is not installed. Add `neo4j` to the venv."
+        ) from e
+
+    pw_path = _password_file(target)
+    if not pw_path.is_file():
+        raise RuntimeError(
+            f"Bolt password not found at {pw_path}. "
+            f"Has bloodhound_start been run for this target?"
+        )
+    password = pw_path.read_text().strip()
+    uri = f"bolt://{_BOLT_HOST}:{_BOLT_PORT}"
+    return GraphDatabase.driver(uri, auth=(_NEO4J_DEFAULT_USER, password))
+
+
+def _get_neo4j_session(target: str):
+    """Convenience: open a driver and return (driver, session). Caller closes both."""
+    driver = _get_neo4j_driver(target)
+    return driver, driver.session()
+
+
+# ── Write detection for free-form cypher ────────────────────────────
+
+_WRITE_RE = re.compile(
+    r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|CALL\s+APOC\.CREATE|CALL\s+APOC\.MERGE|CALL\s+DBMS|CALL\s+DB\.CREATE)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_writes(cypher: str) -> bool:
+    """Return True if the cypher appears to contain a write operation.
+
+    Intentionally over-broad: a naive regex (does not parse strings/comments).
+    Callers who need writes pass allow_writes=True to the tool.
+    """
+    return _WRITE_RE.search(cypher) is not None
+
+
+# ── Canned-query catalog (15 queries) ───────────────────────────────
+
+CANNED_QUERIES: dict[str, str] = {
+    "kerberoastable_users": """
+        MATCH (u:User)
+        WHERE u.hasspn = true AND u.enabled = true
+        RETURN u.name AS name,
+               u.serviceprincipalnames AS spns,
+               u.pwdlastset AS pwdlastset
+        ORDER BY u.name
+    """.strip(),
+
+    "asreproastable_users": """
+        MATCH (u:User)
+        WHERE u.dontreqpreauth = true AND u.enabled = true
+        RETURN u.name AS name,
+               u.pwdlastset AS pwdlastset
+        ORDER BY u.name
+    """.strip(),
+
+    "shortest_path_to_da": """
+        MATCH (g:Group)
+        WHERE g.name STARTS WITH 'DOMAIN ADMINS@'
+        MATCH p = shortestPath((src)-[*1..]->(g))
+        WHERE NOT src = g
+        RETURN p
+        LIMIT 5
+    """.strip(),
+
+    "computers_where_user_admin": """
+        MATCH (u {name: $username})-[:MemberOf*0..]->(g)-[:AdminTo]->(c:Computer)
+        RETURN DISTINCT c.name AS computer
+        ORDER BY computer
+    """.strip(),
+
+    "users_with_dcsync": """
+        MATCH (u:User)-[:MemberOf*0..]->(g)-[:GetChanges|GetChangesAll|GetChangesInFilteredSet]->(d:Domain)
+        RETURN DISTINCT u.name AS name, d.name AS domain
+        ORDER BY name
+    """.strip(),
+
+    "unconstrained_delegation": """
+        MATCH (n)
+        WHERE (n:User OR n:Computer) AND n.unconstraineddelegation = true
+        RETURN labels(n)[0] AS kind, n.name AS name
+        ORDER BY kind, name
+    """.strip(),
+
+    "constrained_delegation": """
+        MATCH (n)-[r:AllowedToDelegate]->(t:Computer)
+        RETURN labels(n)[0] AS kind, n.name AS principal, t.name AS target
+        ORDER BY principal, target
+    """.strip(),
+
+    "password_not_required": """
+        MATCH (u:User)
+        WHERE u.passwordnotreqd = true AND u.enabled = true
+        RETURN u.name AS name
+        ORDER BY u.name
+    """.strip(),
+
+    "computers_no_laps": """
+        MATCH (c:Computer)
+        WHERE c.haslaps = false AND c.enabled = true
+        RETURN c.name AS name, c.operatingsystem AS os
+        ORDER BY c.name
+    """.strip(),
+
+    "foreign_group_membership": """
+        MATCH (u:User)-[:MemberOf]->(g:Group)
+        WHERE NOT split(u.name, '@')[1] = split(g.name, '@')[1]
+        RETURN u.name AS user, g.name AS group
+        ORDER BY user
+    """.strip(),
+
+    "owned_to_high_value": """
+        MATCH (u {name: $username})
+        MATCH (target {highvalue: true})
+        MATCH p = shortestPath((u)-[*1..]->(target))
+        RETURN p
+        LIMIT 10
+    """.strip(),
+
+    "sessions_on_target": """
+        MATCH (u:User)-[:HasSession]->(c:Computer {name: $computer})
+        RETURN u.name AS user, c.name AS computer
+        ORDER BY user
+    """.strip(),
+
+    "high_value_targets": """
+        MATCH (n)
+        WHERE n.highvalue = true
+        RETURN labels(n)[0] AS kind, n.name AS name
+        ORDER BY kind, name
+    """.strip(),
+
+    "domain_admins": """
+        MATCH (g:Group)
+        WHERE g.name STARTS WITH 'DOMAIN ADMINS@'
+        MATCH (u:User)-[:MemberOf*1..]->(g)
+        RETURN DISTINCT u.name AS name, g.name AS group
+        ORDER BY name
+    """.strip(),
+
+    "kerberos_delegation_summary": """
+        MATCH (n)
+        WHERE (n:User OR n:Computer) AND
+              (n.unconstraineddelegation = true OR
+               n.allowedtodelegate IS NOT NULL OR
+               n.trustedtoauth = true)
+        RETURN labels(n)[0] AS kind,
+               n.name AS name,
+               coalesce(n.unconstraineddelegation, false) AS unconstrained,
+               coalesce(n.trustedtoauth, false) AS rbcd_eligible,
+               size(coalesce(n.allowedtodelegate, [])) AS constrained_targets
+        ORDER BY kind, name
+    """.strip(),
+}
