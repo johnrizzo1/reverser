@@ -348,6 +348,7 @@ async def netexec_smb(args: dict) -> dict:
     cred, err = _resolve_credential(target, username, password, nt_hash, domain)
     if err:
         return format_error(err)
+    assert cred is not None  # _resolve_credential contract: cred non-None when err is None
 
     cmd: list[str] = ["nxc", "smb", target]
     cmd.extend(_build_auth_args(cred, local_auth=local_auth))
