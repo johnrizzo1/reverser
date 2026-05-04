@@ -533,3 +533,118 @@ async def netexec_winrm(args: dict) -> dict:
 
 
 TOOLS.append(netexec_winrm)
+
+
+# ── netexec_ldap ────────────────────────────────────────────────────
+
+_LDAP_ACTIONS = {
+    "check_auth", "users", "groups", "computers", "trusts", "gmsa",
+    "asreproastable", "kerberoastable", "dc_list", "active_users",
+    "admin_count", "password_not_required",
+}
+
+_LDAP_ACTION_TO_FLAG = {
+    "users": ["--users"],
+    "groups": ["--groups"],
+    "computers": ["--computers"],
+    "trusts": ["--trusted-for-delegation"],
+    "gmsa": ["--gmsa"],
+    "asreproastable": ["--asreproast", "/dev/null"],
+    "kerberoastable": ["--kerberoasting", "/dev/null"],
+    "dc_list": ["--dc-list"],
+    "active_users": ["--active-users"],
+    "admin_count": ["--admin-count"],
+    "password_not_required": ["--password-not-required"],
+}
+
+
+@tool(
+    "netexec_ldap",
+    "NetExec LDAP protocol wrapper. Enumerate users/groups/computers/trusts/GMSA, "
+    "find AS-REP roastable / kerberoastable / password-not-required accounts, list "
+    "DCs. Falls back to KB-stored valid credentials.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "action": {"type": "string", "enum": sorted(_LDAP_ACTIONS)},
+            "username": {"type": "string", "default": ""},
+            "password": {"type": "string", "default": ""},
+            "nt_hash": {"type": "string", "default": ""},
+            "domain": {"type": "string", "default": ""},
+            "extra_args": {"type": "string", "default": ""},
+        },
+        "required": ["target", "action"],
+    },
+)
+async def netexec_ldap(args: dict) -> dict:
+    from ..kb import (
+        for_target, require_pentest_auth,
+        HostFact, CredentialFact, CredResult,
+    )
+    require_pentest_auth()
+
+    target = args["target"]
+    action = args["action"]
+    if action not in _LDAP_ACTIONS:
+        return format_error(f"Unknown LDAP action: {action}. Valid: {sorted(_LDAP_ACTIONS)}")
+
+    username = args.get("username", "") or None
+    password = args.get("password", "") or None
+    nt_hash = args.get("nt_hash", "") or None
+    domain = args.get("domain", "") or None
+    extra_args = args.get("extra_args", "") or ""
+
+    cred, err = _resolve_credential(target, username, password, nt_hash, domain)
+    if err:
+        return format_error(err)
+    assert cred is not None
+
+    cmd: list[str] = ["nxc", "ldap", target]
+    cmd.extend(_build_auth_args(cred))
+
+    if action in _LDAP_ACTION_TO_FLAG:
+        cmd.extend(_LDAP_ACTION_TO_FLAG[action])
+
+    if extra_args:
+        cmd.extend(shlex.split(extra_args))
+
+    timeout = NXC_TIMEOUT_MEDIUM if action in ("computers", "users", "groups") else NXC_TIMEOUT_FAST
+    result = run_cmd(cmd, timeout=timeout, max_output=32000)
+    stdout = result["stdout"]
+    success = _auth_succeeded(stdout)
+
+    kb = for_target(target)
+
+    if cred.username and (cred.password is not None or cred.nt_hash):
+        try:
+            status = "valid" if success else "invalid"
+            cred_id = kb.record_credential(CredentialFact(
+                username=cred.username, password=cred.password, nt_hash=cred.nt_hash,
+                domain=cred.domain, source_tool="netexec_ldap", status=status,
+            ))
+            kb.record_cred_result(cred_id, CredResult(
+                service_kind="ldap", target_host=target, success=success,
+                error_msg=None if success else (result.get("stderr") or "auth failed")[:500],
+            ))
+        except Exception as e:
+            logger.warning("KB cred-write failed in netexec_ldap: %s", e)
+
+    if action == "computers" and stdout:
+        try:
+            for c in _parse_nxc_ldap_computers(stdout):
+                kb.record_host(HostFact(
+                    ip=c["ip"], hostname=c["hostname"], domain=c["domain"],
+                ))
+        except Exception as e:
+            logger.warning("KB host-write failed in netexec_ldap: %s", e)
+
+    out_text = f"{cred.origin}\n\n" + stdout
+    if result.get("stderr"):
+        out_text += f"\n\n[stderr]: {result['stderr'][:500]}"
+    if result["returncode"] != 0 and not stdout:
+        return format_error(result["stderr"] or f"nxc ldap failed (rc={result['returncode']})")
+    return format_tool_result(out_text)
+
+
+TOOLS.append(netexec_ldap)
