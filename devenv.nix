@@ -243,7 +243,7 @@
     echo ""
     echo "  Options: -v (verbose) -vv (thinking) --budget N --profile P"
     echo "  Backend: -b ollama -m <model>  (or claude by default)"
-    echo "  RE Profiles: general linux windows android chrome managed api pentest ctf"
+    echo "  RE Profiles: general linux windows android chrome managed api pentest ad ctf"
     echo "  Web Profiles: webpentest webapi webrecon"
     echo ""
     echo "  Web pentest: REVERSER_PENTEST_AUTHORIZED=1 reverser i -p webpentest https://target.com"

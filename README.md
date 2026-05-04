@@ -102,9 +102,21 @@ Profiles specialize the agent's system prompt, tool priorities, and available sk
 | Java / .NET | `managed` | JVM bytecode and .NET IL — decompilation, serialization |
 | API Discovery | `api` | Document network APIs, endpoints, auth, request/response schemas |
 | CTF / Crackme | `ctf` | Solve crackmes — find the flag/key/password |
+| Active Directory | `ad` | Internal AD engagement — assumed-breach methodology with NetExec, BloodHound, KB |
 
 ```sh
 reverser interactive --list-profiles   # show all profiles and their skills
+```
+
+**Active Directory engagements:** the `ad` profile drives an assumed-breach internal AD methodology. \
+It bundles 11 skills (initial recon → DC discovery → AS-REP/Kerberoast → BloodHound graph → NTDS dump \
+→ report) backed by per-target persistent state in `targets/<target>/state.db`, NetExec for every \
+relevant protocol, and BloodHound (Neo4j + bloodhound-python collector + canned + free-form Cypher). \
+Spray actions are gated behind `REVERSER_AD_ALLOW_SPRAY=1`; an optional `targets/<target>/scope.toml` \
+file can tighten enforcement further.
+
+```sh
+REVERSER_PENTEST_AUTHORIZED=1 reverser i -p ad 10.10.10.5
 ```
 
 ### Writeups
