@@ -217,3 +217,38 @@ def test_netexec_smb_respects_scope(tmp_targets_dir, monkeypatch):
     assert result.get("is_error") is True
     assert "scope.toml violation" in result["content"][0]["text"]
     assert called == []  # subprocess was never invoked
+
+
+def test_bloodhound_collect_respects_scope(tmp_targets_dir, monkeypatch):
+    """bloodhound_collect must refuse if dc_ip is excluded by scope.toml."""
+    import asyncio
+    target_dir = tmp_targets_dir / "corp.local"
+    target_dir.mkdir()
+    (target_dir / "scope.toml").write_text(
+        "[scope]\n"
+        'in_scope_cidrs = ["10.10.10.0/24"]\n'
+    )
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+
+    from reverser.tools import bloodhound as bh
+    called = []
+    monkeypatch.setattr(
+        bh, "_run_bloodhound_python",
+        lambda *a, **kw: called.append((a, kw)) or {"stdout": "", "stderr": "", "returncode": 0},
+        raising=False,
+    )
+
+    fn = getattr(bh.bloodhound_collect, "handler", None) or bh.bloodhound_collect
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(fn({
+            "target": "corp.local", "domain": "corp.local",
+            "dc_ip": "172.16.0.1",
+            "username": "jdoe", "password": "x",
+        }))
+    finally:
+        loop.close()
+
+    assert result.get("is_error") is True
+    assert "scope.toml violation" in result["content"][0]["text"]
+    assert called == []

@@ -828,6 +828,16 @@ async def bloodhound_collect(args: dict) -> dict:
     nt_hash = args.get("nt_hash", "") or ""
     methods = args.get("collection_methods", "") or "Default,LoggedOn"
 
+    # ── Scope enforcement ───────────────────────────────────────────
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target_input)
+    if scope is not None:
+        try:
+            scope.assert_in_scope(dc_ip)
+        except ScopeError as e:
+            return format_error(f"scope.toml violation: {e}")
+    # ────────────────────────────────────────────────────────────────
+
     if not password and not nt_hash:
         return format_error(
             "bloodhound_collect requires either `password` or `nt_hash` for the user."
