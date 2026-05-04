@@ -331,6 +331,18 @@ async def netexec_smb(args: dict) -> dict:
     if action not in _SMB_ACTIONS:
         return format_error(f"Unknown SMB action: {action}. Valid: {sorted(_SMB_ACTIONS)}")
 
+    # ── Scope enforcement (optional; no-op if scope.toml is absent) ──
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target)
+    if scope is not None:
+        try:
+            scope.assert_in_scope(target)
+            if action == "spray":
+                scope.assert_spray_allowed()
+        except ScopeError as e:
+            return format_error(f"scope.toml violation: {e}")
+    # ────────────────────────────────────────────────────────────────
+
     username = args.get("username", "") or None
     password = args.get("password", "") or None
     nt_hash = args.get("nt_hash", "") or None
@@ -470,6 +482,18 @@ async def netexec_winrm(args: dict) -> dict:
     if action not in _WINRM_ACTIONS:
         return format_error(f"Unknown WinRM action: {action}. Valid: {sorted(_WINRM_ACTIONS)}")
 
+    # ── Scope enforcement (optional; no-op if scope.toml is absent) ──
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target)
+    if scope is not None:
+        try:
+            scope.assert_in_scope(target)
+            if action == "spray":
+                scope.assert_spray_allowed()
+        except ScopeError as e:
+            return format_error(f"scope.toml violation: {e}")
+    # ────────────────────────────────────────────────────────────────
+
     username = args.get("username", "") or None
     password = args.get("password", "") or None
     nt_hash = args.get("nt_hash", "") or None
@@ -589,6 +613,18 @@ async def netexec_ldap(args: dict) -> dict:
     if action not in _LDAP_ACTIONS:
         return format_error(f"Unknown LDAP action: {action}. Valid: {sorted(_LDAP_ACTIONS)}")
 
+    # ── Scope enforcement (optional; no-op if scope.toml is absent) ──
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target)
+    if scope is not None:
+        try:
+            scope.assert_in_scope(target)
+            if action == "spray":
+                scope.assert_spray_allowed()
+        except ScopeError as e:
+            return format_error(f"scope.toml violation: {e}")
+    # ────────────────────────────────────────────────────────────────
+
     username = args.get("username", "") or None
     password = args.get("password", "") or None
     nt_hash = args.get("nt_hash", "") or None
@@ -690,6 +726,20 @@ async def netexec_mssql(args: dict) -> dict:
     action = args["action"]
     if action not in _MSSQL_ACTIONS:
         return format_error(f"Unknown MSSQL action: {action}. Valid: {sorted(_MSSQL_ACTIONS)}")
+
+    # ── Scope enforcement (optional; no-op if scope.toml is absent) ──
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target)
+    if scope is not None:
+        try:
+            scope.assert_in_scope(target)
+            if action == "spray":
+                scope.assert_spray_allowed()
+            if action in ("xp_cmdshell", "query"):
+                scope.assert_dos_allowed()
+        except ScopeError as e:
+            return format_error(f"scope.toml violation: {e}")
+    # ────────────────────────────────────────────────────────────────
 
     username = args.get("username", "") or None
     password = args.get("password", "") or None
@@ -797,6 +847,18 @@ async def netexec_ssh(args: dict) -> dict:
     action = args["action"]
     if action not in _SSH_ACTIONS:
         return format_error(f"Unknown SSH action: {action}. Valid: {sorted(_SSH_ACTIONS)}")
+
+    # ── Scope enforcement (optional; no-op if scope.toml is absent) ──
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target)
+    if scope is not None:
+        try:
+            scope.assert_in_scope(target)
+            if action == "spray":
+                scope.assert_spray_allowed()
+        except ScopeError as e:
+            return format_error(f"scope.toml violation: {e}")
+    # ────────────────────────────────────────────────────────────────
 
     username = args.get("username", "") or None
     password = args.get("password", "") or None
@@ -930,6 +992,16 @@ async def netexec_ftp_wmi(args: dict) -> dict:
             f"Unknown action {action!r} for protocol {protocol}. "
             f"Valid: {sorted(valid_actions)}"
         )
+
+    # ── Scope enforcement (optional; no-op if scope.toml is absent) ──
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target)
+    if scope is not None:
+        try:
+            scope.assert_in_scope(target)
+        except ScopeError as e:
+            return format_error(f"scope.toml violation: {e}")
+    # ────────────────────────────────────────────────────────────────
 
     username = args.get("username", "") or None
     password = args.get("password", "") or None

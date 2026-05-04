@@ -183,3 +183,37 @@ def test_scope_re_exported_from_package():
     assert callable(load_scope)
     assert isinstance(Scope(), Scope)
     assert issubclass(ScopeError, RuntimeError)
+
+
+def test_netexec_smb_respects_scope(tmp_targets_dir, monkeypatch):
+    """If scope.toml excludes a target, netexec_smb returns a scope error and never shells out."""
+    import asyncio
+    target_dir = tmp_targets_dir / "172.16.0.1"
+    target_dir.mkdir()
+    (target_dir / "scope.toml").write_text(
+        "[scope]\n"
+        'in_scope_cidrs = ["10.10.10.0/24"]\n'
+    )
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+
+    from reverser.tools import netexec as netexec_mod
+    called = []
+    monkeypatch.setattr(
+        netexec_mod, "run_cmd",
+        lambda *a, **kw: called.append((a, kw)) or {"stdout": "", "stderr": "", "returncode": 0, "truncated": False},
+        raising=False,
+    )
+
+    fn = getattr(netexec_mod.netexec_smb, "handler", None) or netexec_mod.netexec_smb
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(fn({
+            "target": "172.16.0.1", "action": "check_auth",
+            "username": "x", "password": "y",
+        }))
+    finally:
+        loop.close()
+
+    assert result.get("is_error") is True
+    assert "scope.toml violation" in result["content"][0]["text"]
+    assert called == []  # subprocess was never invoked
