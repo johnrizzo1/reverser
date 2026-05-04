@@ -6,8 +6,6 @@ import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from reverser.tools.bloodhound import (
     _import_bloodhound_zip,
     _classify_bloodhound_json_file,
