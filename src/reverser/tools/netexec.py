@@ -759,3 +759,117 @@ async def netexec_mssql(args: dict) -> dict:
 
 
 TOOLS.append(netexec_mssql)
+
+
+# ── netexec_ssh ─────────────────────────────────────────────────────
+
+_SSH_ACTIONS = {"check_auth", "exec", "spray"}
+
+
+@tool(
+    "netexec_ssh",
+    "NetExec SSH protocol wrapper. Validate credentials (password or key), run "
+    "commands, controlled spray. Falls back to KB-stored valid credentials. "
+    "Spray actions require REVERSER_AD_ALLOW_SPRAY=1.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "action": {"type": "string", "enum": sorted(_SSH_ACTIONS)},
+            "username": {"type": "string", "default": ""},
+            "password": {"type": "string", "default": ""},
+            "key_file": {"type": "string", "default": "",
+                         "description": "Path to private key file (alternative to password)"},
+            "command": {"type": "string", "default": ""},
+            "extra_args": {"type": "string", "default": ""},
+        },
+        "required": ["target", "action"],
+    },
+)
+async def netexec_ssh(args: dict) -> dict:
+    from ..kb import (
+        for_target, require_pentest_auth,
+        CredentialFact, CredResult,
+    )
+    require_pentest_auth()
+
+    target = args["target"]
+    action = args["action"]
+    if action not in _SSH_ACTIONS:
+        return format_error(f"Unknown SSH action: {action}. Valid: {sorted(_SSH_ACTIONS)}")
+
+    username = args.get("username", "") or None
+    password = args.get("password", "") or None
+    key_file = args.get("key_file", "") or ""
+    command = args.get("command", "") or ""
+    extra_args = args.get("extra_args", "") or ""
+
+    if action == "spray":
+        spray_err = _check_spray_allowed()
+        if spray_err:
+            return format_error(spray_err)
+
+    # SSH allows key-based auth; treat key_file as a "credential present"
+    # signal even without password — but still call _resolve_credential for
+    # KB fallback when neither password nor key_file is given.
+    if key_file and not password:
+        if not username:
+            return format_error("key_file requires a username")
+        cred = ResolvedCredential(
+            username=username, password=None, nt_hash=None, domain=None,
+            origin=f"explicit args (key={key_file})",
+        )
+    else:
+        cred, err = _resolve_credential(target, username, password, None, None)
+        if err:
+            return format_error(err)
+        assert cred is not None
+
+    cmd: list[str] = ["nxc", "ssh", target]
+    if cred.username:
+        cmd.extend(["-u", cred.username])
+    if cred.password is not None:
+        cmd.extend(["-p", cred.password])
+    if key_file:
+        cmd.extend(["--key-file", key_file])
+
+    if action == "exec":
+        if not command:
+            return format_error("action=exec requires command argument")
+        cmd.extend(["-x", command])
+    elif action == "spray":
+        cmd.extend(["--max-failed-logins", str(_spray_max())])
+
+    if extra_args:
+        cmd.extend(shlex.split(extra_args))
+
+    result = run_cmd(cmd, timeout=NXC_TIMEOUT_FAST, max_output=16000)
+    stdout = result["stdout"]
+    success = _auth_succeeded(stdout)
+
+    kb = for_target(target)
+    if cred.username and (cred.password is not None or key_file):
+        try:
+            status = "valid" if success else "invalid"
+            cred_id = kb.record_credential(CredentialFact(
+                username=cred.username, password=cred.password,
+                source_tool="netexec_ssh",
+                source_context=f"key={key_file}" if key_file else None,
+                status=status,
+            ))
+            kb.record_cred_result(cred_id, CredResult(
+                service_kind="ssh", target_host=target, success=success,
+                error_msg=None if success else (result.get("stderr") or "auth failed")[:500],
+            ))
+        except Exception as e:
+            logger.warning("KB cred-write failed in netexec_ssh: %s", e)
+
+    out_text = f"{cred.origin}\n\n" + stdout
+    if result.get("stderr"):
+        out_text += f"\n\n[stderr]: {result['stderr'][:500]}"
+    if result["returncode"] != 0 and not stdout:
+        return format_error(result["stderr"] or f"nxc ssh failed (rc={result['returncode']})")
+    return format_tool_result(out_text)
+
+
+TOOLS.append(netexec_ssh)
