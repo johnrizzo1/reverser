@@ -49,6 +49,7 @@
     sslscan
     whatweb
     nbtscan
+    netexec               # nxc — successor to crackmapexec; AD enumeration/exploitation
     krb5                   # kinit, klist, krb5-config
     dnsutils               # dig, nslookup, host
     seclists               # wordlists for gobuster, kerberos, etc.
