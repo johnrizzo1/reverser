@@ -13,6 +13,7 @@ import hashlib
 import logging
 import os
 import re
+import shlex
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -259,3 +260,172 @@ def _build_auth_args(cred: ResolvedCredential, local_auth: bool = False) -> list
 
 
 TOOLS: list = []
+
+
+# ── netexec_smb ─────────────────────────────────────────────────────
+
+_SMB_ACTIONS = {
+    "shares", "users", "groups", "computers", "pass_pol", "rid_brute",
+    "sam", "lsa", "ntds", "loggedon", "sessions", "disks", "spider",
+    "exec", "spray", "check_auth",
+}
+
+_SMB_ACTION_TO_FLAG = {
+    "shares": ["--shares"],
+    "users": ["--users"],
+    "groups": ["--groups"],
+    "computers": ["--computers"],
+    "pass_pol": ["--pass-pol"],
+    "rid_brute": ["--rid-brute"],
+    "sam": ["--sam"],
+    "lsa": ["--lsa"],
+    "ntds": ["--ntds"],
+    "loggedon": ["--loggedon-users"],
+    "sessions": ["--sessions"],
+    "disks": ["--disks"],
+    "spider": ["--spider", "C$"],
+}
+
+_SMB_DUMP_KIND = {"sam": "sam_hashes", "lsa": "lsa_secrets", "ntds": "ntds_dump"}
+
+
+@tool(
+    "netexec_smb",
+    "NetExec SMB protocol wrapper. Enumerate shares/users/groups/computers, dump "
+    "SAM/LSA/NTDS, run commands, and validate credentials. Falls back to KB-stored "
+    "valid credentials if no auth args are given. Spray actions require "
+    "REVERSER_AD_ALLOW_SPRAY=1 and are capped at REVERSER_SPRAY_MAX attempts/user.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Target IP, hostname, or CIDR"},
+            "action": {
+                "type": "string",
+                "enum": sorted(_SMB_ACTIONS),
+                "description": "What to do over SMB",
+            },
+            "username": {"type": "string", "default": ""},
+            "password": {"type": "string", "default": ""},
+            "nt_hash": {"type": "string", "default": ""},
+            "domain": {"type": "string", "default": ""},
+            "local_auth": {"type": "boolean", "default": False,
+                           "description": "Treat the credential as local (not domain)"},
+            "module": {"type": "string", "default": "",
+                       "description": "Optional NetExec module name (lsassy, spider_plus, coerce_plus, ...)"},
+            "command": {"type": "string", "default": "",
+                        "description": "Command to run (only for action=exec)"},
+            "extra_args": {"type": "string", "default": ""},
+        },
+        "required": ["target", "action"],
+    },
+)
+async def netexec_smb(args: dict) -> dict:
+    from ..kb import (
+        for_target, require_pentest_auth,
+        CredentialFact, CredResult, ArtifactFact,
+    )
+    require_pentest_auth()
+
+    target = args["target"]
+    action = args["action"]
+    if action not in _SMB_ACTIONS:
+        return format_error(f"Unknown SMB action: {action}. Valid: {sorted(_SMB_ACTIONS)}")
+
+    username = args.get("username", "") or None
+    password = args.get("password", "") or None
+    nt_hash = args.get("nt_hash", "") or None
+    domain = args.get("domain", "") or None
+    local_auth = bool(args.get("local_auth", False))
+    module = (args.get("module", "") or "").strip()
+    command = args.get("command", "") or ""
+    extra_args = args.get("extra_args", "") or ""
+
+    if action == "spray":
+        spray_err = _check_spray_allowed()
+        if spray_err:
+            return format_error(spray_err)
+
+    cred, err = _resolve_credential(target, username, password, nt_hash, domain)
+    if err:
+        return format_error(err)
+
+    cmd: list[str] = ["nxc", "smb", target]
+    cmd.extend(_build_auth_args(cred, local_auth=local_auth))
+
+    if action in _SMB_ACTION_TO_FLAG:
+        cmd.extend(_SMB_ACTION_TO_FLAG[action])
+    elif action == "exec":
+        if command:
+            cmd.extend(["-x", command])
+        elif not module:
+            return format_error("action=exec requires either command or module argument")
+    elif action == "spray":
+        cmd.extend(["--max-failed-logins", str(_spray_max())])
+    elif action == "check_auth":
+        pass
+
+    if module:
+        cmd.extend(["-M", module])
+
+    if extra_args:
+        cmd.extend(shlex.split(extra_args))
+
+    timeout = NXC_TIMEOUT_SLOW if action in ("ntds", "lsa", "sam", "spider", "spray") else NXC_TIMEOUT_FAST
+    result = run_cmd(cmd, timeout=timeout, max_output=32000)
+    stdout = result["stdout"]
+    success = _auth_succeeded(stdout)
+
+    kb = for_target(target)
+
+    cred_id: Optional[int] = None
+    if cred.username and (cred.password is not None or cred.nt_hash):
+        try:
+            status = "valid" if success else "invalid"
+            cred_id = kb.record_credential(CredentialFact(
+                username=cred.username, password=cred.password, nt_hash=cred.nt_hash,
+                domain=cred.domain, source_tool="netexec_smb", status=status,
+            ))
+            kb.record_cred_result(cred_id, CredResult(
+                service_kind="smb", target_host=target, success=success,
+                error_msg=None if success else (result.get("stderr") or "auth failed")[:500],
+            ))
+        except Exception as e:
+            logger.warning("KB cred-write failed in netexec_smb: %s", e)
+
+    try:
+        if action == "shares" and stdout:
+            shares = _parse_nxc_share_table(stdout)
+            if shares:
+                body = "SMB shares on {}:\n".format(target) + "\n".join(
+                    f"  {s['share']:20s}  {s['perms']:15s}  {s['remark']}" for s in shares
+                )
+                kb.record_note(body)
+        elif action in _SMB_DUMP_KIND and stdout:
+            kind = _SMB_DUMP_KIND[action]
+            path, sha = _save_dump_artifact(target, kind, stdout)
+            kb.record_artifact(ArtifactFact(
+                kind=kind, path=str(path), sha256=sha, source_tool="netexec_smb",
+            ))
+            for hdump in _parse_nxc_secret_dump(stdout):
+                try:
+                    kb.record_credential(CredentialFact(
+                        username=hdump["username"], nt_hash=hdump["nt_hash"],
+                        lm_hash=hdump["lm_hash"], domain=cred.domain,
+                        source_tool="netexec_smb",
+                        source_context=f"{action} dump from {target}",
+                        status="untested",
+                    ))
+                except Exception as e:
+                    logger.warning("KB hash record failed: %s", e)
+    except Exception as e:
+        logger.warning("KB action-write failed in netexec_smb: %s", e)
+
+    out_text = f"{cred.origin}\n\n" + stdout
+    if result.get("stderr"):
+        out_text += f"\n\n[stderr]: {result['stderr'][:500]}"
+    if result["returncode"] != 0 and not stdout:
+        return format_error(result["stderr"] or f"nxc smb failed (rc={result['returncode']})")
+    return format_tool_result(out_text)
+
+
+TOOLS.append(netexec_smb)
