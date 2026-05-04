@@ -755,3 +755,150 @@ def _import_bloodhound_zip(driver, zip_path: Path) -> dict[str, int]:
                         continue
                 counts[kind] = counts.get(kind, 0) + imported
     return counts
+
+
+# ── bloodhound-python collector wrapper ─────────────────────────────
+
+def _run_bloodhound_python(cmd: list[str], cwd: str) -> dict:
+    """Invoke bloodhound-python. Pulled out for test mocking."""
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=cwd,
+        )
+        return {
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "returncode": proc.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"stdout": "", "stderr": "bloodhound-python timed out after 600s", "returncode": -1}
+    except FileNotFoundError:
+        return {"stdout": "", "stderr": "bloodhound-python not found in PATH", "returncode": -1}
+
+
+def _find_collection_zip(directory: Path) -> Path | None:
+    """Find the most recent bloodhound-python output zip in `directory`."""
+    candidates = sorted(
+        directory.glob("*.zip"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+@tool(
+    "bloodhound_collect",
+    "Run the bloodhound-python collector against a domain controller and import "
+    "the results into the per-target Neo4j. Requires a running Neo4j (call "
+    "bloodhound_start first). The collector zip is auto-imported via the bolt driver.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Target identifier"},
+            "domain": {"type": "string", "description": "AD domain (e.g. CORP.LOCAL)"},
+            "dc_ip": {"type": "string", "description": "Domain controller IP (used as -dc and -ns)"},
+            "username": {"type": "string", "description": "Domain user for collection"},
+            "password": {"type": "string", "description": "Password (or use nt_hash)", "default": ""},
+            "nt_hash": {"type": "string", "description": "NT hash (alternative to password)", "default": ""},
+            "collection_methods": {
+                "type": "string",
+                "description": "BloodHound collection methods (default: Default,LoggedOn). "
+                               "Use 'DCOnly' for stealthier runs.",
+                "default": "Default,LoggedOn",
+            },
+        },
+        "required": ["target", "domain", "dc_ip", "username"],
+    },
+)
+async def bloodhound_collect(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    target_input = args["target"]
+    domain = args["domain"]
+    dc_ip = args["dc_ip"]
+    username = args["username"]
+    password = args.get("password", "") or ""
+    nt_hash = args.get("nt_hash", "") or ""
+    methods = args.get("collection_methods", "") or "Default,LoggedOn"
+
+    if not password and not nt_hash:
+        return format_error(
+            "bloodhound_collect requires either `password` or `nt_hash` for the user."
+        )
+
+    kb = for_target(target_input)
+    target = kb.target_id
+
+    pid = _read_pid(target)
+    if pid is None or not _process_alive(pid):
+        return format_error(
+            f"Neo4j is not running for target {target}. "
+            f"Run bloodhound_start first."
+        )
+
+    out_dir = _neo4j_dir(target) / "collections"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "bloodhound-python",
+        "-c", methods,
+        "-d", domain,
+        "-u", username,
+        "-dc", dc_ip,
+        "-ns", dc_ip,
+        "--zip",
+    ]
+    if password:
+        cmd += ["-p", password]
+    if nt_hash:
+        cmd += ["--hashes", f":{nt_hash}"]
+
+    proc_result = _run_bloodhound_python(cmd, cwd=str(out_dir))
+    if proc_result["returncode"] != 0:
+        return format_error(
+            f"bloodhound-python failed (rc={proc_result['returncode']}):\n"
+            f"stdout: {proc_result['stdout'][:1000]}\n"
+            f"stderr: {proc_result['stderr'][:2000]}"
+        )
+
+    zip_path = _find_collection_zip(out_dir)
+    if zip_path is None:
+        return format_error(
+            f"bloodhound-python ran successfully but no .zip was produced in {out_dir}."
+        )
+
+    try:
+        driver = _get_neo4j_driver(target)
+    except RuntimeError as e:
+        return format_error(f"Could not connect to Neo4j: {e}")
+    try:
+        counts = _import_bloodhound_zip(driver, zip_path)
+    finally:
+        try:
+            driver.close()
+        except Exception:
+            pass
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _set_meta(target, _META_LAST_COLLECTION, now_iso)
+
+    summary_lines = [f"BloodHound collection complete for {target} ({domain}):"]
+    for kind in ("users", "computers", "groups", "ous", "gpos", "domains"):
+        summary_lines.append(f"  {kind:10s} {counts.get(kind, 0)}")
+    summary_lines.append(f"  zip: {zip_path}")
+    try:
+        kb.record_note(
+            f"BloodHound collection ({methods}) into Neo4j for {domain}: " +
+            ", ".join(f"{k}={v}" for k, v in counts.items())
+        )
+    except Exception:
+        pass
+    return format_tool_result("\n".join(summary_lines))

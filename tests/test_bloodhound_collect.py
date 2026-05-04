@@ -108,3 +108,74 @@ def test_import_bloodhound_zip_handles_objectless_entries(tmp_path):
     fake_driver.session.return_value = fake_session
     counts = _import_bloodhound_zip(fake_driver, z)
     assert counts == {"users": 0}
+
+
+def test_bloodhound_collect_requires_auth(tmp_targets_dir, monkeypatch):
+    monkeypatch.delenv("REVERSER_PENTEST_AUTHORIZED", raising=False)
+    monkeypatch.chdir(tmp_targets_dir)
+    from reverser.tools.bloodhound import bloodhound_collect
+    result = _call(bloodhound_collect, {
+        "target": "10.10.10.5", "domain": "CORP.LOCAL",
+        "dc_ip": "10.10.10.5", "username": "jdoe", "password": "x",
+    })
+    assert result.get("is_error") is True
+
+
+def test_bloodhound_collect_requires_neo4j_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.bloodhound import bloodhound_collect
+    result = _call(bloodhound_collect, {
+        "target": "10.10.10.5", "domain": "CORP.LOCAL",
+        "dc_ip": "10.10.10.5", "username": "jdoe", "password": "x",
+    })
+    assert result.get("is_error") is True
+    assert "bloodhound_start" in result["content"][0]["text"]
+
+
+def test_bloodhound_collect_requires_password_or_hash(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    from reverser.tools.bloodhound import _write_pid, bloodhound_collect
+    _write_pid("10.10.10.5", os.getpid())
+    result = _call(bloodhound_collect, {
+        "target": "10.10.10.5", "domain": "CORP.LOCAL",
+        "dc_ip": "10.10.10.5", "username": "jdoe",
+    })
+    assert result.get("is_error") is True
+    assert "password" in result["content"][0]["text"].lower() or "hash" in result["content"][0]["text"].lower()
+
+
+def test_bloodhound_collect_invokes_bloodhound_python(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    (tmp_targets_dir / "10.10.10.5" / "neo4j").mkdir(parents=True)
+    from reverser.tools.bloodhound import _write_pid, bloodhound_collect
+    _write_pid("10.10.10.5", os.getpid())
+
+    captured_cmd = []
+
+    def fake_run_bh(cmd, cwd):
+        captured_cmd.extend(cmd)
+        z = Path(cwd) / "20260503000000_corp.local.zip"
+        with zipfile.ZipFile(z, "w") as zf:
+            zf.writestr("users.json", json.dumps({"data": [], "meta": {"type": "users"}}))
+        return {"stdout": "ok", "stderr": "", "returncode": 0}
+
+    fake_session = MagicMock()
+    fake_session.__enter__ = lambda s: s
+    fake_session.__exit__ = lambda *a: None
+    fake_driver = MagicMock()
+    fake_driver.session.return_value = fake_session
+
+    with patch("reverser.tools.bloodhound._run_bloodhound_python", side_effect=fake_run_bh), \
+         patch("reverser.tools.bloodhound._get_neo4j_driver", return_value=fake_driver), \
+         patch("reverser.tools.bloodhound._set_meta"):
+        result = _call(bloodhound_collect, {
+            "target": "10.10.10.5", "domain": "CORP.LOCAL",
+            "dc_ip": "10.10.10.5", "username": "jdoe", "password": "x",
+        })
+    assert result.get("is_error") is not True
+    assert "users" in result["content"][0]["text"].lower()
+    assert "-d" in captured_cmd
+    assert "CORP.LOCAL" in captured_cmd
+    assert "-u" in captured_cmd
+    assert "jdoe" in captured_cmd
