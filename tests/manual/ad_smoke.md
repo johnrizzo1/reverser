@@ -247,3 +247,103 @@ sqlite3 targets/<BOX_IP>/state.db "SELECT kind, path FROM artifacts WHERE kind =
 sqlite3 targets/<BOX_IP>/state.db \
   "SELECT username, substr(nt_hash, 1, 12) FROM credentials WHERE nt_hash IS NOT NULL LIMIT 10"
 ```
+
+---
+
+## Step 11 — Show what we know
+
+Trigger: F1 → "Show what we know".
+
+Expected tool calls (in parallel):
+- `kb_show()`
+- `kb_list_hosts(target=<BOX_IP>)`
+- `kb_list_creds(target=<BOX_IP>)`
+
+Expected output:
+- A single-screen overview listing host count, port count, valid creds (count + most
+  recent), and finding count by severity.
+- Full host inventory with the DC marked `is_dc=True`.
+- All credentials with their statuses (`valid` for `svc-alfresco`, `untested` for any
+  freshly-dumped NTDS hashes).
+
+LLM should then state, in two sentences, the current foothold-path hypothesis and the
+cheapest disconfirming experiment. **If it skips the hypothesis statement, the prompt is
+not being followed — file a bug.**
+
+---
+
+## Step 12 — Generate the final report
+
+Trigger: F1 → "Generate report".
+
+Expected tool call:
+- `kb_export_report(target=<BOX_IP>)`
+
+Expected output:
+- File written to `targets/<BOX_IP>/report.md`.
+- Sections present: Executive Summary, Target Information, Discovered Hosts,
+  Discovered Services, Credentials, Findings, Notes.
+
+Verification:
+```sh
+test -f targets/<BOX_IP>/report.md && echo "report exists"
+head -40 targets/<BOX_IP>/report.md
+```
+
+The report should mention every host, service, and finding present in the KB. If a
+finding is missing, the LLM should call `kb_add_finding` and re-run the report.
+
+---
+
+## Step 13 — Stop Neo4j (cleanup)
+
+Trigger: tell the LLM "We're done — clean up."
+
+Expected tool call:
+- `bloodhound_stop(target=<BOX_IP>)`
+
+Expected output:
+- The Neo4j PID file at `targets/<BOX_IP>/neo4j/.pid` is removed.
+- `bloodhound_status(target=<BOX_IP>)` now reports "stopped".
+
+Verification:
+```sh
+test ! -f targets/<BOX_IP>/neo4j/.pid && echo "neo4j stopped cleanly"
+```
+
+---
+
+## Pass criteria
+
+The smoke test passes if:
+- All 13 steps executed without hand-editing tool source code.
+- Every "KB state after" verification query returned the expected non-empty result.
+- The final report includes every host, service, valid credential, and finding observed
+  during the engagement.
+- The LLM followed the hypothesis-driven loop (you saw at least one explicit hypothesis
+  statement in the transcript).
+- Total wall-clock time was ≤ 45 minutes (target: 30 minutes).
+
+The smoke test fails — file a bug — if any of the following:
+- A KB write was lost (a successful tool call did not produce expected rows).
+- The LLM tried to invoke a tool name that does not exist (e.g. `netexec_dump_secrets`).
+- A scope violation was triggered without a `scope.toml` being present.
+- BloodHound's bolt-port collision triggered without a clear remediation message.
+- The LLM cracked hashes inside the agent (it must surface for offline cracking).
+
+---
+
+## Re-run hygiene
+
+To re-run the smoke test cleanly against the same box:
+
+```sh
+# Stop Neo4j if still running
+reverser i -p ad <BOX_IP>  # then F1 → … or just bash:
+ps aux | grep neo4j
+
+# Wipe the KB and per-target dir
+rm -rf targets/<BOX_IP>
+```
+
+Do NOT delete `targets/` itself — other targets live there.
