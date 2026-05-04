@@ -51,3 +51,16 @@ def test_ad_prompt_mentions_hypothesis_loop():
     p = get_profile("ad")
     assert "hypothesis" in p.system_addendum.lower()
     assert "5 tool calls" in p.system_addendum or "every 5" in p.system_addendum.lower()
+
+
+def test_pentest_profile_mentions_ad_pivot():
+    p = get_profile("pentest")
+    assert "ad" in p.system_addendum.lower()
+    assert "-p ad" in p.system_addendum
+    assert "BloodHound" in p.system_addendum or "bloodhound" in p.system_addendum.lower()
+
+
+def test_pentest_profile_still_loadable_after_augmentation():
+    p = get_profile("pentest")
+    assert p.name == "Pentest"
+    assert len(p.skills) > 0

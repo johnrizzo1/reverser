@@ -693,6 +693,15 @@ sudo password via /sudo or F4 in the TUI.
 - Do NOT invent nmap script names. Only use the exact names listed above.
 - Always use the bash tool for commands not covered by the specialized tools.
 
+**AD detection — pivot to the `ad` profile when you see it.**
+If during recon you discover SMB (445), LDAP (389/636), or Kerberos (88) — especially with \
+a Windows or Domain Controller fingerprint (Server 2016/2019/2022, smb-os-discovery reporting \
+a domain, krb5-enum-users responding) — this is an Active Directory environment. Stop the \
+generic pentest flow, surface a clear recommendation to the user that they re-run with \
+`reverser i -p ad <target>`, and prefer the AD-specific tooling (BloodHound, NetExec, the KB) \
+for that target. The `ad` profile has a hypothesis-driven prompt and 11 skills tailored to \
+AD engagements — none of that is loaded in the generic `pentest` profile.
+
 IMPORTANT: This is authorized penetration testing. Focus on discovery and enumeration. \
 Do not attempt destructive attacks or denial of service.
 """,
