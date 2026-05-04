@@ -873,3 +873,125 @@ async def netexec_ssh(args: dict) -> dict:
 
 
 TOOLS.append(netexec_ssh)
+
+
+# ── netexec_ftp_wmi ─────────────────────────────────────────────────
+
+_FTP_ACTIONS = {"check_auth", "list", "get"}
+_WMI_ACTIONS = {"check_auth", "exec"}
+_VALID_PROTOCOLS = {"ftp", "wmi"}
+
+
+@tool(
+    "netexec_ftp_wmi",
+    "NetExec wrapper for FTP and WMI protocols. FTP: check_auth, list directories, "
+    "download files. WMI: check_auth, run remote commands. Falls back to KB-stored "
+    "valid credentials.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "protocol": {"type": "string", "enum": sorted(_VALID_PROTOCOLS)},
+            "action": {
+                "type": "string",
+                "enum": sorted(_FTP_ACTIONS | _WMI_ACTIONS),
+                "description": "ftp: check_auth|list|get; wmi: check_auth|exec",
+            },
+            "username": {"type": "string", "default": ""},
+            "password": {"type": "string", "default": ""},
+            "nt_hash": {"type": "string", "default": ""},
+            "domain": {"type": "string", "default": ""},
+            "command": {"type": "string", "default": "",
+                        "description": "wmi: command to run; ftp/get: remote path; ftp/list: dir path"},
+            "extra_args": {"type": "string", "default": ""},
+        },
+        "required": ["target", "protocol", "action"],
+    },
+)
+async def netexec_ftp_wmi(args: dict) -> dict:
+    from ..kb import (
+        for_target, require_pentest_auth,
+        CredentialFact, CredResult,
+    )
+    require_pentest_auth()
+
+    target = args["target"]
+    protocol = args["protocol"]
+    action = args["action"]
+
+    if protocol not in _VALID_PROTOCOLS:
+        return format_error(
+            f"Unknown protocol: {protocol}. Valid: {sorted(_VALID_PROTOCOLS)}"
+        )
+
+    valid_actions = _FTP_ACTIONS if protocol == "ftp" else _WMI_ACTIONS
+    if action not in valid_actions:
+        return format_error(
+            f"Unknown action {action!r} for protocol {protocol}. "
+            f"Valid: {sorted(valid_actions)}"
+        )
+
+    username = args.get("username", "") or None
+    password = args.get("password", "") or None
+    nt_hash = args.get("nt_hash", "") or None
+    domain = args.get("domain", "") or None
+    command = args.get("command", "") or ""
+    extra_args = args.get("extra_args", "") or ""
+
+    cred, err = _resolve_credential(target, username, password, nt_hash, domain)
+    if err:
+        return format_error(err)
+    assert cred is not None
+
+    cmd: list[str] = ["nxc", protocol, target]
+    cmd.extend(_build_auth_args(cred))
+
+    if protocol == "ftp":
+        if action == "list":
+            # nxc ftp uses --ls <path>
+            ls_path = command or "/"
+            cmd.extend(["--ls", ls_path])
+        elif action == "get":
+            if not command:
+                return format_error("ftp/get requires command argument (remote path)")
+            cmd.extend(["--get", command])
+        # check_auth: no extra
+    elif protocol == "wmi":
+        if action == "exec":
+            if not command:
+                return format_error("wmi/exec requires command argument")
+            cmd.extend(["-x", command])
+        # check_auth: no extra
+
+    if extra_args:
+        cmd.extend(shlex.split(extra_args))
+
+    result = run_cmd(cmd, timeout=NXC_TIMEOUT_FAST, max_output=16000)
+    stdout = result["stdout"]
+    success = _auth_succeeded(stdout)
+
+    kb = for_target(target)
+    if cred.username and (cred.password is not None or cred.nt_hash):
+        try:
+            status = "valid" if success else "invalid"
+            cred_id = kb.record_credential(CredentialFact(
+                username=cred.username, password=cred.password, nt_hash=cred.nt_hash,
+                domain=cred.domain, source_tool=f"netexec_{protocol}",
+                status=status,
+            ))
+            kb.record_cred_result(cred_id, CredResult(
+                service_kind=protocol, target_host=target, success=success,
+                error_msg=None if success else (result.get("stderr") or "auth failed")[:500],
+            ))
+        except Exception as e:
+            logger.warning("KB cred-write failed in netexec_ftp_wmi: %s", e)
+
+    out_text = f"{cred.origin}\n\n" + stdout
+    if result.get("stderr"):
+        out_text += f"\n\n[stderr]: {result['stderr'][:500]}"
+    if result["returncode"] != 0 and not stdout:
+        return format_error(result["stderr"] or f"nxc {protocol} failed (rc={result['returncode']})")
+    return format_tool_result(out_text)
+
+
+TOOLS.append(netexec_ftp_wmi)
