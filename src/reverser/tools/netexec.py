@@ -430,3 +430,106 @@ async def netexec_smb(args: dict) -> dict:
 
 
 TOOLS.append(netexec_smb)
+
+
+# ── netexec_winrm ───────────────────────────────────────────────────
+
+_WINRM_ACTIONS = {"check_auth", "exec", "ps", "spray"}
+
+
+@tool(
+    "netexec_winrm",
+    "NetExec WinRM protocol wrapper. Validate credentials, run commands and "
+    "PowerShell, or controlled spray. Falls back to KB-stored valid credentials. "
+    "Spray actions require REVERSER_AD_ALLOW_SPRAY=1.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Target IP, hostname, or CIDR"},
+            "action": {"type": "string", "enum": sorted(_WINRM_ACTIONS)},
+            "username": {"type": "string", "default": ""},
+            "password": {"type": "string", "default": ""},
+            "nt_hash": {"type": "string", "default": ""},
+            "domain": {"type": "string", "default": ""},
+            "command": {"type": "string", "default": "",
+                        "description": "Command (action=exec) or PowerShell snippet (action=ps)"},
+            "extra_args": {"type": "string", "default": ""},
+        },
+        "required": ["target", "action"],
+    },
+)
+async def netexec_winrm(args: dict) -> dict:
+    from ..kb import (
+        for_target, require_pentest_auth,
+        CredentialFact, CredResult,
+    )
+    require_pentest_auth()
+
+    target = args["target"]
+    action = args["action"]
+    if action not in _WINRM_ACTIONS:
+        return format_error(f"Unknown WinRM action: {action}. Valid: {sorted(_WINRM_ACTIONS)}")
+
+    username = args.get("username", "") or None
+    password = args.get("password", "") or None
+    nt_hash = args.get("nt_hash", "") or None
+    domain = args.get("domain", "") or None
+    command = args.get("command", "") or ""
+    extra_args = args.get("extra_args", "") or ""
+
+    if action == "spray":
+        spray_err = _check_spray_allowed()
+        if spray_err:
+            return format_error(spray_err)
+
+    cred, err = _resolve_credential(target, username, password, nt_hash, domain)
+    if err:
+        return format_error(err)
+    assert cred is not None
+
+    cmd: list[str] = ["nxc", "winrm", target]
+    cmd.extend(_build_auth_args(cred))
+
+    if action == "exec":
+        if not command:
+            return format_error("action=exec requires command argument")
+        cmd.extend(["-x", command])
+    elif action == "ps":
+        if not command:
+            return format_error("action=ps requires command argument")
+        cmd.extend(["-X", command])
+    elif action == "spray":
+        cmd.extend(["--max-failed-logins", str(_spray_max())])
+
+    if extra_args:
+        cmd.extend(shlex.split(extra_args))
+
+    timeout = NXC_TIMEOUT_MEDIUM if action in ("exec", "ps") else NXC_TIMEOUT_FAST
+    result = run_cmd(cmd, timeout=timeout, max_output=16000)
+    stdout = result["stdout"]
+    success = _auth_succeeded(stdout)
+
+    kb = for_target(target)
+    if cred.username and (cred.password is not None or cred.nt_hash):
+        try:
+            status = "valid" if success else "invalid"
+            cred_id = kb.record_credential(CredentialFact(
+                username=cred.username, password=cred.password, nt_hash=cred.nt_hash,
+                domain=cred.domain, source_tool="netexec_winrm", status=status,
+            ))
+            kb.record_cred_result(cred_id, CredResult(
+                service_kind="winrm", target_host=target, success=success,
+                error_msg=None if success else (result.get("stderr") or "auth failed")[:500],
+            ))
+        except Exception as e:
+            logger.warning("KB cred-write failed in netexec_winrm: %s", e)
+
+    out_text = f"{cred.origin}\n\n" + stdout
+    if result.get("stderr"):
+        out_text += f"\n\n[stderr]: {result['stderr'][:500]}"
+    if result["returncode"] != 0 and not stdout:
+        return format_error(result["stderr"] or f"nxc winrm failed (rc={result['returncode']})")
+    return format_tool_result(out_text)
+
+
+TOOLS.append(netexec_winrm)
