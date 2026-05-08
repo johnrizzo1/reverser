@@ -1,0 +1,14 @@
+Version: 2.1.0
+OpenSSL 3.1.0
+
+Connected to 10.10.10.99
+
+Testing SSL server 10.10.10.99 on port 443
+
+  SSL/TLS Protocols:
+SSLv2     disabled
+SSLv3     disabled
+TLSv1.0   disabled
+TLSv1.1   disabled
+TLSv1.2   enabled
+TLSv1.3   enabled

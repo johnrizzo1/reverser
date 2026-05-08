@@ -1,0 +1,17 @@
+Version: 2.1.0
+
+Connected to 10.13.38.23
+
+Testing SSL server 10.13.38.23 on port 443
+
+  SSL/TLS Protocols:
+SSLv2     disabled
+SSLv3     disabled
+TLSv1.0   enabled
+TLSv1.2   enabled
+
+  Subject:  CN=www.solarsystem.htb, O=SolarSystem Ltd, C=UK
+  Issuer:   CN=www.solarsystem.htb, O=SolarSystem Ltd, C=UK
+  Not valid before:  Feb 19 22:48:07 2020 GMT
+  Not valid after:   Feb 18 22:48:07 2021 GMT
+  Certificate has expired

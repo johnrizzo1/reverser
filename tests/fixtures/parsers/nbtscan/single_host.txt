@@ -1,0 +1,5 @@
+Doing NBT name scan for addresses from 10.10.10.5
+
+IP address       NetBIOS Name     Server    User             MAC address
+------------------------------------------------------------------------------
+10.10.10.5       DC01             <server>  <unknown>        00:50:56:01:23:45

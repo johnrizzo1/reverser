@@ -49,6 +49,8 @@
     sslscan
     whatweb
     nbtscan
+    netexec               # nxc — successor to crackmapexec; AD enumeration/exploitation
+    neo4j                  # graph database for BloodHound (per-target instances)
     krb5                   # kinit, klist, krb5-config
     dnsutils               # dig, nslookup, host
     seclists               # wordlists for gobuster, kerberos, etc.
@@ -149,6 +151,8 @@
 	invoke
 	pynacl
 	paramiko
+        neo4j
+        bloodhound
       '';
     };
   };
@@ -239,7 +243,7 @@
     echo ""
     echo "  Options: -v (verbose) -vv (thinking) --budget N --profile P"
     echo "  Backend: -b ollama -m <model>  (or claude by default)"
-    echo "  RE Profiles: general linux windows android chrome managed api pentest ctf"
+    echo "  RE Profiles: general linux windows android chrome managed api pentest ad ctf"
     echo "  Web Profiles: webpentest webapi webrecon"
     echo ""
     echo "  Web pentest: REVERSER_PENTEST_AUTHORIZED=1 reverser i -p webpentest https://target.com"
@@ -286,6 +290,10 @@
     python3 -c "import click" > /dev/null 2>&1 && echo "✓ click" || echo "✗ click"
     incus version > /dev/null 2>&1 && echo "✓ incus" || echo "✗ incus (check socket permissions)"
     aws --version > /dev/null 2>&1 && echo "✓ awscli" || echo "✗ awscli"
+    echo "Testing BloodHound stack..."
+    neo4j --version > /dev/null 2>&1 && echo "✓ neo4j" || echo "✗ neo4j"
+    python3 -c "import neo4j" > /dev/null 2>&1 && echo "✓ neo4j (py)" || echo "✗ neo4j (py)"
+    python3 -c "import bloodhound" > /dev/null 2>&1 && echo "✓ bloodhound (py)" || echo "✗ bloodhound (py)"
     echo "Done."
   '';
 }

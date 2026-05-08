@@ -1,0 +1,7 @@
+Starting Nmap 7.94 ( https://nmap.org ) at 2026-05-03 12:00 UTC
+Nmap scan report for 10.10.10.99
+Host is up (0.0050s latency).
+All 1000 scanned ports on 10.10.10.99 are in ignored states.
+Not shown: 1000 filtered tcp ports (no-response)
+
+Nmap done: 1 IP address (1 host up) scanned in 22.10 seconds

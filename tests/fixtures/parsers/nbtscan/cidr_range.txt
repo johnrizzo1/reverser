@@ -1,0 +1,7 @@
+Doing NBT name scan for addresses from 192.168.1.0/24
+
+IP address       NetBIOS Name     Server    User             MAC address
+------------------------------------------------------------------------------
+192.168.1.10     DC01             <server>  <unknown>        00:50:56:aa:bb:cc
+192.168.1.20     WS01             <server>  ALICE            00:50:56:aa:bb:dd
+192.168.1.21     WS02             <server>  BOB              00:50:56:aa:bb:ee

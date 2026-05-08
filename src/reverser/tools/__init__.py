@@ -10,8 +10,15 @@ from .exploit import TOOLS as exploit_tools
 from .util import TOOLS as util_tools
 from .network import TOOLS as network_tools
 from .web import TOOLS as web_tools
+from .kb import TOOLS as kb_tools
+from .netexec import TOOLS as netexec_tools
+from .bloodhound import TOOLS as bloodhound_tools
 
-ALL_TOOLS = triage_tools + static_tools + dynamic_tools + python_tools + exploit_tools + util_tools + network_tools + web_tools
+ALL_TOOLS = (
+    triage_tools + static_tools + dynamic_tools + python_tools
+    + exploit_tools + util_tools + network_tools + web_tools
+    + kb_tools + netexec_tools + bloodhound_tools
+)
 
 
 def create_re_mcp_server():

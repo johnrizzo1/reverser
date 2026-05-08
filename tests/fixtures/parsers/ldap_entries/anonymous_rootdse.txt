@@ -1,0 +1,14 @@
+Search base:
+Filter: (objectClass=*)
+Results: 1
+
+DN:  - STATUS: Read - READ TIME: 2026-05-03T12:00:00.000000
+    defaultNamingContext: DC=corp,DC=local
+    dnsHostName: dc01.corp.local
+    domainFunctionality: 7
+    forestFunctionality: 7
+    namingContexts: DC=corp,DC=local
+                    CN=Configuration,DC=corp,DC=local
+                    CN=Schema,CN=Configuration,DC=corp,DC=local
+    rootDomainNamingContext: DC=corp,DC=local
+    serverName: CN=DC01,CN=Servers,CN=Default-First-Site-Name,CN=Sites,CN=Configuration,DC=corp,DC=local

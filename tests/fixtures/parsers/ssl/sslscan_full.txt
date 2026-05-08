@@ -1,0 +1,33 @@
+Version: 2.1.0
+OpenSSL 3.1.0 14 Mar 2023
+
+Connected to 10.10.10.5
+
+Testing SSL server 10.10.10.5 on port 443
+
+  SSL/TLS Protocols:
+SSLv2     disabled
+SSLv3     disabled
+TLSv1.0   enabled
+TLSv1.1   enabled
+TLSv1.2   enabled
+TLSv1.3   disabled
+
+  TLS Fallback SCSV:
+Server supports TLS Fallback SCSV
+
+  Heartbleed:
+TLS 1.0 not vulnerable to heartbleed
+TLS 1.1 not vulnerable to heartbleed
+TLS 1.2 not vulnerable to heartbleed
+
+  Supported Server Cipher(s):
+Preferred TLSv1.2  256 bits  ECDHE-RSA-AES256-GCM-SHA384   Curve P-256 DHE 256
+Accepted  TLSv1.2  128 bits  ECDHE-RSA-AES128-GCM-SHA256   Curve P-256 DHE 256
+Accepted  TLSv1.0  256 bits  AES256-SHA
+Accepted  TLSv1.0  128 bits  AES128-SHA
+
+  Subject:  CN=*.corp.local
+  Issuer:   CN=Internal CA
+  Not valid before:  Jan  1 00:00:00 2024 GMT
+  Not valid after:   Jan  1 00:00:00 2027 GMT

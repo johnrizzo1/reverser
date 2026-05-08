@@ -240,6 +240,21 @@ async def nmap_scan(args: dict) -> dict:
     cmd.append(target)
 
     result = _run_sudo_cmd(cmd, needs_root, timeout=120, max_output=16000)
+
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_nmap_output
+        kb = for_target(target)
+        for nmap_host in parse_nmap_output(result["stdout"]):
+            kb.record_host(nmap_host.host)
+            for svc in nmap_host.services:
+                kb.record_service(svc)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in nmap_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
+
     return cmd_result_to_tool_result(result)
 
 
@@ -286,6 +301,17 @@ async def nikto_scan(args: dict) -> dict:
 
     # Nikto can be slow; give it 3 minutes
     result = run_cmd(cmd, timeout=180, max_output=16000)
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_nikto_findings
+        kb = for_target(target)
+        for finding in parse_nikto_findings(result["stdout"]):
+            kb.record_finding(finding)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in nikto_scan (network): %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
@@ -347,6 +373,31 @@ async def gobuster_scan(args: dict) -> dict:
         cmd.extend(extra_args.split())
 
     result = run_cmd(cmd, timeout=180, max_output=16000)
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        import json
+        from pathlib import Path
+        from ..kb import for_target, ArtifactFact
+        from ..kb.parsers import parse_gobuster_paths
+        kb = for_target(target)
+        paths = parse_gobuster_paths(result["stdout"])
+        if paths:
+            artifact_path = str(kb.root / "loot" / "gobuster_paths.json")
+            Path(artifact_path).write_text(json.dumps(paths, indent=2))
+            kb.record_artifact(ArtifactFact(
+                kind="discovered_paths",
+                path=artifact_path,
+                source_tool="gobuster_scan",
+            ))
+            kb.record_note(
+                f"gobuster {target}: discovered {len(paths)} paths — "
+                + ", ".join(paths[:10])
+                + (" ..." if len(paths) > 10 else "")
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in gobuster_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
@@ -456,6 +507,20 @@ async def ssl_scan(args: dict) -> dict:
             True, timeout=60, max_output=16000,
         )
 
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_ssl_findings
+        kb = for_target(target)
+        out = parse_ssl_findings(result["stdout"])
+        for f in out["findings"]:
+            kb.record_finding(f)
+        if out["note"]:
+            kb.record_note(out["note"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in ssl_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
@@ -482,6 +547,25 @@ async def whatweb_scan(args: dict) -> dict:
 
     cmd = ["whatweb", "--color=never", f"-a{aggression}", target]
     result = run_cmd(cmd, timeout=60, max_output=16000)
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from urllib.parse import urlparse
+        from ..kb import for_target, HostFact
+        from ..kb.parsers import parse_whatweb_plugins
+        parsed_url = urlparse(target if "://" in target else f"http://{target}")
+        host_ip = parsed_url.hostname or target
+        port = parsed_url.port or (443 if parsed_url.scheme == "https" else 80)
+        kb = for_target(target)
+        out = parse_whatweb_plugins(result["stdout"], host_ip=host_ip, port=port)
+        if out.get("service"):
+            kb.record_host(HostFact(ip=host_ip))
+            kb.record_service(out["service"])
+        if out.get("note"):
+            kb.record_note(out["note"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in whatweb_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
     return cmd_result_to_tool_result(result)
 
 
@@ -551,6 +635,21 @@ async def banner_grab(args: dict) -> dict:
         cmd.append(f"nc -w 5 {target} {port}")
 
     result = run_cmd(cmd, timeout=10, max_output=8000)
+
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target, HostFact
+        from ..kb.parsers import parse_banner_first_line
+        kb = for_target(target)
+        svc = parse_banner_first_line(result["stdout"], host_ip=target, port=int(port))
+        if svc is not None:
+            kb.record_host(HostFact(ip=target))
+            kb.record_service(svc)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in banner_grab: %s", e)
+    # ───────────────────────────────────────────────────────────────────
+
     return cmd_result_to_tool_result(result)
 
 
@@ -692,6 +791,22 @@ async def ldap_search(args: dict) -> dict:
             output += f"\n\n[Results limited to {size_limit} entries — increase size_limit for more]"
 
         conn.unbind()
+
+        # ── KB write (new) ─────────────────────────────────────────────────
+        try:
+            from ..kb import for_target
+            from ..kb.parsers import parse_ldap_entries
+            kb = for_target(target)
+            parsed = parse_ldap_entries(output)
+            for h in parsed["hosts"]:
+                kb.record_host(h)
+            if parsed["note"]:
+                kb.record_note(parsed["note"])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("KB write failed in ldap_search: %s", e)
+        # ───────────────────────────────────────────────────────────────────
+
         return format_tool_result(output)
 
     except ldap3.core.exceptions.LDAPBindError as e:
@@ -767,6 +882,37 @@ async def smb_enum(args: dict) -> dict:
         if nmap_result.get("stderr") and nmap_result["returncode"] != 0:
             outputs.append(f"[stderr]: {nmap_result['stderr'][:500]}")
 
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target, HostFact
+        from ..kb.parsers import parse_smbclient_shares, parse_nmap_smb_scripts
+        kb = for_target(target)
+        kb.record_host(HostFact(ip=target))
+        joined = "\n\n".join(outputs)
+        smb_out = parse_smbclient_shares(joined)
+        if smb_out["host"].domain:
+            kb.record_host(HostFact(ip=target, domain=smb_out["host"].domain))
+        if smb_out["shares_note"]:
+            kb.record_note(smb_out["shares_note"])
+        nmap_out = parse_nmap_smb_scripts(joined)
+        if nmap_out["host"].ip == target or nmap_out["host"].ip == "":
+            merged = HostFact(
+                ip=target,
+                hostname=nmap_out["host"].hostname,
+                os=nmap_out["host"].os,
+                domain=nmap_out["host"].domain,
+                smb_signing=nmap_out["host"].smb_signing,
+            )
+            kb.record_host(merged)
+        for svc in nmap_out["services"]:
+            kb.record_service(svc)
+        if nmap_out["note"]:
+            kb.record_note(nmap_out["note"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in smb_enum: %s", e)
+    # ───────────────────────────────────────────────────────────────────
+
     return format_tool_result("\n\n".join(outputs))
 
 
@@ -801,6 +947,19 @@ async def nbtscan_scan(args: dict) -> dict:
     cmd.append(target)
 
     result = run_cmd(cmd, timeout=60, max_output=16000)
+
+    # ── KB write (new) ─────────────────────────────────────────────────
+    try:
+        from ..kb import for_target
+        from ..kb.parsers import parse_nbtscan_output
+        kb = for_target(target)
+        for host in parse_nbtscan_output(result["stdout"]):
+            kb.record_host(host)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("KB write failed in nbtscan_scan: %s", e)
+    # ───────────────────────────────────────────────────────────────────
+
     return cmd_result_to_tool_result(result)
 
 
@@ -921,6 +1080,19 @@ async def kerberos_enum(args: dict) -> dict:
                     "impacket GetNPUsers not found. Install impacket: pip install impacket"
                 )
 
+        # ── KB write (new — asreproast) ────────────────────────────────────
+        try:
+            from ..kb import for_target
+            from ..kb.parsers import parse_asreproast_hashes
+            kb = for_target(target)
+            for cred in parse_asreproast_hashes(result["stdout"]):
+                kb.record_credential(cred)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "KB write failed in kerberos_enum/asreproast: %s", e)
+        # ───────────────────────────────────────────────────────────────────
+
         return cmd_result_to_tool_result(result)
 
     elif mode == "kerberoast":
@@ -944,6 +1116,19 @@ async def kerberos_enum(args: dict) -> dict:
                 return format_error(
                     "impacket GetUserSPNs not found. Install impacket: pip install impacket"
                 )
+
+        # ── KB write (new — kerberoast) ────────────────────────────────────
+        try:
+            from ..kb import for_target
+            from ..kb.parsers import parse_kerberoast_hashes
+            kb = for_target(target)
+            for cred in parse_kerberoast_hashes(result["stdout"]):
+                kb.record_credential(cred)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "KB write failed in kerberos_enum/kerberoast: %s", e)
+        # ───────────────────────────────────────────────────────────────────
 
         return cmd_result_to_tool_result(result)
 

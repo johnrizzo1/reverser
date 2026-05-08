@@ -1,0 +1,4 @@
+Impacket v0.11.0 - Copyright 2023 Fortra
+
+[*] Getting TGT for svc_backup
+$krb5asrep$23$svc_backup@CORP.LOCAL:aa11bb22cc33dd44:ee55ff66aabbccdd0011223344556677ee55ff66aabbccdd0011223344556677

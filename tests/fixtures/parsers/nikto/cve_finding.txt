@@ -1,0 +1,11 @@
+- Nikto v2.5.0
+---------------------------------------------------------------------------
++ Target IP:          10.10.10.5
++ Target Port:        443
+---------------------------------------------------------------------------
++ Server: Apache/2.2.15
++ /: Apache/2.2.15 is vulnerable to CVE-2017-9798 (Optionsbleed).
++ /admin/login.php: default credentials may be allowed (admin/admin).
++ /: TRACE method is enabled, allowing Cross-Site Tracing.
++ End Time: 2026-05-03 12:15:00 (GMT0)
+---------------------------------------------------------------------------

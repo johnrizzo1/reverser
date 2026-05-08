@@ -1,0 +1,7 @@
+Impacket v0.11.0 - Copyright 2023 Fortra
+
+ServicePrincipalName            Name      MemberOf                                       PasswordLastSet
+------------------------------  --------  ---------------------------------------------  -------------------
+MSSQLSvc/sql01.corp.local       svc_sql   CN=Domain Users,CN=Users,DC=corp,DC=local      2024-06-01 12:00:00
+
+$krb5tgs$23$*svc_sql$CORP.LOCAL$MSSQLSvc/sql01.corp.local*$cafebabe12345678$0011aabbccddeeff00112233445566778899aabbccddeeff
