@@ -110,3 +110,65 @@ SKILL_SYSCALLS = Skill(
            "file operations, network calls, and process manipulation. Summarize "
            "the syscall patterns.",
 )
+
+SKILL_WEB_RECON = Skill(
+    name="Web Recon",
+    key="r",
+    description="Reconnaissance: subdomain enum, port scan, fingerprinting, WAF detection",
+    prompt="Perform web reconnaissance on the target. Run in parallel: nmap_scan for open "
+           "ports, subfinder_enum for subdomains, whatweb_fingerprint for technology stack, "
+           "and wafw00f_detect for WAF detection. Summarize the attack surface.",
+)
+
+SKILL_WEB_SCAN = Skill(
+    name="Vuln Scan",
+    key="v",
+    description="Run vulnerability scanners (Nuclei, Nikto) against the target",
+    prompt="Run vulnerability scanners against the target. Use nuclei_scan with "
+           "severity=critical,high first, then nikto_scan. Summarize all findings by severity.",
+)
+
+SKILL_WEB_DISCOVER = Skill(
+    name="Discover",
+    key="d",
+    description="Directory and file discovery with fuzzing",
+    prompt="Discover hidden directories, files, and endpoints on the target. Use ffuf_fuzz "
+           "with the default wordlist first, then try with extensions "
+           ".php,.html,.js,.json,.xml,.bak,.old. Report all interesting findings.",
+)
+
+SKILL_WEB_SSL = Skill(
+    name="TLS/SSL",
+    key="l",
+    description="Analyze TLS/SSL configuration and certificates",
+    prompt="Analyze the target's TLS/SSL configuration using testssl_analyze. Report on "
+           "protocol support, cipher suites, certificate details, and any vulnerabilities.",
+)
+
+SKILL_WEB_SQLI = Skill(
+    name="SQLi Test",
+    key="q",
+    description="Test for SQL injection vulnerabilities",
+    prompt="Test the target for SQL injection. Start by using http_request to identify "
+           "forms and parameters, then use sqlmap_test on promising endpoints. Report findings.",
+)
+
+SKILL_WEB_MANUAL = Skill(
+    name="Manual Test",
+    key="m",
+    description="Manual HTTP probing: headers, cookies, auth, CORS",
+    prompt="Perform manual HTTP testing on the target. Use http_request to: check security "
+           "headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, etc.), test CORS "
+           "configuration, examine cookies (HttpOnly, Secure, SameSite flags), check for "
+           "information disclosure in headers and error pages. Report all findings.",
+)
+
+SKILL_WEB_REPORT = Skill(
+    name="Report",
+    key="w",
+    description="Generate a penetration test report of findings",
+    prompt="Based on everything discovered so far, write a structured penetration test "
+           "report: Executive summary, scope, methodology, findings (sorted by severity "
+           "with CVSS where applicable), evidence, and remediation recommendations. "
+           "Use markdown formatting.",
+)

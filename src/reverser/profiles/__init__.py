@@ -50,4 +50,18 @@ def list_profiles() -> list[Profile]:
 
 
 # ── Profile module imports (each registers itself on import) ────────
-# These will be added one-by-one as profile modules are created.
+from . import (  # noqa: F401, E402  # imported for side effects
+    general,
+    linux,
+    windows,
+    android,
+    chrome,
+    managed,
+    api,
+    pentest,
+    webpentest,
+    webapi,
+    webrecon,
+    ad,
+    ctf,
+)
