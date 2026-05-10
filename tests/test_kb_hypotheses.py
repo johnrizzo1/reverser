@@ -86,8 +86,14 @@ from reverser.kb.store import KB, HypothesisFact
 
 
 def _fresh_kb(tmp_path, monkeypatch, target="testtarget"):
-    """Create an isolated KB rooted at tmp_path."""
+    """Create an isolated KB rooted at tmp_path.
+
+    Clears the per-process KB cache so subsequent for_target() calls (used
+    inside the @tool-wrapped MCP functions) see this test's fresh dir.
+    """
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
     return KB(target)  # constructor takes the raw target string and normalizes internally
 
 
@@ -228,3 +234,56 @@ def test_resolve_evidence_refs_skips_unknown_kinds(tmp_path, monkeypatch):
     refs = [{"kind": "alien_artifact", "id": 99}]
     resolved = kb.resolve_evidence_refs(refs)
     assert resolved == []
+
+
+import asyncio
+
+
+def _call_tool(tool_obj, args):
+    """Invoke an SDK tool object's underlying coroutine.
+
+    The claude_agent_sdk @tool decorator returns an SdkMcpTool whose callable
+    lives on .handler. Fall back to .fn or calling the object directly for
+    forward/backward compatibility.
+    """
+    fn = getattr(tool_obj, "handler", None) or getattr(tool_obj, "fn", None) or tool_obj
+    return asyncio.new_event_loop().run_until_complete(fn(args))
+
+
+def test_kb_add_hypothesis_tool_persists(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.kb import kb_add_hypothesis
+
+    result = _call_tool(kb_add_hypothesis, {
+        "target": "10.10.10.5",
+        "statement": "DC has SMB signing disabled",
+        "rationale": "from nmap output",
+        "confidence": 80,
+        "tags": ["smb", "high-impact"],
+    })
+    assert "id" in result["content"][0]["text"] or "id" in str(result)
+    # verify persistence
+    kb = _fresh_kb(tmp_path, monkeypatch, target="10.10.10.5")
+    hypotheses = kb.list_hypotheses()
+    assert len(hypotheses) == 1
+    assert hypotheses[0].statement == "DC has SMB signing disabled"
+    assert hypotheses[0].confidence == 80
+
+
+def test_kb_get_hypothesis_tool_returns_record_with_children(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.kb import kb_get_hypothesis
+
+    kb = _fresh_kb(tmp_path, monkeypatch, target="10.10.10.5")
+    parent = kb.add_hypothesis(statement="parent")
+    child = kb.add_hypothesis(statement="child", parent_id=parent.id)
+
+    result = _call_tool(kb_get_hypothesis, {
+        "target": "10.10.10.5",
+        "id": parent.id,
+    })
+    text = result["content"][0]["text"]
+    assert "parent" in text
+    assert str(child.id) in text  # children listed
