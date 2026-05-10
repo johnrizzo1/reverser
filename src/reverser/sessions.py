@@ -162,3 +162,73 @@ def new_snapshot(
         config=config,
         pid=os.getpid(),
     )
+
+
+def snapshot_path(target: str, session_id: str) -> Path:
+    """Canonical path for a session snapshot file."""
+    return _targets_root() / target / "sessions" / f"{session_id}.json"
+
+
+def _from_dict(d: dict) -> SessionSnapshot:
+    """Reconstruct a SessionSnapshot from a dict (the inverse of asdict)."""
+    config_data = d.get("config", {})
+    stats_data = d.get("stats", {})
+    ui_data = d.get("ui", {})
+    in_flight_data = d.get("in_flight")
+    conversation_data = d.get("conversation", [])
+
+    return SessionSnapshot(
+        session_id=d["session_id"],
+        target=d["target"],
+        log_path=d["log_path"],
+        state=d["state"],
+        started_at=d["started_at"],
+        last_active_at=d["last_active_at"],
+        stopped_at=d.get("stopped_at"),
+        config=SessionConfig(**config_data) if config_data else SessionConfig(profile="general"),
+        stats=SessionStats(**stats_data) if stats_data else SessionStats(),
+        conversation=[ConversationEntry(**e) for e in conversation_data],
+        ui=UIState(**ui_data) if ui_data else UIState(),
+        in_flight=InFlightDispatch(**in_flight_data) if in_flight_data else None,
+        pid=d.get("pid"),
+        schema_version=d.get("schema_version", 1),
+    )
+
+
+def save(snapshot: SessionSnapshot) -> None:
+    """Atomically write the snapshot to disk.
+
+    Updates last_active_at to now before serialization. Writes to a
+    sibling .tmp file then renames atomically; partially-written snapshots
+    never appear at the canonical path.
+    """
+    snapshot.last_active_at = _now_iso()
+    path = snapshot_path(snapshot.target, snapshot.session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    payload = json.dumps(asdict(snapshot), indent=2, sort_keys=False)
+    tmp_path.write_text(payload)
+    os.replace(tmp_path, path)
+
+
+def load(target: str, session_id: str) -> SessionSnapshot:
+    """Read and parse a snapshot file.
+
+    Raises SessionNotFoundError if the file is missing.
+    Raises SchemaError if schema_version is unknown.
+    """
+    path = snapshot_path(target, session_id)
+    if not path.exists():
+        raise SessionNotFoundError(
+            f"No snapshot at {path}. Use --list-sessions to see available sessions."
+        )
+    data = json.loads(path.read_text())
+    version = data.get("schema_version", 1)
+    if version != SCHEMA_VERSION:
+        raise SchemaError(
+            f"Snapshot schema version {version} is not supported "
+            f"(this reverser supports v{SCHEMA_VERSION}). "
+            f"Either upgrade reverser or hand-edit the file at {path}."
+        )
+    return _from_dict(data)

@@ -119,3 +119,149 @@ def test_snapshot_serializes_to_dict():
     assert d["config"]["profile"] == "manager"
     assert d["conversation"] == []
     assert d["pid"] is None
+
+
+def test_snapshot_path_uses_targets_dir(tmp_path, monkeypatch):
+    """snapshot_path returns targets/<target>/sessions/<id>.json under REVERSER_TARGETS_DIR."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import snapshot_path
+
+    p = snapshot_path("10.10.10.5", "2026-05-09T14-23-00")
+    assert p == tmp_path / "10.10.10.5" / "sessions" / "2026-05-09T14-23-00.json"
+
+
+def test_save_creates_directory_and_file(tmp_path, monkeypatch):
+    """save() creates the target/sessions/ directory if missing and writes the file."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, new_snapshot, SessionConfig
+
+    snap = new_snapshot(
+        target="10.10.10.5",
+        log_path="logs/test.jsonl",
+        config=SessionConfig(profile="manager"),
+    )
+    save(snap)
+
+    expected = tmp_path / "10.10.10.5" / "sessions" / f"{snap.session_id}.json"
+    assert expected.exists()
+    import json
+    data = json.loads(expected.read_text())
+    assert data["session_id"] == snap.session_id
+    assert data["state"] == "active"
+
+
+def test_save_updates_last_active_at(tmp_path, monkeypatch):
+    """save() bumps last_active_at to now before serializing."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, load, new_snapshot, SessionConfig
+    import time
+
+    snap = new_snapshot(
+        target="10.10.10.5",
+        log_path="logs/test.jsonl",
+        config=SessionConfig(profile="manager"),
+    )
+    original_last_active = snap.last_active_at
+    time.sleep(1.1)
+    save(snap)
+
+    loaded = load("10.10.10.5", snap.session_id)
+    assert loaded.last_active_at != original_last_active
+
+
+def test_save_is_atomic(tmp_path, monkeypatch):
+    """save() never leaves a partially-written file at the canonical path."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, new_snapshot, SessionConfig
+
+    snap = new_snapshot(
+        target="10.10.10.5",
+        log_path="logs/test.jsonl",
+        config=SessionConfig(profile="manager"),
+    )
+    save(snap)
+
+    canonical = tmp_path / "10.10.10.5" / "sessions" / f"{snap.session_id}.json"
+    tmp_files = list((tmp_path / "10.10.10.5" / "sessions").glob("*.tmp"))
+
+    assert canonical.exists()
+    assert tmp_files == []
+
+
+def test_load_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import (
+        save, load, new_snapshot, SessionConfig, ConversationEntry,
+    )
+
+    snap = new_snapshot(
+        target="10.10.10.5",
+        log_path="logs/test.jsonl",
+        config=SessionConfig(profile="manager", budget=10.0),
+    )
+    snap.conversation = [
+        ConversationEntry(user="hi", agent="hello", turn=1,
+                          timestamp="2026-05-09T14:23:00", cost=0.01),
+        ConversationEntry(user="next", agent="ok", turn=2,
+                          timestamp="2026-05-09T14:24:00", cost=0.02),
+    ]
+    snap.stats.total_cost = 0.03
+    snap.stats.turns = 2
+    save(snap)
+
+    loaded = load("10.10.10.5", snap.session_id)
+    assert loaded.session_id == snap.session_id
+    assert loaded.target == snap.target
+    assert loaded.config.profile == "manager"
+    assert loaded.config.budget == 10.0
+    assert loaded.stats.total_cost == 0.03
+    assert loaded.stats.turns == 2
+    assert len(loaded.conversation) == 2
+    assert loaded.conversation[0].user == "hi"
+    assert loaded.conversation[1].cost == 0.02
+
+
+def test_load_raises_session_not_found_on_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import load, SessionNotFoundError
+
+    with pytest.raises(SessionNotFoundError):
+        load("10.10.10.5", "nonexistent-session-id")
+
+
+def test_load_raises_schema_error_on_bad_version(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import load, SchemaError, snapshot_path
+    import json
+
+    p = snapshot_path("10.10.10.5", "future-session")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "session_id": "future-session",
+        "target": "10.10.10.5",
+        "log_path": "logs/x.jsonl",
+        "state": "active",
+        "started_at": "2030-01-01T00:00:00",
+        "last_active_at": "2030-01-01T00:00:00",
+        "schema_version": 99,
+    }))
+
+    with pytest.raises(SchemaError):
+        load("10.10.10.5", "future-session")
+
+
+def test_save_overwrites_existing(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, load, new_snapshot, SessionConfig
+
+    snap = new_snapshot(
+        target="10.10.10.5",
+        log_path="logs/test.jsonl",
+        config=SessionConfig(profile="manager"),
+    )
+    save(snap)
+    snap.stats.turns = 5
+    save(snap)
+
+    loaded = load("10.10.10.5", snap.session_id)
+    assert loaded.stats.turns == 5
