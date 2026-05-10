@@ -27,8 +27,14 @@ if TYPE_CHECKING:
     from reverser.tui.session import Session
 
 
-SessionState = Literal["active", "stopped", "completed"]
+SessionState = Literal["active", "stopped", "completed", "abandoned"]
 SCHEMA_VERSION = 1
+
+# Terminal states — sessions in these states are not offered for resume by
+# default. `completed` = user explicitly marked done; `abandoned` = TUI
+# exited without ever incrementing turns (typically: launched and quit
+# without sending any messages).
+_TERMINAL_STATES = ("completed", "abandoned")
 
 
 @dataclass
@@ -282,19 +288,66 @@ def list_all(*, exclude_completed: bool = False) -> list[SessionSnapshot]:
 
 
 def latest_for_target(
-    target: str, *, exclude_completed: bool = True
+    target: str,
+    *,
+    exclude_completed: bool = True,
+    exclude_abandoned: bool = True,
+    prefer_nonempty: bool = True,
 ) -> Optional[SessionSnapshot]:
-    """Most recent snapshot for the target. Default excludes completed."""
-    snaps = list_for_target(target, exclude_completed=exclude_completed)
-    return snaps[0] if snaps else None
+    """Most recent snapshot for the target.
+
+    Defaults exclude terminal states (completed, abandoned) — terminal
+    sessions are not meant to be resumed.
+
+    With prefer_nonempty=True (default), prefers the most recent session
+    that has at least one turn over a more-recent zero-turn session. This
+    matches the typical user intent ("resume my work, not the empty TUI
+    launch from 30 seconds ago"). Falls back to the most recent of any
+    eligible session if all eligible sessions are empty.
+    """
+    return _pick_latest(
+        list_for_target(target),
+        exclude_completed=exclude_completed,
+        exclude_abandoned=exclude_abandoned,
+        prefer_nonempty=prefer_nonempty,
+    )
 
 
 def latest_global(
-    *, exclude_completed: bool = True
+    *,
+    exclude_completed: bool = True,
+    exclude_abandoned: bool = True,
+    prefer_nonempty: bool = True,
 ) -> Optional[SessionSnapshot]:
-    """Most recent snapshot across all targets."""
-    snaps = list_all(exclude_completed=exclude_completed)
-    return snaps[0] if snaps else None
+    """Most recent snapshot across all targets. Same filtering as latest_for_target."""
+    return _pick_latest(
+        list_all(),
+        exclude_completed=exclude_completed,
+        exclude_abandoned=exclude_abandoned,
+        prefer_nonempty=prefer_nonempty,
+    )
+
+
+def _pick_latest(
+    snaps: list[SessionSnapshot],
+    *,
+    exclude_completed: bool,
+    exclude_abandoned: bool,
+    prefer_nonempty: bool,
+) -> Optional[SessionSnapshot]:
+    """Apply terminal-state filters and (optionally) the nonempty preference."""
+    eligible = [
+        s for s in snaps
+        if not (exclude_completed and s.state == "completed")
+        and not (exclude_abandoned and s.state == "abandoned")
+    ]
+    if not eligible:
+        return None
+    if prefer_nonempty:
+        nonempty = [s for s in eligible if s.stats.turns > 0]
+        if nonempty:
+            return nonempty[0]  # already sorted desc by last_active_at
+    return eligible[0]
 
 
 def is_session_alive(snapshot: SessionSnapshot) -> bool:

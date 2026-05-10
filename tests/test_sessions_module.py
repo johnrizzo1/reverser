@@ -457,3 +457,109 @@ def test_is_session_alive_false_when_pid_is_none(tmp_path, monkeypatch):
                         config=SessionConfig(profile="manager"))
     snap.pid = None
     assert is_session_alive(snap) is False
+
+
+def test_latest_for_target_prefers_nonempty_session(tmp_path, monkeypatch):
+    """latest_for_target picks the most recent session with turns>0 over a
+    more-recent empty session."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    import time
+    from reverser.sessions import (
+        save, latest_for_target, SessionSnapshot, SessionConfig, SessionStats,
+    )
+    # Older session with real work
+    with_work = SessionSnapshot(
+        session_id="2026-05-10T17-52-25", target="10.10.10.5",
+        log_path="logs/work.jsonl", state="active",
+        started_at="2026-05-10T17:52:25", last_active_at="2026-05-10T17:52:25",
+        config=SessionConfig(profile="manager"),
+        stats=SessionStats(turns=50, total_cost=1.84),
+    )
+    save(with_work)
+    time.sleep(1.1)
+    # Newer empty session (e.g. accidental launch)
+    empty = SessionSnapshot(
+        session_id="2026-05-10T19-05-07", target="10.10.10.5",
+        log_path="logs/empty.jsonl", state="active",
+        started_at="2026-05-10T19:05:07", last_active_at="2026-05-10T19:05:07",
+        config=SessionConfig(profile="manager"),
+        stats=SessionStats(turns=0, total_cost=0.0),
+    )
+    save(empty)
+
+    latest = latest_for_target("10.10.10.5")
+    assert latest is not None
+    assert latest.session_id == "2026-05-10T17-52-25"
+    assert latest.stats.turns == 50
+
+
+def test_latest_for_target_falls_back_when_all_empty(tmp_path, monkeypatch):
+    """When every eligible session has turns==0, return the most recent
+    rather than None."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    import time
+    from reverser.sessions import (
+        save, latest_for_target, SessionSnapshot, SessionConfig,
+    )
+    older = SessionSnapshot(
+        session_id="older", target="10.10.10.5", log_path="logs/o.jsonl",
+        state="active", started_at="2026-05-10T17:00:00",
+        last_active_at="2026-05-10T17:00:00",
+        config=SessionConfig(profile="general"),
+    )
+    save(older)
+    time.sleep(1.1)
+    newer = SessionSnapshot(
+        session_id="newer", target="10.10.10.5", log_path="logs/n.jsonl",
+        state="active", started_at="2026-05-10T18:00:00",
+        last_active_at="2026-05-10T18:00:00",
+        config=SessionConfig(profile="general"),
+    )
+    save(newer)
+
+    latest = latest_for_target("10.10.10.5")
+    assert latest is not None
+    assert latest.session_id == "newer"  # all empty, falls back to most recent
+
+
+def test_latest_for_target_excludes_abandoned_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import (
+        save, latest_for_target, SessionSnapshot, SessionConfig, SessionStats,
+    )
+    abandoned_recent = SessionSnapshot(
+        session_id="abandoned-1", target="10.10.10.5",
+        log_path="logs/a.jsonl", state="abandoned",
+        started_at="2026-05-10T19:00:00", last_active_at="2026-05-10T19:00:00",
+        config=SessionConfig(profile="general"),
+    )
+    stopped_older = SessionSnapshot(
+        session_id="stopped-1", target="10.10.10.5",
+        log_path="logs/s.jsonl", state="stopped",
+        started_at="2026-05-10T17:00:00", last_active_at="2026-05-10T17:00:00",
+        config=SessionConfig(profile="general"),
+        stats=SessionStats(turns=10),
+    )
+    save(abandoned_recent)
+    save(stopped_older)
+
+    latest = latest_for_target("10.10.10.5")
+    assert latest is not None
+    assert latest.session_id == "stopped-1"
+
+
+def test_abandoned_state_round_trip(tmp_path, monkeypatch):
+    """A snapshot with state='abandoned' loads back correctly."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import (
+        save, load, SessionSnapshot, SessionConfig,
+    )
+    snap = SessionSnapshot(
+        session_id="abandoned-1", target="10.10.10.5",
+        log_path="logs/a.jsonl", state="abandoned",
+        started_at="2026-05-10T19:00:00", last_active_at="2026-05-10T19:00:00",
+        config=SessionConfig(profile="general"),
+    )
+    save(snap)
+    loaded = load("10.10.10.5", "abandoned-1")
+    assert loaded.state == "abandoned"

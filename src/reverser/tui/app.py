@@ -827,14 +827,26 @@ class ReverserApp(App):
 def _emergency_snapshot(session) -> None:
     """Best-effort save on interpreter shutdown — runs even on crash/SIGTERM.
 
+    Also auto-marks zero-turn active sessions as `abandoned`, so launching
+    the TUI repeatedly without sending any messages doesn't accumulate
+    ghost "active" snapshots forever. Sessions in `stopped` / `completed`
+    are left untouched.
+
     Called from atexit and SIGTERM signal handler. Catches all exceptions
     because we're shutting down; nothing useful we can do if save fails.
     """
     if session is None:
         return
     try:
+        from datetime import datetime, timezone
         from ..sessions import save as save_snapshot
-        save_snapshot(session._snapshot)
+
+        snap = session._snapshot
+        if snap.state == "active" and snap.stats.turns == 0:
+            snap.state = "abandoned"
+            snap.stopped_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            snap.pid = None
+        save_snapshot(snap)
     except Exception:
         pass
 

@@ -31,3 +31,66 @@ def test_emergency_snapshot_handles_none_session():
     """Called with None session, _emergency_snapshot is a no-op (no exception)."""
     from reverser.tui.app import _emergency_snapshot
     _emergency_snapshot(None)  # should not raise
+
+
+def test_emergency_snapshot_marks_zero_turn_active_as_abandoned(tmp_path, monkeypatch):
+    """Zero-turn active session → abandoned on TUI exit."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.profiles import get_profile
+    from reverser.tui.session import AgentSession
+    from reverser.tui.app import _emergency_snapshot
+    from reverser.sessions import load
+
+    sess = AgentSession(
+        binary_path="10.10.10.5",
+        profile=get_profile("general"),
+    )
+    sid = sess._snapshot.session_id
+    # Session has 0 turns (default)
+    _emergency_snapshot(sess)
+
+    loaded = load(sess.target, sid)
+    assert loaded.state == "abandoned"
+    assert loaded.stopped_at is not None
+    assert loaded.pid is None
+
+
+def test_emergency_snapshot_preserves_active_when_session_had_work(tmp_path, monkeypatch):
+    """Active session with turns>0 stays active (only zero-turn sessions get abandoned)."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.profiles import get_profile
+    from reverser.tui.session import AgentSession
+    from reverser.tui.app import _emergency_snapshot
+    from reverser.sessions import load
+
+    sess = AgentSession(
+        binary_path="10.10.10.5",
+        profile=get_profile("general"),
+    )
+    sid = sess._snapshot.session_id
+    # Simulate real work
+    sess._snapshot.stats.turns = 5
+    _emergency_snapshot(sess)
+
+    loaded = load(sess.target, sid)
+    assert loaded.state == "active"  # not abandoned
+
+
+def test_emergency_snapshot_preserves_stopped_state(tmp_path, monkeypatch):
+    """Already-stopped session stays stopped (don't downgrade)."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.profiles import get_profile
+    from reverser.tui.session import AgentSession
+    from reverser.tui.app import _emergency_snapshot
+    from reverser.sessions import load
+
+    sess = AgentSession(
+        binary_path="10.10.10.5",
+        profile=get_profile("general"),
+    )
+    sid = sess._snapshot.session_id
+    sess.stop()
+    _emergency_snapshot(sess)
+
+    loaded = load(sess.target, sid)
+    assert loaded.state == "stopped"
