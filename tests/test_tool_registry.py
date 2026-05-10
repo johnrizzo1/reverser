@@ -31,3 +31,33 @@ def test_all_six_bloodhound_tools_registered():
 def test_bloodhound_tools_count():
     bh_names = {t.name for t in ALL_TOOLS if t.name.startswith("bloodhound_")}
     assert len(bh_names) == 6
+
+
+def test_dispatch_specialist_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "dispatch_specialist" in names
+
+
+def test_all_hypothesis_tools_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "kb_add_hypothesis" in names
+    assert "kb_update_hypothesis" in names
+    assert "kb_list_hypotheses" in names
+    assert "kb_get_hypothesis" in names
+
+
+def test_all_tools_count_after_manager_work():
+    """Total registered tools after the manager-profile plan.
+
+    Baseline ALL_TOOLS list had 63 entries (61 unique — `nmap_scan` and
+    `nikto_scan` were each registered twice as a pre-existing quirk).
+    Plan added 4 hypothesis CRUD + 1 dispatch_specialist = 68 registered,
+    66 unique. The spec's "68" was the registered count (not unique).
+    """
+    assert len(ALL_TOOLS) == 68, (
+        f"expected 68 registered tools, got {len(ALL_TOOLS)}"
+    )
+    unique_names = {t.name for t in ALL_TOOLS}
+    assert len(unique_names) == 66, (
+        f"expected 66 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
+    )
