@@ -287,3 +287,64 @@ def test_kb_get_hypothesis_tool_returns_record_with_children(tmp_path, monkeypat
     text = result["content"][0]["text"]
     assert "parent" in text
     assert str(child.id) in text  # children listed
+
+
+def test_kb_update_hypothesis_tool_changes_status(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.kb import kb_update_hypothesis
+
+    kb = _fresh_kb(tmp_path, monkeypatch, target="10.10.10.5")
+    h = kb.add_hypothesis(statement="x")
+    result = _call_tool(kb_update_hypothesis, {
+        "target": "10.10.10.5",
+        "id": h.id,
+        "status": "confirmed",
+        "confidence": 95,
+        "evidence_refs": [{"kind": "finding", "id": 1}],
+    })
+    text = result["content"][0]["text"]
+    assert "updated" in text.lower()
+
+    fetched = kb.get_hypothesis(h.id)
+    assert fetched.status == "confirmed"
+    assert fetched.confidence == 95
+    assert fetched.evidence_refs == [{"kind": "finding", "id": 1}]
+
+
+def test_kb_list_hypotheses_tool_returns_table(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.kb import kb_list_hypotheses
+
+    kb = _fresh_kb(tmp_path, monkeypatch, target="10.10.10.5")
+    kb.add_hypothesis(statement="alpha")
+    kb.add_hypothesis(statement="beta")
+
+    result = _call_tool(kb_list_hypotheses, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "alpha" in text
+    assert "beta" in text
+
+
+def test_kb_list_hypotheses_tool_with_include_tree(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.kb import kb_list_hypotheses
+
+    kb = _fresh_kb(tmp_path, monkeypatch, target="10.10.10.5")
+    parent = kb.add_hypothesis(statement="parent")
+    kb.add_hypothesis(statement="child", parent_id=parent.id)
+
+    result = _call_tool(kb_list_hypotheses, {
+        "target": "10.10.10.5",
+        "include_tree": True,
+    })
+    text = result["content"][0]["text"]
+    # The tree-rendered output indents children
+    assert "parent" in text
+    assert "child" in text
+    # Child should appear indented (after the parent line)
+    parent_idx = text.index("parent")
+    child_idx = text.index("child")
+    assert child_idx > parent_idx
