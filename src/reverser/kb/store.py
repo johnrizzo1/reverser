@@ -91,6 +91,22 @@ class CredResult:
     error_msg: Optional[str] = None
 
 
+@dataclass
+class HypothesisFact:
+    id: int | None = None
+    parent_id: int | None = None
+    statement: str = ""
+    rationale: str | None = None
+    status: str = "proposed"
+    confidence: int | None = None
+    dispatched_to: str | None = None
+    dispatch_count: int = 0
+    evidence_refs: list[dict] | None = None
+    tags: list[str] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 def normalize_target(target: str) -> str:
     """Normalize a target identifier (lowercase, strip)."""
     if not target or not target.strip():
@@ -413,3 +429,136 @@ class KB:
                 (self.target_id,),
             )
             return [r[0] for r in cursor.fetchall()]
+
+    # ── Hypothesis CRUD ────────────────────────────────────────────────
+
+    def add_hypothesis(
+        self,
+        statement: str,
+        *,
+        parent_id: int | None = None,
+        rationale: str | None = None,
+        confidence: int | None = None,
+        tags: list[str] | None = None,
+    ) -> HypothesisFact:
+        """Insert a new hypothesis. Returns the persisted fact with id populated."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO hypotheses "
+                "(target_id, parent_id, statement, rationale, confidence, tags, "
+                "status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?)",
+                (
+                    self.target_id, parent_id, statement, rationale, confidence,
+                    json.dumps(tags) if tags is not None else None,
+                    _now_iso(), _now_iso(),
+                ),
+            )
+            new_id = cur.lastrowid
+            conn.commit()
+        return self.get_hypothesis(new_id)
+
+    def update_hypothesis(
+        self,
+        hypothesis_id: int,
+        *,
+        status: str | None = None,
+        rationale: str | None = None,
+        confidence: int | None = None,
+        dispatched_to: str | None = None,
+        evidence_refs: list[dict] | None = None,
+        tags: list[str] | None = None,
+        increment_dispatch_count: bool = False,
+    ) -> None:
+        """Update fields on an existing hypothesis. Only provided kwargs are written."""
+        sets: list[str] = []
+        params: list = []
+        if status is not None:
+            sets.append("status = ?")
+            params.append(status)
+        if rationale is not None:
+            sets.append("rationale = ?")
+            params.append(rationale)
+        if confidence is not None:
+            sets.append("confidence = ?")
+            params.append(confidence)
+        if dispatched_to is not None:
+            sets.append("dispatched_to = ?")
+            params.append(dispatched_to)
+        if evidence_refs is not None:
+            sets.append("evidence_refs = ?")
+            params.append(json.dumps(evidence_refs))
+        if tags is not None:
+            sets.append("tags = ?")
+            params.append(json.dumps(tags))
+        if increment_dispatch_count:
+            sets.append("dispatch_count = dispatch_count + 1")
+        if not sets:
+            return  # nothing to do
+        sets.append("updated_at = ?")
+        params.append(_now_iso())
+        params.append(hypothesis_id)
+        params.append(self.target_id)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE hypotheses SET {', '.join(sets)} "
+                "WHERE id = ? AND target_id = ?",
+                tuple(params),
+            )
+            conn.commit()
+
+    def get_hypothesis(self, hypothesis_id: int) -> HypothesisFact | None:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT id, parent_id, statement, rationale, status, confidence, "
+                "dispatched_to, dispatch_count, evidence_refs, tags, "
+                "created_at, updated_at "
+                "FROM hypotheses WHERE id = ? AND target_id = ?",
+                (hypothesis_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return self._row_to_hypothesis(row)
+
+    def list_hypotheses(
+        self,
+        *,
+        status: str | None = None,
+        parent_id: int | None = None,
+    ) -> list[HypothesisFact]:
+        sql = (
+            "SELECT id, parent_id, statement, rationale, status, confidence, "
+            "dispatched_to, dispatch_count, evidence_refs, tags, "
+            "created_at, updated_at "
+            "FROM hypotheses WHERE target_id = ?"
+        )
+        params: list = [self.target_id]
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        if parent_id is not None:
+            sql += " AND parent_id = ?"
+            params.append(parent_id)
+        sql += " ORDER BY id"
+        with self._connect() as conn:
+            cur = conn.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [self._row_to_hypothesis(r) for r in rows]
+
+    @staticmethod
+    def _row_to_hypothesis(row) -> HypothesisFact:
+        return HypothesisFact(
+            id=row[0],
+            parent_id=row[1],
+            statement=row[2],
+            rationale=row[3],
+            status=row[4],
+            confidence=row[5],
+            dispatched_to=row[6],
+            dispatch_count=row[7],
+            evidence_refs=json.loads(row[8]) if row[8] else None,
+            tags=json.loads(row[9]) if row[9] else None,
+            created_at=row[10],
+            updated_at=row[11],
+        )
