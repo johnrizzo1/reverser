@@ -265,3 +265,195 @@ def test_save_overwrites_existing(tmp_path, monkeypatch):
 
     loaded = load("10.10.10.5", snap.session_id)
     assert loaded.stats.turns == 5
+
+
+def test_list_for_target_returns_snapshots_sorted_desc(tmp_path, monkeypatch):
+    """Sort by last_active_at desc.
+
+    Note: save() bumps last_active_at to now, so we sleep between saves
+    so the second snapshot has a strictly newer timestamp at second precision.
+    """
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    import time
+    from reverser.sessions import (
+        save, list_for_target, SessionSnapshot, SessionConfig,
+    )
+    older = SessionSnapshot(
+        session_id="2026-05-08T09-12-44", target="10.10.10.5",
+        log_path="logs/older.jsonl", state="stopped",
+        started_at="2026-05-08T09:12:44", last_active_at="2026-05-08T17:33:00",
+        config=SessionConfig(profile="manager"),
+    )
+    save(older)
+    time.sleep(1.1)
+    newer = SessionSnapshot(
+        session_id="2026-05-09T14-23-00", target="10.10.10.5",
+        log_path="logs/newer.jsonl", state="active",
+        started_at="2026-05-09T14:23:00", last_active_at="2026-05-09T18:47:00",
+        config=SessionConfig(profile="manager"),
+    )
+    save(newer)
+    snaps = list_for_target("10.10.10.5")
+    assert len(snaps) == 2
+    assert snaps[0].session_id == "2026-05-09T14-23-00"
+    assert snaps[1].session_id == "2026-05-08T09-12-44"
+
+
+def test_list_for_target_empty_when_no_sessions(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import list_for_target
+    assert list_for_target("nonexistent-target") == []
+
+
+def test_list_for_target_excludes_completed_when_requested(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import (
+        save, list_for_target, SessionSnapshot, SessionConfig,
+    )
+    completed = SessionSnapshot(
+        session_id="completed-1", target="10.10.10.5", log_path="logs/c.jsonl",
+        state="completed", started_at="2026-05-08T09:12:44",
+        last_active_at="2026-05-08T17:33:00", config=SessionConfig(profile="manager"),
+    )
+    active = SessionSnapshot(
+        session_id="active-1", target="10.10.10.5", log_path="logs/a.jsonl",
+        state="active", started_at="2026-05-09T14:23:00",
+        last_active_at="2026-05-09T18:47:00", config=SessionConfig(profile="manager"),
+    )
+    save(completed)
+    save(active)
+    assert len(list_for_target("10.10.10.5")) == 2
+    only_resumable = list_for_target("10.10.10.5", exclude_completed=True)
+    assert len(only_resumable) == 1
+    assert only_resumable[0].session_id == "active-1"
+
+
+def test_list_for_target_skips_tmp_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, list_for_target, snapshot_path, new_snapshot, SessionConfig
+    snap = new_snapshot(target="10.10.10.5", log_path="logs/x.jsonl",
+                        config=SessionConfig(profile="manager"))
+    save(snap)
+    orphan = snapshot_path("10.10.10.5", "orphan-id").with_suffix(".json.tmp")
+    orphan.write_text("{not even valid json")
+    snaps = list_for_target("10.10.10.5")
+    assert len(snaps) == 1
+
+
+def test_list_all_walks_all_target_directories(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, list_all, SessionSnapshot, SessionConfig
+    snap_a = SessionSnapshot(
+        session_id="2026-05-09T14-23-00", target="10.10.10.5", log_path="logs/a.jsonl",
+        state="active", started_at="2026-05-09T14:23:00",
+        last_active_at="2026-05-09T18:47:00", config=SessionConfig(profile="manager"),
+    )
+    snap_b = SessionSnapshot(
+        session_id="2026-05-08T09-12-44", target="10.10.10.7", log_path="logs/b.jsonl",
+        state="stopped", started_at="2026-05-08T09:12:44",
+        last_active_at="2026-05-08T17:33:00", config=SessionConfig(profile="ad"),
+    )
+    save(snap_a)
+    save(snap_b)
+    snaps = list_all()
+    assert len(snaps) == 2
+    assert {s.target for s in snaps} == {"10.10.10.5", "10.10.10.7"}
+
+
+def test_latest_for_target_picks_most_recent_resumable(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, latest_for_target, SessionSnapshot, SessionConfig
+    import time
+    older = SessionSnapshot(
+        session_id="older", target="10.10.10.5", log_path="logs/o.jsonl",
+        state="stopped", started_at="2026-05-08T09:12:44",
+        last_active_at="2026-05-08T17:33:00", config=SessionConfig(profile="manager"),
+    )
+    save(older)
+    time.sleep(1.1)
+    newer = SessionSnapshot(
+        session_id="newer", target="10.10.10.5", log_path="logs/n.jsonl",
+        state="active", started_at="2026-05-09T14:23:00",
+        last_active_at="2026-05-09T18:47:00", config=SessionConfig(profile="manager"),
+    )
+    save(newer)
+    latest = latest_for_target("10.10.10.5")
+    assert latest is not None
+    assert latest.session_id == "newer"
+
+
+def test_latest_for_target_excludes_completed_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, latest_for_target, SessionSnapshot, SessionConfig
+    completed = SessionSnapshot(
+        session_id="completed-recent", target="10.10.10.5", log_path="logs/c.jsonl",
+        state="completed", started_at="2026-05-09T15:00:00",
+        last_active_at="2026-05-09T18:00:00", config=SessionConfig(profile="manager"),
+    )
+    older_stopped = SessionSnapshot(
+        session_id="stopped-older", target="10.10.10.5", log_path="logs/s.jsonl",
+        state="stopped", started_at="2026-05-08T09:12:44",
+        last_active_at="2026-05-08T17:33:00", config=SessionConfig(profile="manager"),
+    )
+    save(completed)
+    save(older_stopped)
+    latest = latest_for_target("10.10.10.5")
+    assert latest is not None
+    assert latest.session_id == "stopped-older"
+
+
+def test_latest_for_target_returns_none_when_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import latest_for_target
+    assert latest_for_target("nothing-here") is None
+
+
+def test_latest_global_picks_most_recent_across_all_targets(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import save, latest_global, SessionSnapshot, SessionConfig
+    import time
+    a = SessionSnapshot(
+        session_id="a", target="10.10.10.5", log_path="logs/a.jsonl",
+        state="stopped", started_at="2026-05-08T09:12:44",
+        last_active_at="2026-05-08T17:33:00", config=SessionConfig(profile="manager"),
+    )
+    save(a)
+    time.sleep(1.1)
+    b = SessionSnapshot(
+        session_id="b", target="10.10.10.7", log_path="logs/b.jsonl",
+        state="active", started_at="2026-05-09T14:23:00",
+        last_active_at="2026-05-09T18:47:00", config=SessionConfig(profile="ad"),
+    )
+    save(b)
+    latest = latest_global()
+    assert latest is not None
+    assert latest.session_id == "b"
+    assert latest.target == "10.10.10.7"
+
+
+def test_is_session_alive_true_for_own_pid(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import is_session_alive, new_snapshot, SessionConfig
+    import os
+    snap = new_snapshot(target="10.10.10.5", log_path="logs/x.jsonl",
+                        config=SessionConfig(profile="manager"))
+    assert snap.pid == os.getpid()
+    assert is_session_alive(snap) is True
+
+
+def test_is_session_alive_false_for_dead_pid(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import is_session_alive, new_snapshot, SessionConfig
+    snap = new_snapshot(target="10.10.10.5", log_path="logs/x.jsonl",
+                        config=SessionConfig(profile="manager"))
+    snap.pid = 999999
+    assert is_session_alive(snap) is False
+
+
+def test_is_session_alive_false_when_pid_is_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import is_session_alive, new_snapshot, SessionConfig
+    snap = new_snapshot(target="10.10.10.5", log_path="logs/x.jsonl",
+                        config=SessionConfig(profile="manager"))
+    snap.pid = None
+    assert is_session_alive(snap) is False

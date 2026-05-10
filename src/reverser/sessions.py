@@ -232,3 +232,82 @@ def load(target: str, session_id: str) -> SessionSnapshot:
             f"Either upgrade reverser or hand-edit the file at {path}."
         )
     return _from_dict(data)
+
+
+def list_for_target(
+    target: str, *, exclude_completed: bool = False
+) -> list[SessionSnapshot]:
+    """Enumerate snapshots for a target, sorted by last_active_at desc.
+
+    Skips orphan .tmp files (incomplete writes from crashes) and
+    silently skips corrupted snapshot files.
+    """
+    sessions_dir = _targets_root() / target / "sessions"
+    if not sessions_dir.is_dir():
+        return []
+
+    snapshots: list[SessionSnapshot] = []
+    for entry in sessions_dir.iterdir():
+        if not entry.is_file() or entry.suffix != ".json":
+            continue
+        try:
+            data = json.loads(entry.read_text())
+            snap = _from_dict(data)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+        if exclude_completed and snap.state == "completed":
+            continue
+        snapshots.append(snap)
+
+    snapshots.sort(key=lambda s: s.last_active_at, reverse=True)
+    return snapshots
+
+
+def list_all(*, exclude_completed: bool = False) -> list[SessionSnapshot]:
+    """Walk targets/*/sessions/, return all parsed snapshots, sorted desc."""
+    root = _targets_root()
+    if not root.is_dir():
+        return []
+
+    all_snaps: list[SessionSnapshot] = []
+    for target_dir in root.iterdir():
+        if not target_dir.is_dir():
+            continue
+        all_snaps.extend(
+            list_for_target(target_dir.name, exclude_completed=exclude_completed)
+        )
+
+    all_snaps.sort(key=lambda s: s.last_active_at, reverse=True)
+    return all_snaps
+
+
+def latest_for_target(
+    target: str, *, exclude_completed: bool = True
+) -> Optional[SessionSnapshot]:
+    """Most recent snapshot for the target. Default excludes completed."""
+    snaps = list_for_target(target, exclude_completed=exclude_completed)
+    return snaps[0] if snaps else None
+
+
+def latest_global(
+    *, exclude_completed: bool = True
+) -> Optional[SessionSnapshot]:
+    """Most recent snapshot across all targets."""
+    snaps = list_all(exclude_completed=exclude_completed)
+    return snaps[0] if snaps else None
+
+
+def is_session_alive(snapshot: SessionSnapshot) -> bool:
+    """True iff snapshot.pid is set AND that process exists.
+
+    Uses os.kill(pid, 0) — sends signal 0 (no-op probe). Catches OSError
+    when the process doesn't exist. Note: false positives possible if
+    PID has been reused by an unrelated process. Best-effort only.
+    """
+    if snapshot.pid is None:
+        return False
+    try:
+        os.kill(snapshot.pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
