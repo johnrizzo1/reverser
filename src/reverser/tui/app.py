@@ -415,8 +415,15 @@ class ReverserApp(App):
                 if snap.conversation:
                     log.write(f"Replaying {len(snap.conversation)} prior exchanges...")
                     for entry in snap.conversation:
-                        log.write(f"[bold]You ({entry.timestamp})[/]: {entry.user}")
-                        log.write(f"[bold]Agent[/]: {entry.agent}")
+                        # Escape user/agent text — it's untrusted (it's literally
+                        # the agent's output, which can contain [...] markers
+                        # like our own "[... truncated]" tail) and Rich treats
+                        # bare [xxx] as markup, silently dropping malformed tags.
+                        log.write(
+                            f"[bold]You ({entry.timestamp})[/]: "
+                            f"{markup_escape(entry.user)}"
+                        )
+                        log.write(f"[bold]Agent[/]: {markup_escape(entry.agent)}")
                         log.write("")
                 if snap.in_flight is not None:
                     log.write(
