@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..prompts import SYSTEM_PROMPT, WEB_SYSTEM_PROMPT  # noqa: F401
@@ -13,6 +14,25 @@ from ..session_log import SessionLog, session_log_path
 
 # Profiles that operate on web targets rather than binary files
 _WEB_PROFILES = {"webpentest", "webapi", "webrecon"}
+
+
+def _now_iso_session() -> str:
+    """ISO-8601 UTC timestamp at second precision."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+@dataclass
+class Exchange:
+    """One agent ↔ user round-trip during a session.
+
+    Stored on Session.exchanges (replaces the old findings list of strings).
+    Captures the per-turn cost so the snapshot can persist it for resume.
+    """
+    user: str
+    agent: str
+    turn: int
+    timestamp: str   # ISO-8601
+    cost: float      # USD spent on this exchange
 
 
 @dataclass
@@ -59,7 +79,7 @@ class AgentSession:
         self.profile = profile
         self.budget = budget
         self.max_turns = max_turns
-        self.findings: list[str] = []
+        self.exchanges: list[Exchange] = []
         self.stats = TurnStats(
             budget=budget,
             max_turns=max_turns,
@@ -163,13 +183,26 @@ When you respond, present your findings clearly with relevant details.
 """
         return base
 
+    def _recent_findings_strings(self, limit: int = 8) -> list[str]:
+        """Project recent exchanges into the legacy "findings" string format.
+
+        The original prompt builder used a list of "User: X\\n\\nAgent: Y"
+        strings. This helper reproduces that format from the new structured
+        Exchange storage so prompt behavior is preserved.
+        """
+        return [
+            f"User: {e.user}\n\nAgent: {e.agent}"
+            for e in self.exchanges[-limit:]
+        ]
+
     def _build_prompt(self, user_message: str) -> str:
         """Build the prompt including conversation context."""
         parts = []
 
-        if self.findings:
+        recent = self._recent_findings_strings()
+        if recent:
             parts.append("## Previous findings from this session\n")
-            for i, finding in enumerate(self.findings[-8:], 1):
+            for i, finding in enumerate(recent, 1):
                 parts.append(f"### Exchange {i}\n{finding}\n")
             parts.append("---\n")
 
@@ -196,6 +229,7 @@ When you respond, present your findings clearly with relevant details.
         remaining_budget = max(0.1, self.budget - self.stats.total_cost)
 
         turn_text_parts = []
+        last_turn_cost: float = 0.0
 
         try:
             async for event in self._backend.run(
@@ -234,6 +268,7 @@ When you respond, present your findings clearly with relevant details.
                 elif event.kind == "result":
                     if event.cost:
                         self.stats.total_cost += event.cost
+                        last_turn_cost = float(event.cost)
                     self._slog.log_session_end(
                         event.content if event.subtype == "success" else None,
                         event.cost, event.turns, event.subtype,
@@ -249,13 +284,19 @@ When you respond, present your findings clearly with relevant details.
         finally:
             self._running = False
 
-        # Store findings for context in future turns
+        # Store exchange for context in future turns
         full_text = "".join(turn_text_parts)
         if full_text.strip():
             summary = full_text[:2000]
             if len(full_text) > 2000:
                 summary += "\n[... truncated]"
-            self.findings.append(f"User: {user_message}\n\nAgent: {summary}")
+            self.exchanges.append(Exchange(
+                user=user_message,
+                agent=summary,
+                turn=self.stats.turns,
+                timestamp=_now_iso_session(),
+                cost=last_turn_cost,
+            ))
 
     def close(self):
         self._slog.close()
