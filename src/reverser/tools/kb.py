@@ -653,6 +653,14 @@ def _render_report(kb) -> str:
         lines.append("_No notes recorded._")
     lines.append("")
 
+    # Attack tree (only if hypotheses exist)
+    branches = kb.hypothesis_tree()
+    if branches:
+        lines.append("## Attack tree")
+        lines.append("")
+        lines.append(_render_hypothesis_tree(kb))
+        lines.append("")
+
     return "\n".join(lines)
 
 

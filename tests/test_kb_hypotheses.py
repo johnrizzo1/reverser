@@ -348,3 +348,31 @@ def test_kb_list_hypotheses_tool_with_include_tree(tmp_path, monkeypatch):
     parent_idx = text.index("parent")
     child_idx = text.index("child")
     assert child_idx > parent_idx
+
+
+def test_kb_export_report_includes_attack_tree(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.kb import kb_export_report
+
+    kb = _fresh_kb(tmp_path, monkeypatch, target="10.10.10.5")
+    parent = kb.add_hypothesis(statement="DC SMB signing off", confidence=95)
+    kb.update_hypothesis(parent.id, status="confirmed")
+    kb.add_hypothesis(statement="NTLM relay viable", parent_id=parent.id)
+
+    result = _call_tool(kb_export_report, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "## Attack tree" in text
+    assert "DC SMB signing off" in text
+    assert "NTLM relay viable" in text
+
+
+def test_kb_export_report_omits_attack_tree_when_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.kb import kb_export_report
+
+    _fresh_kb(tmp_path, monkeypatch, target="10.10.10.6")  # empty
+    result = _call_tool(kb_export_report, {"target": "10.10.10.6"})
+    text = result["content"][0]["text"]
+    assert "## Attack tree" not in text
