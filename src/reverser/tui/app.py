@@ -353,6 +353,7 @@ class ReverserApp(App):
         backend: str = "claude",
         model: str | None = None,
         api_base: str | None = None,
+        resume_from=None,  # SessionSnapshot | None
     ):
         super().__init__()
         self.binary_path = binary_path
@@ -364,6 +365,8 @@ class ReverserApp(App):
         self.api_base = api_base
         self.profile = get_profile(profile_key)
         self.session: AgentSession | None = None
+        self._resume_from = resume_from
+        self._was_resumed = resume_from is not None
 
     @property
     def _is_web_profile(self) -> bool:
@@ -455,7 +458,11 @@ class ReverserApp(App):
             backend_name=self.backend_name,
             model=self.model,
             api_base=self.api_base,
+            resume_from=self._resume_from,
         )
+        # Resume snapshot is consumed; clear it so subsequent _init_session
+        # calls (e.g. profile switch) construct a fresh session.
+        self._resume_from = None
         self._update_status()
 
     def _update_status(self):
@@ -855,6 +862,7 @@ def run_tui(
     backend: str = "claude",
     model: str | None = None,
     api_base: str | None = None,
+    resume_from=None,  # SessionSnapshot | None
 ):
     """Launch the interactive TUI."""
     app = ReverserApp(
@@ -865,5 +873,6 @@ def run_tui(
         backend=backend,
         model=model,
         api_base=api_base,
+        resume_from=resume_from,
     )
     app.run()

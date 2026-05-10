@@ -76,6 +76,20 @@ def main():
                                          "Default 1 (sequential). Increase only for safe-to-parallelize work like "
                                          "external recon across distinct subnets.")
     interactive_parser.add_argument("--list-profiles", action="store_true", help="List available profiles and exit")
+    interactive_parser.add_argument(
+        "--resume",
+        nargs="?",
+        const="__latest__",
+        default=None,
+        metavar="SESSION_ID",
+        help="Resume a session. With no SESSION_ID, resumes the latest "
+             "(target-scoped if a target arg is given, else global).",
+    )
+    interactive_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="With --resume: take over a session whose process is still running.",
+    )
     add_backend_args(interactive_parser)
 
     # Writeup command
@@ -161,14 +175,40 @@ def _run_interactive(args):
 
     target = getattr(args, "target", "") or ""
     profile_key = args.profile
+    resume_snap = None
+
+    # Handle --resume routing
+    if getattr(args, "resume", None) is not None:
+        resume_snap = _resolve_resume(args, target)
+        if resume_snap is None:
+            sys.exit(1)
+        # Snapshot wins for target/profile/budget/max_turns unless explicitly overridden
+        target = resume_snap.target
+        profile_explicit = any(a in ("-p", "--profile") for a in sys.argv[1:])
+        budget_explicit = any(a == "--budget" for a in sys.argv[1:])
+        max_turns_explicit = any(a == "--max-turns" for a in sys.argv[1:])
+        if profile_explicit and profile_key != resume_snap.config.profile:
+            print(
+                f"Error: resume must use the same profile (snapshot uses "
+                f"{resume_snap.config.profile!r}; got -p {profile_key!r}). "
+                f"Drop -p to use the snapshot's profile, or start a new session.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        profile_key = resume_snap.config.profile
+        budget = args.budget if budget_explicit else resume_snap.config.budget
+        max_turns = args.max_turns if max_turns_explicit else resume_snap.config.max_turns
+    else:
+        budget = args.budget
+        max_turns = args.max_turns
+
     is_web_profile = profile_key in _WEB_PROFILES
 
-    if target:
+    if target and resume_snap is None:
+        # Only validate target on fresh sessions (resume targets came from snapshot)
         if is_url(target):
-            # URL target — valid for web profiles (and we'll allow it for any profile)
             pass
         else:
-            # File path — resolve and validate
             target = os.path.abspath(target)
             if not os.path.isfile(target):
                 print(f"Error: file not found: {target}", file=sys.stderr)
@@ -178,12 +218,85 @@ def _run_interactive(args):
     run_tui(
         binary_path=target,
         profile=profile_key,
-        budget=args.budget,
-        max_turns=args.max_turns,
+        budget=budget,
+        max_turns=max_turns,
         backend=args.backend,
         model=args.model,
         api_base=args.api_base,
+        resume_from=resume_snap,
     )
+
+
+def _resolve_resume(args, target_arg):
+    """Resolve --resume value into a SessionSnapshot or print error and return None."""
+    from .sessions import (
+        load, latest_for_target, latest_global, list_all,
+        is_session_alive,
+        SessionNotFoundError, SessionStateError,
+    )
+
+    resume_value = args.resume
+
+    if resume_value == "__latest__":
+        # No specific ID — pick the latest
+        if target_arg:
+            snap = latest_for_target(target_arg, exclude_completed=True)
+            if snap is None:
+                print(
+                    f"Error: no resumable sessions for {target_arg}. "
+                    f"Start a new session with: reverser i -p <profile> {target_arg}",
+                    file=sys.stderr,
+                )
+                return None
+        else:
+            snap = latest_global(exclude_completed=True)
+            if snap is None:
+                print(
+                    "Error: no sessions to resume. "
+                    "Start with: reverser i -p <profile> <target>",
+                    file=sys.stderr,
+                )
+                return None
+    else:
+        # Specific session ID — find it across targets if no target_arg
+        target = target_arg
+        if not target:
+            for s in list_all():
+                if s.session_id == resume_value:
+                    target = s.target
+                    break
+            if not target:
+                print(
+                    f"Error: no snapshot with session_id={resume_value!r} found. "
+                    f"Run reverser --list-sessions to see available sessions.",
+                    file=sys.stderr,
+                )
+                return None
+        try:
+            snap = load(target, resume_value)
+        except SessionNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return None
+
+    # Reject completed sessions
+    if snap.state == "completed":
+        print(
+            f"Error: session {snap.session_id} is completed and cannot be resumed. "
+            f"Run reverser --list-sessions to see other options.",
+            file=sys.stderr,
+        )
+        return None
+
+    # Liveness check
+    if is_session_alive(snap) and not args.force:
+        print(
+            f"Error: session {snap.session_id} is currently running in PID {snap.pid}. "
+            f"Use --force to take over (warning: the original process's writes will conflict).",
+            file=sys.stderr,
+        )
+        return None
+
+    return snap
 
 
 def _run_writeup(args):
