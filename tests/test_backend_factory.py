@@ -1,0 +1,51 @@
+"""Tests for the create_backend factory's name → api_base resolution."""
+
+from unittest.mock import patch
+
+import pytest
+
+from reverser.backends import create_backend
+
+
+def _resolved_api_base(name, model="any-model", api_base=None):
+    """Capture the api_base passed to OpenAICompatBackend without actually connecting."""
+    with patch("reverser.backends.openai_compat.OpenAICompatBackend") as M:
+        create_backend(name, tools=[], model=model, api_base=api_base)
+        assert M.call_count == 1
+        kwargs = M.call_args.kwargs
+        return kwargs["api_base"]
+
+
+def test_ollama_default_api_base():
+    assert _resolved_api_base("ollama") == "http://localhost:11434/v1"
+
+
+def test_lmstudio_default_api_base():
+    assert _resolved_api_base("lmstudio") == "http://localhost:1234/v1"
+
+
+def test_unknown_name_falls_back_to_generic_default():
+    """Any name we don't special-case routes to the generic OpenAI default."""
+    assert _resolved_api_base("some-other-server") == "http://localhost:8000/v1"
+
+
+def test_explicit_api_base_overrides_default():
+    """Passing --api-base wins over the name-based default for every backend."""
+    custom = "http://192.168.1.50:9999/v1"
+    assert _resolved_api_base("ollama", api_base=custom) == custom
+    assert _resolved_api_base("lmstudio", api_base=custom) == custom
+
+
+def test_claude_does_not_require_model_or_api_base():
+    """Claude backend doesn't go through OpenAICompatBackend at all."""
+    with patch("reverser.backends.claude.ClaudeBackend") as M:
+        create_backend("claude", tools=[])
+        M.assert_called_once_with([])
+
+
+def test_non_claude_backends_require_model():
+    """Forgetting --model for an OpenAI-compatible backend should raise."""
+    with pytest.raises(ValueError, match="model"):
+        create_backend("ollama", tools=[], model=None)
+    with pytest.raises(ValueError, match="model"):
+        create_backend("lmstudio", tools=[], model=None)

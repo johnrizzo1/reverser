@@ -40,7 +40,8 @@ def main():
     # Shared backend arguments
     def add_backend_args(sub):
         sub.add_argument("--backend", "-b", default="claude",
-                         help="LLM backend: claude, ollama, or any OpenAI-compatible server (default: claude)")
+                         help="LLM backend: claude, ollama, lmstudio, or any "
+                              "OpenAI-compatible server (default: claude)")
         sub.add_argument("--model", "-m", default=None,
                          help="Model name/tag for non-claude backends (e.g. qwen3.5:35b-a3b-coding-nvfp4)")
         sub.add_argument("--api-base", default=None,
