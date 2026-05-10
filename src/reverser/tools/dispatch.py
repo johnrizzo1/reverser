@@ -253,6 +253,24 @@ async def dispatch_specialist(args: dict) -> dict:
         max_budget_usd=budget_usd,
     )
 
+    # Mark in_flight on the running session's snapshot so resume tooling
+    # can surface "stopped mid-dispatch" if the user stops here.
+    from datetime import datetime, timezone
+    from ..sessions import current_session, InFlightDispatch, save as save_snapshot
+    sess = current_session.get()
+    if sess is not None:
+        sess._snapshot.in_flight = InFlightDispatch(
+            kind="dispatch",
+            specialty=specialty,
+            hypothesis_id=hypothesis_id,
+            sub_goal=sub_goal,
+            started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        try:
+            save_snapshot(sess._snapshot)
+        except Exception:
+            pass
+
     report_text = ""
     cost_usd = 0.0
     turns_consumed = 0
@@ -286,6 +304,14 @@ async def dispatch_specialist(args: dict) -> dict:
         error_msg = f"{type(e).__name__}: {e}"
         if not report_text:
             report_text = f"(dispatch failed: {error_msg})"
+    finally:
+        # Clear in_flight whether the dispatch succeeded, errored, or was cancelled
+        if sess is not None:
+            sess._snapshot.in_flight = None
+            try:
+                save_snapshot(sess._snapshot)
+            except Exception:
+                pass
 
     outcome = parse_hypothesis_outcome(report_text)
 
