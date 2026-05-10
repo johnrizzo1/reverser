@@ -203,6 +203,7 @@ When you respond, present your findings clearly with relevant details.
                 system_prompt=system_prompt,
                 max_turns=self.max_turns,
                 max_budget_usd=remaining_budget,
+                allowed_tools=self.profile.tools_allowlist,
             ):
                 if self._cancel:
                     break
