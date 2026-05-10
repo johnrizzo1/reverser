@@ -65,4 +65,5 @@ from . import (  # noqa: F401, E402  # imported for side effects
     webrecon,
     ad,
     ctf,
+    manager,
 )
