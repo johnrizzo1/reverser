@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DDL = [
     """
@@ -117,6 +117,30 @@ _DDL = [
         body       TEXT NOT NULL,
         created_at TEXT NOT NULL
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS hypotheses (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_id       INTEGER REFERENCES hypotheses(id) ON DELETE SET NULL,
+        target_id       TEXT    NOT NULL REFERENCES targets(id),
+        statement       TEXT    NOT NULL,
+        rationale       TEXT,
+        status          TEXT    NOT NULL DEFAULT 'proposed'
+                        CHECK (status IN ('proposed','testing','confirmed','refuted','abandoned','blocked')),
+        confidence      INTEGER CHECK (confidence BETWEEN 0 AND 100),
+        dispatched_to   TEXT,
+        dispatch_count  INTEGER NOT NULL DEFAULT 0,
+        evidence_refs   TEXT,
+        tags            TEXT,
+        created_at      TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at      TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_hypotheses_status ON hypotheses(status)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_hypotheses_parent ON hypotheses(parent_id)
     """,
 ]
 
