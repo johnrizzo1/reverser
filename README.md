@@ -103,6 +103,7 @@ Profiles specialize the agent's system prompt, tool priorities, and available sk
 | API Discovery | `api` | Document network APIs, endpoints, auth, request/response schemas |
 | CTF / Crackme | `ctf` | Solve crackmes — find the flag/key/password |
 | Active Directory | `ad` | Internal AD engagement — assumed-breach methodology with NetExec, BloodHound, KB |
+| Manager | `manager` | Network red-team conductor — plans hypotheses and dispatches specialists |
 
 ```sh
 reverser interactive --list-profiles   # show all profiles and their skills
@@ -117,6 +118,33 @@ file can tighten enforcement further.
 
 ```sh
 REVERSER_PENTEST_AUTHORIZED=1 reverser i -p ad 10.10.10.5
+```
+
+**Manager-led engagements:** the `manager` profile coordinates specialist sub-agents for network \
+red-team work. It maintains a hypothesis tree in the per-target KB and dispatches the right \
+specialty (`ad`, `pentest`, `webpentest`, `webapi`, `webrecon`) to test each hypothesis. The \
+manager has a restricted tool surface — KB read/write, hypothesis CRUD, lightweight recon \
+(`nmap_scan`, `dns_recon`, `whatweb_scan`), and `dispatch_specialist`. Heavy offensive tools \
+(netexec, bloodhound, sqlmap, nuclei, etc.) require dispatch to a specialist, preventing the \
+manager from doing everything itself instead of delegating.
+
+```sh
+REVERSER_PENTEST_AUTHORIZED=1 reverser i -p manager 10.10.10.5
+```
+
+Skills:
+- `k` — Kickoff (read KB, propose 3–5 root hypotheses, dispatch first)
+- `s` — Status (current tree, dispatches in flight, next action)
+- `r` — Report (engagement report with attack tree section)
+- `p` — Pivot (reassess tree, abandon stale hypotheses, propose new)
+- `b` — Budget (show spend, raise cap on request)
+- `w` — Wrap up (mark unresolved, generate report, stop)
+
+For parallel dispatches (use cautiously — operational collisions on real infrastructure can trip \
+rate limits or detection thresholds):
+
+```sh
+REVERSER_PENTEST_AUTHORIZED=1 reverser i -p manager 10.10.10.5 --max-parallel 3
 ```
 
 ### Writeups
