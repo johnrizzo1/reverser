@@ -49,7 +49,14 @@
     sslscan
     whatweb
     nbtscan
-    enum4linux-ng         # SMB/RPC/LDAP/NetBIOS enumeration — modern enum4linux rewrite
+    # enum4linux-ng — NOT included here because it transitively depends on
+    # `samba` (for smbclient/rpcclient/nmblookup), and samba-4.22.7 fails
+    # to build with current Clang on Darwin (strict-initializer-not-constant
+    # error in Samba's own test code). To install on macOS:
+    #   brew install samba
+    #   pipx install git+https://github.com/cddmp/enum4linux-ng.git
+    # On Linux, samba builds OK — re-enable the `enum4linux-ng` package
+    # here (it's wired into reverser as the `enum4linux_ng` MCP tool).
     # netexec (nxc) is installed from PyPI in the Python venv below — the
     # nixpkgs build is currently marked broken on this channel. Upstream's
     # recommended install method is `pip install netexec` anyway.
