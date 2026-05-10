@@ -100,6 +100,8 @@
     # yargen
     inetutils
     sshpass
+
+    semgrep
   ]
 
   # ── Linux-only packages ────────────────────────────────────────────
