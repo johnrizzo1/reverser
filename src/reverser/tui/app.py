@@ -1,6 +1,10 @@
 """Interactive TUI application for the reverser agent."""
 
 import asyncio
+import atexit
+import os
+import signal
+import sys
 from pathlib import Path
 
 from textual import on, work
@@ -386,6 +390,9 @@ class ReverserApp(App):
             backend_info += f" ([yellow]{self.model}[/yellow])"
         log.write(f"[bold]Reverser Agent[/bold] — Profile: [cyan]{self.profile.name}[/cyan]{backend_info}")
         log.write("")
+
+        # Wire emergency snapshot hooks (best-effort save on shutdown)
+        _register_emergency_hooks(self)
 
         if self.binary_path:
             self._init_session()
@@ -783,6 +790,36 @@ class ReverserApp(App):
                 self.exit()
 
         self.push_screen(DoneConfirmModal(), on_confirm)
+
+
+def _emergency_snapshot(session) -> None:
+    """Best-effort save on interpreter shutdown — runs even on crash/SIGTERM.
+
+    Called from atexit and SIGTERM signal handler. Catches all exceptions
+    because we're shutting down; nothing useful we can do if save fails.
+    """
+    if session is None:
+        return
+    try:
+        from ..sessions import save as save_snapshot
+        save_snapshot(session._snapshot)
+    except Exception:
+        pass
+
+
+def _register_emergency_hooks(app) -> None:
+    """Wire atexit + SIGTERM to emergency_snapshot of the app's current session.
+
+    Idempotent — safe to call multiple times.
+    """
+    atexit.register(lambda: _emergency_snapshot(getattr(app, "session", None)))
+
+    def _sigterm_handler(*_args):
+        _emergency_snapshot(getattr(app, "session", None))
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
 
 def run_tui(
