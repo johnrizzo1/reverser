@@ -49,6 +49,28 @@ class SessionLog:
             "turns": turns,
         })
 
+    def log_session_resumed(self, session_id: str, prior_turn: int, prior_cost: float):
+        self._write({
+            "type": "session_resumed",
+            "session_id": session_id,
+            "prior_turn": prior_turn,
+            "prior_cost": prior_cost,
+        })
+
+    def log_session_stopped(self, cost: float, turns: int):
+        self._write({
+            "type": "session_stopped",
+            "cost": cost,
+            "turns": turns,
+        })
+
+    def log_session_completed(self, cost: float, turns: int):
+        self._write({
+            "type": "session_completed",
+            "cost": cost,
+            "turns": turns,
+        })
+
     def close(self):
         self._f.close()
 

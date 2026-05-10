@@ -218,6 +218,16 @@ class AgentSession:
         self._snapshot = snap
         save_snapshot(self._snapshot)
 
+        # Audit log: record the resume
+        try:
+            self._slog.log_session_resumed(
+                session_id=snap.session_id,
+                prior_turn=snap.stats.turns,
+                prior_cost=snap.stats.total_cost,
+            )
+        except Exception:
+            pass
+
     @property
     def log_path(self) -> str:
         return self._log_path
@@ -331,6 +341,61 @@ When you respond, present your findings clearly with relevant details.
         """Request cancellation of the current query."""
         self._cancel = True
 
+    def stop(self) -> None:
+        """User-initiated stop. Marks state stopped and persists.
+
+        Distinct from cancel(): cancel halts a single in-flight query;
+        stop signals "I'm done for now, expect to resume." Sets the cancel
+        flag too so any in-flight turn unwinds.
+        """
+        from ..sessions import save as save_snapshot
+        if self._snapshot.state == "completed":
+            # Terminal — don't downgrade
+            return
+        self._cancel = True
+        self._stop_requested = True
+        self._snapshot.state = "stopped"
+        self._snapshot.stopped_at = _now_iso_session()
+        self._snapshot.pid = None
+        save_snapshot(self._snapshot)
+        try:
+            self._slog.log_session_stopped(
+                cost=self.stats.total_cost, turns=self.stats.turns,
+            )
+        except Exception:
+            pass
+
+    def mark_completed(self) -> None:
+        """Mark session completed (terminal)."""
+        from ..sessions import save as save_snapshot
+        self._snapshot.state = "completed"
+        self._snapshot.stopped_at = _now_iso_session()
+        self._snapshot.pid = None
+        save_snapshot(self._snapshot)
+        try:
+            self._slog.log_session_completed(
+                cost=self.stats.total_cost, turns=self.stats.turns,
+            )
+        except Exception:
+            pass
+
+    def _autosave_snapshot(self) -> None:
+        """Update the snapshot with current stats + exchanges and persist.
+
+        Called at the end of each turn. Cheap (snapshot is a few KB JSON).
+        """
+        from ..sessions import save as save_snapshot, ConversationEntry
+        self._snapshot.stats.total_cost = self.stats.total_cost
+        self._snapshot.stats.turns = self.stats.turns
+        self._snapshot.conversation = [
+            ConversationEntry(
+                user=e.user, agent=e.agent, turn=e.turn,
+                timestamp=e.timestamp, cost=e.cost,
+            )
+            for e in self.exchanges
+        ]
+        save_snapshot(self._snapshot)
+
     async def send(self, user_message: str):
         """Send a message to the agent and yield AgentEvents."""
         self._running = True
@@ -410,6 +475,12 @@ When you respond, present your findings clearly with relevant details.
                 timestamp=_now_iso_session(),
                 cost=last_turn_cost,
             ))
+
+        # Autosave snapshot at end of every turn (cheap; gives crash recovery)
+        try:
+            self._autosave_snapshot()
+        except Exception:
+            pass  # autosave is best-effort; never block the session loop
 
     def close(self):
         self._slog.close()
