@@ -169,3 +169,62 @@ def test_dispatch_count_increments(tmp_path, monkeypatch):
     assert kb.get_hypothesis(h.id).dispatch_count == 1
     kb.update_hypothesis(h.id, dispatched_to="ad", increment_dispatch_count=True)
     assert kb.get_hypothesis(h.id).dispatch_count == 2
+
+
+def test_hypothesis_tree_returns_nested_structure(tmp_path, monkeypatch):
+    """tree returns roots with .children populated recursively."""
+    kb = _fresh_kb(tmp_path, monkeypatch)
+    root = kb.add_hypothesis(statement="root")
+    child = kb.add_hypothesis(statement="child", parent_id=root.id)
+    grand = kb.add_hypothesis(statement="grandchild", parent_id=child.id)
+    other_root = kb.add_hypothesis(statement="other root")
+
+    tree = kb.hypothesis_tree()
+    # tree is a list of dicts: [{"hypothesis": HypothesisFact, "children": [...]}]
+    assert len(tree) == 2
+    # find the "root" branch
+    root_branch = next(b for b in tree if b["hypothesis"].id == root.id)
+    assert len(root_branch["children"]) == 1
+    child_branch = root_branch["children"][0]
+    assert child_branch["hypothesis"].id == child.id
+    assert len(child_branch["children"]) == 1
+    assert child_branch["children"][0]["hypothesis"].id == grand.id
+    # other_root has no children
+    other_branch = next(b for b in tree if b["hypothesis"].id == other_root.id)
+    assert other_branch["children"] == []
+
+
+def test_hypothesis_tree_with_root_id_returns_subtree(tmp_path, monkeypatch):
+    kb = _fresh_kb(tmp_path, monkeypatch)
+    root = kb.add_hypothesis(statement="root")
+    child = kb.add_hypothesis(statement="child", parent_id=root.id)
+    kb.add_hypothesis(statement="orphan")
+
+    subtree = kb.hypothesis_tree(root_id=root.id)
+    # subtree returns a single branch dict (not a list)
+    assert subtree["hypothesis"].id == root.id
+    assert len(subtree["children"]) == 1
+    assert subtree["children"][0]["hypothesis"].id == child.id
+
+
+def test_resolve_evidence_refs_returns_finding_rows(tmp_path, monkeypatch):
+    kb = _fresh_kb(tmp_path, monkeypatch)
+    from reverser.kb.store import FindingFact
+    finding_id = kb.record_finding(FindingFact(
+        title="SMB signing disabled",
+        severity="medium",
+        description="…",
+    ))
+    refs = [{"kind": "finding", "id": finding_id}]
+    resolved = kb.resolve_evidence_refs(refs)
+    assert len(resolved) == 1
+    assert resolved[0]["kind"] == "finding"
+    assert resolved[0]["data"].title == "SMB signing disabled"
+
+
+def test_resolve_evidence_refs_skips_unknown_kinds(tmp_path, monkeypatch):
+    """Unknown kinds are dropped rather than raising — defensive against schema drift."""
+    kb = _fresh_kb(tmp_path, monkeypatch)
+    refs = [{"kind": "alien_artifact", "id": 99}]
+    resolved = kb.resolve_evidence_refs(refs)
+    assert resolved == []

@@ -562,3 +562,120 @@ class KB:
             created_at=row[10],
             updated_at=row[11],
         )
+
+    def hypothesis_tree(self, root_id: int | None = None):
+        """Return hierarchical view of hypotheses.
+
+        If root_id is None, returns a list of {"hypothesis": HypothesisFact,
+        "children": [...]} branches for all root hypotheses (parent_id IS NULL).
+
+        If root_id is given, returns a single branch dict rooted at that hypothesis.
+        Raises KeyError if root_id doesn't exist.
+        """
+        # Fetch all hypotheses for this target, build parent_id → children map
+        all_hypotheses = self.list_hypotheses()
+        by_parent: dict[int | None, list[HypothesisFact]] = {}
+        for h in all_hypotheses:
+            by_parent.setdefault(h.parent_id, []).append(h)
+
+        def build_branch(h: HypothesisFact) -> dict:
+            return {
+                "hypothesis": h,
+                "children": [build_branch(c) for c in by_parent.get(h.id, [])],
+            }
+
+        if root_id is None:
+            roots = by_parent.get(None, [])
+            return [build_branch(r) for r in roots]
+        else:
+            target = next((h for h in all_hypotheses if h.id == root_id), None)
+            if target is None:
+                raise KeyError(f"hypothesis {root_id} not found")
+            return build_branch(target)
+
+    def resolve_evidence_refs(self, refs: list[dict]) -> list[dict]:
+        """Dereference evidence_refs into [{kind, id, data}] tuples.
+
+        Unknown kinds are silently dropped (defensive against schema drift).
+        Missing rows are silently dropped (defensive against deletion).
+        """
+        out: list[dict] = []
+        for ref in refs:
+            kind = ref.get("kind")
+            ref_id = ref.get("id")
+            if kind is None or ref_id is None:
+                continue
+            data = None
+            if kind == "finding":
+                data = self._get_finding_by_id(ref_id)
+            elif kind == "note":
+                data = self._get_note_by_id(ref_id)
+            elif kind == "credential":
+                data = self._get_credential_by_id(ref_id)
+            elif kind == "service":
+                data = self._get_service_by_id(ref_id)
+            else:
+                continue  # unknown kind
+            if data is None:
+                continue
+            out.append({"kind": kind, "id": ref_id, "data": data})
+        return out
+
+    def _get_finding_by_id(self, finding_id: int):
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT title, severity, cvss, description, evidence_paths, created_at "
+                "FROM findings WHERE id = ? AND target_id = ?",
+                (finding_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return FindingFact(
+            title=row[0], severity=row[1], cvss=row[2],
+            description=row[3],
+            evidence_paths=json.loads(row[4]) if row[4] else [],
+        )
+
+    def _get_note_by_id(self, note_id: int):
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT body, created_at FROM notes WHERE id = ? AND target_id = ?",
+                (note_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {"body": row[0], "created_at": row[1]}
+
+    def _get_credential_by_id(self, cred_id: int):
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT username, password, nt_hash, domain, status "
+                "FROM credentials WHERE id = ? AND target_id = ?",
+                (cred_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return CredentialFact(
+            username=row[0], password=row[1], nt_hash=row[2],
+            domain=row[3], status=row[4],
+        )
+
+    def _get_service_by_id(self, service_row_id: int):
+        # services has a composite PK (target_id, host_ip, port, proto) — id refs
+        # are by rowid here. Defensive: if missing, return None.
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT host_ip, port, proto, service, version "
+                "FROM services WHERE rowid = ? AND target_id = ?",
+                (service_row_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return ServiceFact(
+            host_ip=row[0], port=row[1], proto=row[2],
+            service=row[3], version=row[4],
+        )
