@@ -336,6 +336,7 @@ class ReverserApp(App):
         Binding("f3", "load_binary", "Load", show=True),
         Binding("f4", "set_sudo", "Sudo", show=True),
         Binding("f5", "clear_log", "Clear", show=True),
+        Binding("f6", "stop_session", "Stop", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
@@ -518,10 +519,12 @@ class ReverserApp(App):
             log.write("  /skills         — Show available skills (or F1)")
             log.write("  /budget <amt>   — Set budget in USD")
             log.write("  /turns <n>      — Set max turns")
-            log.write("  /status         — Show session stats")
+            log.write("  /status         — Show session stats and snapshot state")
             log.write("  /sudo           — Set sudo password for privileged scans (or F4)")
             log.write("  /clear          — Clear the chat log (or F5)")
             log.write("  /cancel         — Cancel running agent")
+            log.write("  /stop           — Stop session, save snapshot, exit (or F6)")
+            log.write("  /done           — Mark session completed (terminal), exit")
             log.write("")
             log.write("[bold]Profiles:[/bold]")
             for p in list_profiles():
@@ -564,11 +567,16 @@ class ReverserApp(App):
         elif cmd == "/status":
             if self.session:
                 s = self.session.stats
+                snap = getattr(self.session, "_snapshot", None)
                 log.write(f"Binary: {s.binary_path}")
                 log.write(f"Profile: {self.profile.name} ({self.profile_key})")
                 log.write(f"Turns: {s.turns}/{s.max_turns}")
                 log.write(f"Cost: ${s.total_cost:.4f} / ${s.budget:.2f}")
                 log.write(f"Log: {self.session.log_path}")
+                if snap is not None:
+                    log.write(f"Session ID: {snap.session_id}")
+                    log.write(f"State: {snap.state}")
+                    log.write(f"Started: {snap.started_at}")
             else:
                 log.write("No active session.")
 
@@ -584,6 +592,12 @@ class ReverserApp(App):
                 log.write("[yellow]Cancelling...[/yellow]")
             else:
                 log.write("Nothing to cancel.")
+
+        elif cmd == "/stop":
+            self.action_stop_session()
+
+        elif cmd == "/done":
+            self._mark_done()
 
         else:
             log.write(f"[red]Unknown command: {cmd}. Type /help for commands.[/red]")
@@ -736,6 +750,39 @@ class ReverserApp(App):
                 log.write("[green]Sudo password set.[/green]")
 
         self.push_screen(SudoPasswordScreen(), handle_password)
+
+    def action_stop_session(self) -> None:
+        """F6 / /stop — confirm and stop the session."""
+        from .modals import StopConfirmModal
+        log = self.query_one("#chat-log", SelectableRichLog)
+        if self.session is None:
+            log.write("[yellow]No active session to stop.[/yellow]")
+            return
+
+        def on_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                self.session.stop()
+                log.write("[yellow]Session stopped and snapshot saved.[/yellow]")
+                log.write(f"Resume later with: reverser i {self.session.target} --resume")
+                self.exit()
+
+        self.push_screen(StopConfirmModal(), on_confirm)
+
+    def _mark_done(self) -> None:
+        """/done — confirm and mark the session completed (terminal)."""
+        from .modals import DoneConfirmModal
+        log = self.query_one("#chat-log", SelectableRichLog)
+        if self.session is None:
+            log.write("[yellow]No active session to mark completed.[/yellow]")
+            return
+
+        def on_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                self.session.mark_completed()
+                log.write("[green]Session marked completed.[/green]")
+                self.exit()
+
+        self.push_screen(DoneConfirmModal(), on_confirm)
 
 
 def run_tui(
