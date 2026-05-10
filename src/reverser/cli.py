@@ -62,9 +62,13 @@ def main():
                                     help="Path to binary or target URL for web pentest")
     interactive_parser.add_argument("--profile", "-p", default="general",
                                     help="Agent profile (general, linux, windows, android, chrome, managed, "
-                                         "api, ctf, webpentest, webapi, webrecon)")
+                                         "api, pentest, ad, ctf, webpentest, webapi, webrecon, manager)")
     interactive_parser.add_argument("--budget", type=float, default=5.0, help="Max USD budget (default: 5.0)")
     interactive_parser.add_argument("--max-turns", type=int, default=50, help="Max agent turns per interaction (default: 50)")
+    interactive_parser.add_argument("--max-parallel", type=int, default=1, metavar="N",
+                                    help="Maximum parallel specialist dispatches (manager profile only). "
+                                         "Default 1 (sequential). Increase only for safe-to-parallelize work like "
+                                         "external recon across distinct subnets.")
     interactive_parser.add_argument("--list-profiles", action="store_true", help="List available profiles and exit")
     add_backend_args(interactive_parser)
 

@@ -333,6 +333,215 @@ async def kb_add_note(args: dict) -> dict:
 TOOLS.append(kb_add_note)
 
 
+@tool(
+    "kb_add_hypothesis",
+    "Add a new hypothesis to the engagement's attack tree. Returns the new id. "
+    "Use parent_id to link to a parent hypothesis you're refining. confidence is "
+    "0-100. tags is a list of free-form labels.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Normalized target identifier."},
+            "statement": {"type": "string", "description": "What you're hypothesizing."},
+            "parent_id": {"type": "integer", "description": "Parent hypothesis id (optional)."},
+            "rationale": {"type": "string", "description": "Why you're proposing this."},
+            "confidence": {"type": "integer", "description": "0-100 confidence."},
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["target", "statement"],
+    },
+)
+async def kb_add_hypothesis(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    h = for_target(args["target"]).add_hypothesis(
+        statement=args["statement"],
+        parent_id=args.get("parent_id"),
+        rationale=args.get("rationale"),
+        confidence=args.get("confidence"),
+        tags=args.get("tags"),
+    )
+    return format_tool_result(
+        f"Hypothesis #{h.id} added (status={h.status}, confidence={h.confidence}): "
+        f"{h.statement}"
+    )
+
+
+TOOLS.append(kb_add_hypothesis)
+
+
+@tool(
+    "kb_get_hypothesis",
+    "Fetch a single hypothesis with its full record and a list of its child "
+    "hypothesis ids. Use this to inspect a specific node of the attack tree.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "id": {"type": "integer", "description": "Hypothesis id."},
+        },
+        "required": ["target", "id"],
+    },
+)
+async def kb_get_hypothesis(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    kb = for_target(args["target"])
+    h = kb.get_hypothesis(args["id"])
+    if h is None:
+        return format_tool_result(f"No hypothesis with id={args['id']}.")
+    children = kb.list_hypotheses(parent_id=h.id)
+    lines = [
+        f"# Hypothesis #{h.id}",
+        f"**Statement:** {h.statement}",
+        f"**Status:** {h.status}",
+        f"**Confidence:** {h.confidence if h.confidence is not None else '—'}",
+        f"**Parent:** {h.parent_id if h.parent_id else '—'}",
+        f"**Dispatched to:** {h.dispatched_to or '—'}",
+        f"**Dispatch count:** {h.dispatch_count}",
+        f"**Tags:** {', '.join(h.tags) if h.tags else '—'}",
+    ]
+    if h.rationale:
+        lines.append(f"**Rationale:** {h.rationale}")
+    if h.evidence_refs:
+        lines.append(f"**Evidence refs:** {h.evidence_refs}")
+    if children:
+        lines.append("")
+        lines.append(f"**Children (ids):** {[c.id for c in children]}")
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(kb_get_hypothesis)
+
+
+@tool(
+    "kb_update_hypothesis",
+    "Update fields on an existing hypothesis. Pass only the fields you want to "
+    "change. Common transitions: status='testing' when dispatching, "
+    "status='confirmed'/'refuted'/'inconclusive' when a dispatch returns. "
+    "evidence_refs is a list of {kind, id} dicts pointing into the KB.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "id": {"type": "integer"},
+            "status": {
+                "type": "string",
+                "enum": ["proposed", "testing", "confirmed", "refuted", "abandoned", "blocked"],
+            },
+            "rationale": {"type": "string"},
+            "confidence": {"type": "integer"},
+            "dispatched_to": {"type": "string"},
+            "evidence_refs": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "List of {kind: 'finding'|'note'|'credential'|'service', id: int}",
+            },
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["target", "id"],
+    },
+)
+async def kb_update_hypothesis(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    kb = for_target(args["target"])
+    if kb.get_hypothesis(args["id"]) is None:
+        return format_tool_result(f"No hypothesis with id={args['id']}.")
+    update_kwargs = {
+        k: args[k]
+        for k in ("status", "rationale", "confidence", "dispatched_to",
+                  "evidence_refs", "tags")
+        if k in args
+    }
+    kb.update_hypothesis(args["id"], **update_kwargs)
+    return format_tool_result(
+        f"Hypothesis #{args['id']} updated: {sorted(update_kwargs.keys())}"
+    )
+
+
+TOOLS.append(kb_update_hypothesis)
+
+
+@tool(
+    "kb_list_hypotheses",
+    "List hypotheses for the target, optionally filtered by status or parent_id. "
+    "Set include_tree=True to render a hierarchical view (recommended for the "
+    "manager profile's status checks).",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "status": {"type": "string"},
+            "parent_id": {"type": "integer"},
+            "include_tree": {"type": "boolean", "default": False},
+        },
+        "required": ["target"],
+    },
+)
+async def kb_list_hypotheses(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    kb = for_target(args["target"])
+    if args.get("include_tree"):
+        return format_tool_result(_render_hypothesis_tree(kb))
+    hypotheses = kb.list_hypotheses(
+        status=args.get("status"),
+        parent_id=args.get("parent_id"),
+    )
+    if not hypotheses:
+        return format_tool_result("No hypotheses match.")
+    lines = ["| id | status | conf | parent | statement |",
+             "|---|---|---|---|---|"]
+    for h in hypotheses:
+        lines.append(
+            f"| {h.id} | {h.status} | {h.confidence or '—'} | "
+            f"{h.parent_id or '—'} | {h.statement} |"
+        )
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(kb_list_hypotheses)
+
+
+_STATUS_GLYPH = {
+    "proposed": "💭",
+    "testing": "🔄",
+    "confirmed": "✅",
+    "refuted": "❌",
+    "abandoned": "🗑️",
+    "blocked": "⛔",
+}
+
+
+def _render_hypothesis_tree(kb) -> str:
+    """Markdown-bullet rendering of the hypothesis tree."""
+    branches = kb.hypothesis_tree()
+    if not branches:
+        return "(no hypotheses)"
+    lines = []
+
+    def walk(branch, depth: int):
+        h = branch["hypothesis"]
+        glyph = _STATUS_GLYPH.get(h.status, "•")
+        conf = f", {h.confidence}%" if h.confidence is not None else ""
+        prefix = "  " * depth
+        lines.append(
+            f"{prefix}- {glyph} **{h.statement}** "
+            f"({h.status}{conf}, id={h.id})"
+        )
+        for child in branch["children"]:
+            walk(child, depth + 1)
+
+    for b in branches:
+        walk(b, 0)
+    return "\n".join(lines)
+
+
 def _render_report(kb) -> str:
     """Render a markdown report from KB contents in the project house style."""
     hosts = kb.get_hosts()
@@ -443,6 +652,14 @@ def _render_report(kb) -> str:
     else:
         lines.append("_No notes recorded._")
     lines.append("")
+
+    # Attack tree (only if hypotheses exist)
+    branches = kb.hypothesis_tree()
+    if branches:
+        lines.append("## Attack tree")
+        lines.append("")
+        lines.append(_render_hypothesis_tree(kb))
+        lines.append("")
 
     return "\n".join(lines)
 

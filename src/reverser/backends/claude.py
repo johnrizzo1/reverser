@@ -32,6 +32,7 @@ class ClaudeBackend(Backend):
         *,
         max_turns: int = 50,
         max_budget_usd: float = 5.0,
+        allowed_tools: list[str] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         server = create_sdk_mcp_server(
             name="re",
@@ -42,7 +43,7 @@ class ClaudeBackend(Backend):
         options = ClaudeAgentOptions(
             system_prompt=system_prompt,
             mcp_servers={"re": server},
-            allowed_tools=["mcp__re__*"],
+            allowed_tools=allowed_tools or ["mcp__re__*"],
             permission_mode="bypassPermissions",
             max_turns=max_turns,
             max_budget_usd=max_budget_usd,

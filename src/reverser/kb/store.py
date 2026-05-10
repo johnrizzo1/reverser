@@ -91,6 +91,22 @@ class CredResult:
     error_msg: Optional[str] = None
 
 
+@dataclass
+class HypothesisFact:
+    id: int | None = None
+    parent_id: int | None = None
+    statement: str = ""
+    rationale: str | None = None
+    status: str = "proposed"
+    confidence: int | None = None
+    dispatched_to: str | None = None
+    dispatch_count: int = 0
+    evidence_refs: list[dict] | None = None
+    tags: list[str] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 def normalize_target(target: str) -> str:
     """Normalize a target identifier (lowercase, strip)."""
     if not target or not target.strip():
@@ -413,3 +429,253 @@ class KB:
                 (self.target_id,),
             )
             return [r[0] for r in cursor.fetchall()]
+
+    # ── Hypothesis CRUD ────────────────────────────────────────────────
+
+    def add_hypothesis(
+        self,
+        statement: str,
+        *,
+        parent_id: int | None = None,
+        rationale: str | None = None,
+        confidence: int | None = None,
+        tags: list[str] | None = None,
+    ) -> HypothesisFact:
+        """Insert a new hypothesis. Returns the persisted fact with id populated."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO hypotheses "
+                "(target_id, parent_id, statement, rationale, confidence, tags, "
+                "status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?)",
+                (
+                    self.target_id, parent_id, statement, rationale, confidence,
+                    json.dumps(tags) if tags is not None else None,
+                    _now_iso(), _now_iso(),
+                ),
+            )
+            new_id = cur.lastrowid
+            conn.commit()
+        return self.get_hypothesis(new_id)
+
+    def update_hypothesis(
+        self,
+        hypothesis_id: int,
+        *,
+        status: str | None = None,
+        rationale: str | None = None,
+        confidence: int | None = None,
+        dispatched_to: str | None = None,
+        evidence_refs: list[dict] | None = None,
+        tags: list[str] | None = None,
+        increment_dispatch_count: bool = False,
+    ) -> None:
+        """Update fields on an existing hypothesis. Only provided kwargs are written."""
+        sets: list[str] = []
+        params: list = []
+        if status is not None:
+            sets.append("status = ?")
+            params.append(status)
+        if rationale is not None:
+            sets.append("rationale = ?")
+            params.append(rationale)
+        if confidence is not None:
+            sets.append("confidence = ?")
+            params.append(confidence)
+        if dispatched_to is not None:
+            sets.append("dispatched_to = ?")
+            params.append(dispatched_to)
+        if evidence_refs is not None:
+            sets.append("evidence_refs = ?")
+            params.append(json.dumps(evidence_refs))
+        if tags is not None:
+            sets.append("tags = ?")
+            params.append(json.dumps(tags))
+        if increment_dispatch_count:
+            sets.append("dispatch_count = dispatch_count + 1")
+        if not sets:
+            return  # nothing to do
+        sets.append("updated_at = ?")
+        params.append(_now_iso())
+        params.append(hypothesis_id)
+        params.append(self.target_id)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE hypotheses SET {', '.join(sets)} "
+                "WHERE id = ? AND target_id = ?",
+                tuple(params),
+            )
+            conn.commit()
+
+    def get_hypothesis(self, hypothesis_id: int) -> HypothesisFact | None:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT id, parent_id, statement, rationale, status, confidence, "
+                "dispatched_to, dispatch_count, evidence_refs, tags, "
+                "created_at, updated_at "
+                "FROM hypotheses WHERE id = ? AND target_id = ?",
+                (hypothesis_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return self._row_to_hypothesis(row)
+
+    def list_hypotheses(
+        self,
+        *,
+        status: str | None = None,
+        parent_id: int | None = None,
+    ) -> list[HypothesisFact]:
+        sql = (
+            "SELECT id, parent_id, statement, rationale, status, confidence, "
+            "dispatched_to, dispatch_count, evidence_refs, tags, "
+            "created_at, updated_at "
+            "FROM hypotheses WHERE target_id = ?"
+        )
+        params: list = [self.target_id]
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        if parent_id is not None:
+            sql += " AND parent_id = ?"
+            params.append(parent_id)
+        sql += " ORDER BY id"
+        with self._connect() as conn:
+            cur = conn.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [self._row_to_hypothesis(r) for r in rows]
+
+    @staticmethod
+    def _row_to_hypothesis(row) -> HypothesisFact:
+        return HypothesisFact(
+            id=row[0],
+            parent_id=row[1],
+            statement=row[2],
+            rationale=row[3],
+            status=row[4],
+            confidence=row[5],
+            dispatched_to=row[6],
+            dispatch_count=row[7],
+            evidence_refs=json.loads(row[8]) if row[8] else None,
+            tags=json.loads(row[9]) if row[9] else None,
+            created_at=row[10],
+            updated_at=row[11],
+        )
+
+    def hypothesis_tree(self, root_id: int | None = None):
+        """Return hierarchical view of hypotheses.
+
+        If root_id is None, returns a list of {"hypothesis": HypothesisFact,
+        "children": [...]} branches for all root hypotheses (parent_id IS NULL).
+
+        If root_id is given, returns a single branch dict rooted at that hypothesis.
+        Raises KeyError if root_id doesn't exist.
+        """
+        # Fetch all hypotheses for this target, build parent_id → children map
+        all_hypotheses = self.list_hypotheses()
+        by_parent: dict[int | None, list[HypothesisFact]] = {}
+        for h in all_hypotheses:
+            by_parent.setdefault(h.parent_id, []).append(h)
+
+        def build_branch(h: HypothesisFact) -> dict:
+            return {
+                "hypothesis": h,
+                "children": [build_branch(c) for c in by_parent.get(h.id, [])],
+            }
+
+        if root_id is None:
+            roots = by_parent.get(None, [])
+            return [build_branch(r) for r in roots]
+        else:
+            target = next((h for h in all_hypotheses if h.id == root_id), None)
+            if target is None:
+                raise KeyError(f"hypothesis {root_id} not found")
+            return build_branch(target)
+
+    def resolve_evidence_refs(self, refs: list[dict]) -> list[dict]:
+        """Dereference evidence_refs into [{kind, id, data}] tuples.
+
+        Unknown kinds are silently dropped (defensive against schema drift).
+        Missing rows are silently dropped (defensive against deletion).
+        """
+        out: list[dict] = []
+        for ref in refs:
+            kind = ref.get("kind")
+            ref_id = ref.get("id")
+            if kind is None or ref_id is None:
+                continue
+            data = None
+            if kind == "finding":
+                data = self._get_finding_by_id(ref_id)
+            elif kind == "note":
+                data = self._get_note_by_id(ref_id)
+            elif kind == "credential":
+                data = self._get_credential_by_id(ref_id)
+            elif kind == "service":
+                data = self._get_service_by_id(ref_id)
+            else:
+                continue  # unknown kind
+            if data is None:
+                continue
+            out.append({"kind": kind, "id": ref_id, "data": data})
+        return out
+
+    def _get_finding_by_id(self, finding_id: int):
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT title, severity, cvss, description, evidence_paths, created_at "
+                "FROM findings WHERE id = ? AND target_id = ?",
+                (finding_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return FindingFact(
+            title=row[0], severity=row[1], cvss=row[2],
+            description=row[3],
+            evidence_paths=json.loads(row[4]) if row[4] else [],
+        )
+
+    def _get_note_by_id(self, note_id: int):
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT body, created_at FROM notes WHERE id = ? AND target_id = ?",
+                (note_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {"body": row[0], "created_at": row[1]}
+
+    def _get_credential_by_id(self, cred_id: int):
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT username, password, nt_hash, domain, status "
+                "FROM credentials WHERE id = ? AND target_id = ?",
+                (cred_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return CredentialFact(
+            username=row[0], password=row[1], nt_hash=row[2],
+            domain=row[3], status=row[4],
+        )
+
+    def _get_service_by_id(self, service_row_id: int):
+        # services has a composite PK (target_id, host_ip, port, proto) — id refs
+        # are by rowid here. Defensive: if missing, return None.
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT host_ip, port, proto, service, version "
+                "FROM services WHERE rowid = ? AND target_id = ?",
+                (service_row_id, self.target_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return ServiceFact(
+            host_ip=row[0], port=row[1], proto=row[2],
+            service=row[3], version=row[4],
+        )

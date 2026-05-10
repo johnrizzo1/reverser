@@ -29,6 +29,7 @@ class Backend(ABC):
         *,
         max_turns: int = 50,
         max_budget_usd: float = 5.0,
+        allowed_tools: list[str] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Run the agent with the given prompt and yield events.
 
@@ -37,6 +38,8 @@ class Backend(ABC):
             system_prompt: System prompt including profile additions.
             max_turns: Maximum agent turns (tool-call loops).
             max_budget_usd: Budget cap (only enforced by Claude backend).
+            allowed_tools: Explicit allow-list of MCP tool names. None means
+                "all tools" (the default wildcard `mcp__re__*`).
 
         Yields:
             AgentEvent instances as the agent works.
