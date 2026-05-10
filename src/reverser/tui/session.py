@@ -64,7 +64,34 @@ class AgentSession:
         backend_name: str = "claude",
         model: str | None = None,
         api_base: str | None = None,
+        resume_from: "SessionSnapshot | None" = None,
     ):
+        if resume_from is not None:
+            self._init_resumed(resume_from, profile, backend_name, model, api_base)
+        else:
+            self._init_new(
+                binary_path=binary_path,
+                profile=profile,
+                budget=budget,
+                max_turns=max_turns,
+                log_path=log_path,
+                backend_name=backend_name,
+                model=model,
+                api_base=api_base,
+            )
+        # Make this session reachable to session-aware tools (e.g. dispatch_specialist)
+        from ..sessions import current_session
+        current_session.set(self)
+
+    def _init_new(
+        self, *, binary_path, profile, budget, max_turns,
+        log_path, backend_name, model, api_base,
+    ):
+        """Original __init__ body — fresh session."""
+        from ..sessions import (
+            new_snapshot, save as save_snapshot, SessionConfig,
+        )
+
         self._is_web = profile.key in _WEB_PROFILES
         self._is_url_target = is_url(binary_path) if binary_path else False
 
@@ -96,6 +123,7 @@ class AgentSession:
         self._backend_name = backend_name
         self._running = False
         self._cancel = False
+        self._stop_requested = False
 
         if log_path is None:
             log_path = session_log_path(binary_path, is_url=self._is_url_target)
@@ -104,6 +132,91 @@ class AgentSession:
         self._slog.log_session_start(
             self.target, f"interactive/{profile.key}", budget,
         )
+
+        # Mint and persist the initial snapshot
+        config = SessionConfig(
+            profile=profile.key,
+            backend=backend_name,
+            model=model,
+            api_base=api_base,
+            budget=budget,
+            max_turns=max_turns,
+        )
+        self._snapshot = new_snapshot(
+            target=self.target,
+            log_path=self._log_path,
+            config=config,
+        )
+        save_snapshot(self._snapshot)
+
+    def _init_resumed(
+        self, snap: "SessionSnapshot", profile, backend_name, model, api_base,
+    ):
+        """Restore session state from a snapshot."""
+        import os
+        from ..sessions import save as save_snapshot, ConversationEntry
+
+        if snap.config.profile != profile.key:
+            raise ValueError(
+                f"Cannot resume: snapshot profile is {snap.config.profile!r} "
+                f"but caller passed profile {profile.key!r}. Drop the -p flag "
+                f"to use the snapshot's profile, or start a new session."
+            )
+
+        # Resolve target / web flags from the snapshot
+        self.target = snap.target
+        self.binary_path = self.target
+        self._is_url_target = is_url(self.target) if self.target else False
+        self._is_web = profile.key in _WEB_PROFILES
+
+        self.profile = profile
+        self.budget = snap.config.budget
+        self.max_turns = snap.config.max_turns
+
+        # Restore stats
+        self.stats = TurnStats(
+            budget=snap.config.budget,
+            max_turns=snap.config.max_turns,
+            binary_path=self.target,
+            target=self.target,
+            profile_key=profile.key,
+            total_cost=snap.stats.total_cost,
+            turns=snap.stats.turns,
+        )
+
+        # Restore exchanges from conversation entries
+        self.exchanges = [
+            Exchange(
+                user=e.user, agent=e.agent, turn=e.turn,
+                timestamp=e.timestamp, cost=e.cost,
+            )
+            for e in snap.conversation
+        ]
+
+        # Backend (use snapshot's backend config unless overridden)
+        effective_backend = backend_name or snap.config.backend
+        effective_model = model if model is not None else snap.config.model
+        effective_api_base = api_base if api_base is not None else snap.config.api_base
+        self._backend = create_backend(
+            effective_backend,
+            ALL_TOOLS,
+            model=effective_model,
+            api_base=effective_api_base,
+        )
+        self._backend_name = effective_backend
+        self._running = False
+        self._cancel = False
+        self._stop_requested = False
+
+        # Reuse the existing log
+        self._log_path = snap.log_path
+        self._slog = SessionLog(self._log_path)
+
+        # Take ownership: mark snapshot active with our pid
+        snap.state = "active"
+        snap.pid = os.getpid()
+        self._snapshot = snap
+        save_snapshot(self._snapshot)
 
     @property
     def log_path(self) -> str:
