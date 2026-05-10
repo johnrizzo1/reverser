@@ -49,6 +49,7 @@
     sslscan
     whatweb
     nbtscan
+    enum4linux-ng         # SMB/RPC/LDAP/NetBIOS enumeration — modern enum4linux rewrite
     # netexec (nxc) is installed from PyPI in the Python venv below — the
     # nixpkgs build is currently marked broken on this channel. Upstream's
     # recommended install method is `pip install netexec` anyway.
