@@ -121,3 +121,190 @@ def parse_hypothesis_outcome(report: str) -> str | None:
 
     # Section present but no keyword recognized
     return "inconclusive"
+
+
+# ── dispatch_specialist tool ────────────────────────────────────────
+
+from claude_agent_sdk import (  # noqa: E402  # imports here to keep helpers import-light
+    tool,
+    query,
+    ClaudeAgentOptions,
+    AssistantMessage,
+    TextBlock,
+    ResultMessage,
+)
+
+from .kb import _check_auth, format_tool_result  # reuse existing helpers
+from ..profiles import get_profile  # noqa: E402
+from ..kb.store import KB  # noqa: E402
+from ..kb.scope import load_scope  # noqa: E402
+
+
+_DISPATCHABLE_SPECIALTIES = ("pentest", "ad", "webpentest", "webapi", "webrecon")
+
+TOOLS: list = []  # exported for tools/__init__.py registration
+
+
+@tool(
+    "dispatch_specialist",
+    "Dispatch a specialist sub-agent to test a hypothesis or perform a sub-goal. "
+    "Use this when the manager profile needs offensive work done — the sub-agent "
+    "runs with its own context, budget cap, and full tool surface (minus this "
+    "tool to prevent recursive dispatch). Specialty must be one of: "
+    "pentest, ad, webpentest, webapi, webrecon. Returns a structured envelope "
+    "containing the specialist's markdown report, hypothesis_outcome (parsed "
+    "from the report), cost, and turns consumed.",
+    {
+        "type": "object",
+        "properties": {
+            "specialty": {
+                "type": "string",
+                "enum": list(_DISPATCHABLE_SPECIALTIES),
+            },
+            "sub_goal": {"type": "string", "description": "One-sentence falsifiable objective."},
+            "target": {"type": "string", "description": "Target identifier."},
+            "target_subset": {
+                "type": "array", "items": {"type": "string"},
+                "description": "Specific hosts/URLs (default: entire target scope).",
+            },
+            "hypothesis_id": {"type": "integer", "description": "Hypothesis being tested (strongly recommended)."},
+            "rationale": {"type": "string", "description": "Why dispatching now (audit-log)."},
+            "budget_usd": {"type": "number", "default": 0.50},
+            "max_turns": {"type": "integer", "default": 15},
+            "extra_context": {"type": "string", "description": "Additional briefing for the specialist."},
+        },
+        "required": ["specialty", "sub_goal", "target"],
+    },
+)
+async def dispatch_specialist(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+
+    specialty = args["specialty"]
+    if specialty not in _DISPATCHABLE_SPECIALTIES:
+        return format_tool_result(
+            f"Unknown or invalid (non-dispatchable) specialty: {specialty!r}. "
+            f"Valid: {list(_DISPATCHABLE_SPECIALTIES)}"
+        )
+
+    target = args["target"]
+    sub_goal = args["sub_goal"]
+    hypothesis_id = args.get("hypothesis_id")
+    rationale = args.get("rationale")
+    target_subset = args.get("target_subset")
+    extra_context = args.get("extra_context")
+    budget_usd = float(args.get("budget_usd", 0.50))
+    max_turns = int(args.get("max_turns", 15))
+
+    # Look up hypothesis (if any) for the dispatch context, and mark it as testing
+    kb = KB(target)
+    hypothesis_statement = None
+    if hypothesis_id is not None:
+        h = kb.get_hypothesis(hypothesis_id)
+        if h is not None:
+            hypothesis_statement = h.statement
+            kb.update_hypothesis(
+                hypothesis_id,
+                status="testing",
+                dispatched_to=specialty,
+                increment_dispatch_count=True,
+            )
+
+    # Build the scope summary (if a scope.toml exists)
+    try:
+        scope = load_scope(target)
+        scope_summary = (
+            f"in_scope_cidrs={scope.in_scope_cidrs}; "
+            f"no_dos={scope.no_dos}; no_account_lockout={scope.no_account_lockout}; "
+            f"allowed_hours={scope.allowed_hours}"
+        )
+    except Exception:
+        scope_summary = None
+
+    # Compose system prompt: dispatch context + specialty addendum
+    profile = get_profile(specialty)
+    dispatch_block = compose_dispatch_context(
+        target=target,
+        sub_goal=sub_goal,
+        target_subset=target_subset,
+        hypothesis_id=hypothesis_id,
+        hypothesis_statement=hypothesis_statement,
+        rationale=rationale,
+        scope_summary=scope_summary,
+        max_turns=max_turns,
+        budget_usd=budget_usd,
+        extra_context=extra_context,
+    )
+    full_system_prompt = dispatch_block + "\n\n" + profile.system_addendum
+
+    # Compute the sub-agent's allowed_tools — all MCP tools EXCEPT
+    # dispatch_specialist (no recursive dispatch). Late import to avoid cycle.
+    from . import ALL_TOOLS  # noqa: E402  # local to break cycle
+    sub_allowed_tools = [
+        f"mcp__re__{t.name}" for t in ALL_TOOLS if t.name != "dispatch_specialist"
+    ]
+
+    options = ClaudeAgentOptions(
+        system_prompt=full_system_prompt,
+        allowed_tools=sub_allowed_tools,
+        permission_mode="bypassPermissions",
+        max_turns=max_turns,
+        max_budget_usd=budget_usd,
+    )
+
+    report_text = ""
+    cost_usd = 0.0
+    turns_consumed = 0
+    status = "completed"
+    error_msg = None
+
+    try:
+        async for message in query(prompt=sub_goal, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        report_text = block.text  # last text block wins
+            elif isinstance(message, ResultMessage):
+                cost_usd = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
+                turns_consumed = int(getattr(message, "num_turns", 0) or 0)
+                if message.subtype != "success":
+                    subtype_str = str(message.subtype).lower()
+                    if "budget" in subtype_str:
+                        status = "budget_exhausted"
+                    elif "turn" in subtype_str:
+                        status = "turn_limit"
+                    else:
+                        status = "error"
+                    if not report_text:
+                        report_text = (
+                            f"(specialist did not produce a report; "
+                            f"subtype={message.subtype})"
+                        )
+    except Exception as e:
+        status = "error"
+        error_msg = f"{type(e).__name__}: {e}"
+        if not report_text:
+            report_text = f"(dispatch failed: {error_msg})"
+
+    outcome = parse_hypothesis_outcome(report_text)
+
+    summary_lines = [
+        f"# Dispatch result — {specialty}",
+        f"**Status:** {status}",
+        f"**Cost:** ${cost_usd:.4f}",
+        f"**Turns:** {turns_consumed}",
+        f"**Outcome:** {outcome or 'unknown'}",
+    ]
+    if error_msg:
+        summary_lines.append(f"**Error:** {error_msg}")
+    summary_lines.append("")
+    summary_lines.append("---")
+    summary_lines.append("")
+    summary_lines.append("## Specialist's report")
+    summary_lines.append("")
+    summary_lines.append(report_text)
+    return format_tool_result("\n".join(summary_lines))
+
+
+TOOLS.append(dispatch_specialist)
