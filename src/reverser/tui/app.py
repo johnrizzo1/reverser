@@ -401,6 +401,31 @@ class ReverserApp(App):
             else:
                 log.write(f"Binary loaded: [green]{self.binary_path}[/green]")
             log.write(f"Session log: {self.session.log_path}")
+
+            # Surface session info + replay conversation if resumed
+            snap = getattr(self.session, "_snapshot", None)
+            if snap is not None and getattr(self, "_was_resumed", False):
+                log.write(
+                    f"[bold yellow]Resumed session[/] {snap.session_id} "
+                    f"({snap.stats.turns} turns, ${snap.stats.total_cost:.2f} spent)"
+                )
+                if snap.conversation:
+                    log.write(f"Replaying {len(snap.conversation)} prior exchanges...")
+                    for entry in snap.conversation:
+                        log.write(f"[bold]You ({entry.timestamp})[/]: {entry.user}")
+                        log.write(f"[bold]Agent[/]: {entry.agent}")
+                        log.write("")
+                if snap.in_flight is not None:
+                    log.write(
+                        f"[bold yellow]⚠ Previous session was stopped during dispatch "
+                        f"to '{snap.in_flight.specialty}' "
+                        f"(hypothesis #{snap.in_flight.hypothesis_id}). "
+                        f"Hypothesis status is still 'testing'.[/]"
+                    )
+                    log.write("")
+            elif snap is not None:
+                log.write(f"[dim]Session: {snap.session_id} (new)[/dim]")
+                log.write("")
         else:
             if self._is_web_profile:
                 log.write("No target set. Press [bold]F3[/bold] to set one, or enter a URL.")
