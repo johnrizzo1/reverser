@@ -109,7 +109,8 @@ SKILL_WRAPUP = Skill(
         "(out of time, out of scope, blocked, etc.). Then generate the "
         "final engagement report (kb_export_report + executive summary). "
         "Finally, print a brief wrap-up message stating the engagement is "
-        "complete and where the report was written."
+        "complete and where the report was written, and tell the user: "
+        "'Type /done to mark this session completed and exit.'"
     ),
 )
 

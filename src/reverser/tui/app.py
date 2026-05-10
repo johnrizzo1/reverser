@@ -1,6 +1,10 @@
 """Interactive TUI application for the reverser agent."""
 
 import asyncio
+import atexit
+import os
+import signal
+import sys
 from pathlib import Path
 
 from textual import on, work
@@ -336,6 +340,7 @@ class ReverserApp(App):
         Binding("f3", "load_binary", "Load", show=True),
         Binding("f4", "set_sudo", "Sudo", show=True),
         Binding("f5", "clear_log", "Clear", show=True),
+        Binding("f6", "stop_session", "Stop", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
@@ -348,6 +353,7 @@ class ReverserApp(App):
         backend: str = "claude",
         model: str | None = None,
         api_base: str | None = None,
+        resume_from=None,  # SessionSnapshot | None
     ):
         super().__init__()
         self.binary_path = binary_path
@@ -359,6 +365,8 @@ class ReverserApp(App):
         self.api_base = api_base
         self.profile = get_profile(profile_key)
         self.session: AgentSession | None = None
+        self._resume_from = resume_from
+        self._was_resumed = resume_from is not None
 
     @property
     def _is_web_profile(self) -> bool:
@@ -386,6 +394,9 @@ class ReverserApp(App):
         log.write(f"[bold]Reverser Agent[/bold] — Profile: [cyan]{self.profile.name}[/cyan]{backend_info}")
         log.write("")
 
+        # Wire emergency snapshot hooks (best-effort save on shutdown)
+        _register_emergency_hooks(self)
+
         if self.binary_path:
             self._init_session()
             if self._is_web_target:
@@ -393,6 +404,31 @@ class ReverserApp(App):
             else:
                 log.write(f"Binary loaded: [green]{self.binary_path}[/green]")
             log.write(f"Session log: {self.session.log_path}")
+
+            # Surface session info + replay conversation if resumed
+            snap = getattr(self.session, "_snapshot", None)
+            if snap is not None and getattr(self, "_was_resumed", False):
+                log.write(
+                    f"[bold yellow]Resumed session[/] {snap.session_id} "
+                    f"({snap.stats.turns} turns, ${snap.stats.total_cost:.2f} spent)"
+                )
+                if snap.conversation:
+                    log.write(f"Replaying {len(snap.conversation)} prior exchanges...")
+                    for entry in snap.conversation:
+                        log.write(f"[bold]You ({entry.timestamp})[/]: {entry.user}")
+                        log.write(f"[bold]Agent[/]: {entry.agent}")
+                        log.write("")
+                if snap.in_flight is not None:
+                    log.write(
+                        f"[bold yellow]⚠ Previous session was stopped during dispatch "
+                        f"to '{snap.in_flight.specialty}' "
+                        f"(hypothesis #{snap.in_flight.hypothesis_id}). "
+                        f"Hypothesis status is still 'testing'.[/]"
+                    )
+                    log.write("")
+            elif snap is not None:
+                log.write(f"[dim]Session: {snap.session_id} (new)[/dim]")
+                log.write("")
         else:
             if self._is_web_profile:
                 log.write("No target set. Press [bold]F3[/bold] to set one, or enter a URL.")
@@ -422,7 +458,11 @@ class ReverserApp(App):
             backend_name=self.backend_name,
             model=self.model,
             api_base=self.api_base,
+            resume_from=self._resume_from,
         )
+        # Resume snapshot is consumed; clear it so subsequent _init_session
+        # calls (e.g. profile switch) construct a fresh session.
+        self._resume_from = None
         self._update_status()
 
     def _update_status(self):
@@ -518,10 +558,12 @@ class ReverserApp(App):
             log.write("  /skills         — Show available skills (or F1)")
             log.write("  /budget <amt>   — Set budget in USD")
             log.write("  /turns <n>      — Set max turns")
-            log.write("  /status         — Show session stats")
+            log.write("  /status         — Show session stats and snapshot state")
             log.write("  /sudo           — Set sudo password for privileged scans (or F4)")
             log.write("  /clear          — Clear the chat log (or F5)")
             log.write("  /cancel         — Cancel running agent")
+            log.write("  /stop           — Stop session, save snapshot, exit (or F6)")
+            log.write("  /done           — Mark session completed (terminal), exit")
             log.write("")
             log.write("[bold]Profiles:[/bold]")
             for p in list_profiles():
@@ -564,11 +606,16 @@ class ReverserApp(App):
         elif cmd == "/status":
             if self.session:
                 s = self.session.stats
+                snap = getattr(self.session, "_snapshot", None)
                 log.write(f"Binary: {s.binary_path}")
                 log.write(f"Profile: {self.profile.name} ({self.profile_key})")
                 log.write(f"Turns: {s.turns}/{s.max_turns}")
                 log.write(f"Cost: ${s.total_cost:.4f} / ${s.budget:.2f}")
                 log.write(f"Log: {self.session.log_path}")
+                if snap is not None:
+                    log.write(f"Session ID: {snap.session_id}")
+                    log.write(f"State: {snap.state}")
+                    log.write(f"Started: {snap.started_at}")
             else:
                 log.write("No active session.")
 
@@ -584,6 +631,12 @@ class ReverserApp(App):
                 log.write("[yellow]Cancelling...[/yellow]")
             else:
                 log.write("Nothing to cancel.")
+
+        elif cmd == "/stop":
+            self.action_stop_session()
+
+        elif cmd == "/done":
+            self._mark_done()
 
         else:
             log.write(f"[red]Unknown command: {cmd}. Type /help for commands.[/red]")
@@ -737,6 +790,69 @@ class ReverserApp(App):
 
         self.push_screen(SudoPasswordScreen(), handle_password)
 
+    def action_stop_session(self) -> None:
+        """F6 / /stop — confirm and stop the session."""
+        from .modals import StopConfirmModal
+        log = self.query_one("#chat-log", SelectableRichLog)
+        if self.session is None:
+            log.write("[yellow]No active session to stop.[/yellow]")
+            return
+
+        def on_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                self.session.stop()
+                log.write("[yellow]Session stopped and snapshot saved.[/yellow]")
+                log.write(f"Resume later with: reverser i {self.session.target} --resume")
+                self.exit()
+
+        self.push_screen(StopConfirmModal(), on_confirm)
+
+    def _mark_done(self) -> None:
+        """/done — confirm and mark the session completed (terminal)."""
+        from .modals import DoneConfirmModal
+        log = self.query_one("#chat-log", SelectableRichLog)
+        if self.session is None:
+            log.write("[yellow]No active session to mark completed.[/yellow]")
+            return
+
+        def on_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                self.session.mark_completed()
+                log.write("[green]Session marked completed.[/green]")
+                self.exit()
+
+        self.push_screen(DoneConfirmModal(), on_confirm)
+
+
+def _emergency_snapshot(session) -> None:
+    """Best-effort save on interpreter shutdown — runs even on crash/SIGTERM.
+
+    Called from atexit and SIGTERM signal handler. Catches all exceptions
+    because we're shutting down; nothing useful we can do if save fails.
+    """
+    if session is None:
+        return
+    try:
+        from ..sessions import save as save_snapshot
+        save_snapshot(session._snapshot)
+    except Exception:
+        pass
+
+
+def _register_emergency_hooks(app) -> None:
+    """Wire atexit + SIGTERM to emergency_snapshot of the app's current session.
+
+    Idempotent — safe to call multiple times.
+    """
+    atexit.register(lambda: _emergency_snapshot(getattr(app, "session", None)))
+
+    def _sigterm_handler(*_args):
+        _emergency_snapshot(getattr(app, "session", None))
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+
 
 def run_tui(
     binary_path: str = "",
@@ -746,6 +862,7 @@ def run_tui(
     backend: str = "claude",
     model: str | None = None,
     api_base: str | None = None,
+    resume_from=None,  # SessionSnapshot | None
 ):
     """Launch the interactive TUI."""
     app = ReverserApp(
@@ -756,5 +873,6 @@ def run_tui(
         backend=backend,
         model=model,
         api_base=api_base,
+        resume_from=resume_from,
     )
     app.run()
