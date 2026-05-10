@@ -47,17 +47,23 @@ def test_all_hypothesis_tools_registered():
 
 
 def test_all_tools_count_after_manager_work():
-    """Total registered tools after the manager-profile plan.
+    """Total registered tools after the manager-profile + post-merge additions.
 
     Baseline ALL_TOOLS list had 63 entries (61 unique — `nmap_scan` and
     `nikto_scan` were each registered twice as a pre-existing quirk).
-    Plan added 4 hypothesis CRUD + 1 dispatch_specialist = 68 registered,
-    66 unique. The spec's "68" was the registered count (not unique).
+    Manager work added 4 hypothesis CRUD + 1 dispatch_specialist = 68
+    registered (66 unique). enum4linux_ng added post-merge = 69 registered,
+    67 unique.
     """
-    assert len(ALL_TOOLS) == 68, (
-        f"expected 68 registered tools, got {len(ALL_TOOLS)}"
+    assert len(ALL_TOOLS) == 69, (
+        f"expected 69 registered tools, got {len(ALL_TOOLS)}"
     )
     unique_names = {t.name for t in ALL_TOOLS}
-    assert len(unique_names) == 66, (
-        f"expected 66 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
+    assert len(unique_names) == 67, (
+        f"expected 67 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
     )
+
+
+def test_enum4linux_ng_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "enum4linux_ng" in names
