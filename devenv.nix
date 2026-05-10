@@ -49,7 +49,9 @@
     sslscan
     whatweb
     nbtscan
-    netexec               # nxc — successor to crackmapexec; AD enumeration/exploitation
+    # netexec (nxc) is installed from PyPI in the Python venv below — the
+    # nixpkgs build is currently marked broken on this channel. Upstream's
+    # recommended install method is `pip install netexec` anyway.
     neo4j                  # graph database for BloodHound (per-target instances)
     krb5                   # kinit, klist, krb5-config
     dnsutils               # dig, nslookup, host
@@ -153,6 +155,11 @@
 	paramiko
         neo4j
         bloodhound
+        # NetExec is installed explicitly in enterShell (not here) — when
+        # the venv-requirements mechanism processes a `pkg @ git+url` entry,
+        # it imports the module but does not always wire up console_scripts
+        # entry-points (so the `nxc` binary ends up missing from venv/bin).
+        # Installing via `pip install` in enterShell is more reliable.
       '';
     };
   };
@@ -231,6 +238,22 @@
 
   enterShell = ''
     pip install -q --no-deps -e "$REVERSER_HOME" 2>/dev/null || true
+
+    # NetExec (nxc): install from upstream git into the venv so the `nxc`
+    # binary lands in venv/bin and is reachable on PATH. Idempotent — only
+    # runs when nxc is missing, which means it does no work on subsequent
+    # shell entries. NetExec isn't on PyPI and the nixpkgs package is marked
+    # broken on this channel, so explicit pip-from-git is the fallback.
+    if ! command -v nxc >/dev/null 2>&1; then
+      echo "Installing NetExec (nxc) into venv from upstream git..."
+      if pip install -q --upgrade "git+https://github.com/Pennyw0rth/NetExec.git@v1.5.1"; then
+        echo "  ✓ NetExec installed: $(nxc --version 2>&1 | head -1)"
+      else
+        echo "  ✗ NetExec install failed — install manually with:"
+        echo "    pip install git+https://github.com/Pennyw0rth/NetExec.git"
+      fi
+    fi
+
     hash -r
     echo "Reverser agent environment loaded."
     echo ""
