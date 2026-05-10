@@ -24,6 +24,7 @@ class Profile:
     description: str
     system_addendum: str
     skills: list[Skill] = field(default_factory=list)
+    tools_allowlist: list[str] | None = None  # None = all tools available
 
 
 PROFILES: dict[str, Profile] = {}
