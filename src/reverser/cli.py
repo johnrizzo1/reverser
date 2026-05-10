@@ -22,7 +22,13 @@ def main():
         default=0,
         help="Increase verbosity (-v: tool calls/results, -vv: +thinking)",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--list-sessions",
+        action="store_true",
+        help="List all resumable sessions across targets and exit.",
+    )
+    # subcommand is required UNLESS --list-sessions is given (handled below)
+    subparsers = parser.add_subparsers(dest="command", required=False)
 
     # Shared arguments for analysis commands
     def add_common_args(sub):
@@ -79,12 +85,43 @@ def main():
 
     args = parser.parse_args()
 
+    # Top-level --list-sessions short-circuit (no subcommand required)
+    if args.list_sessions:
+        _run_list_sessions()
+        return
+
+    if args.command is None:
+        parser.print_help(sys.stderr)
+        sys.exit(2)
+
     if args.command == "writeup":
         _run_writeup(args)
     elif args.command in ("interactive", "i"):
         _run_interactive(args)
     else:
         _run_agent(args)
+
+
+def _run_list_sessions():
+    from .sessions import list_all
+    snapshots = list_all()
+    if not snapshots:
+        print("No sessions found.")
+        return
+
+    print("Sessions across all targets:")
+    print(f"  {'TARGET':<16} {'ID':<24} {'STATE':<11} {'PROFILE':<10} "
+          f"{'STARTED':<20} {'LAST ACTIVE':<20} {'TURNS':>6} {'COST':>8}")
+    for s in snapshots:
+        cost_str = f"${s.stats.total_cost:.2f}"
+        print(
+            f"  {s.target:<16} {s.session_id:<24} {s.state:<11} "
+            f"{s.config.profile:<10} {s.started_at:<20} "
+            f"{s.last_active_at:<20} {s.stats.turns:>6} {cost_str:>8}"
+        )
+    print()
+    print("Resume the latest session for a target with: reverser i <target> --resume")
+    print("Resume a specific session with:              reverser i --resume <ID>")
 
 
 def _run_agent(args):
