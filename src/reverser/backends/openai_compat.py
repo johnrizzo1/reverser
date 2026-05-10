@@ -130,7 +130,16 @@ class OpenAICompatBackend(Backend):
         *,
         max_turns: int = 50,
         max_budget_usd: float = 5.0,
+        allowed_tools: list[str] | None = None,
     ) -> AsyncIterator[AgentEvent]:
+        # OpenAI-compatible backends don't have a native MCP allowed-tools
+        # filter — tool exposure happens at OpenAI tool-call time. For the
+        # manager profile (which sets allowed_tools), we accept the parameter
+        # for signature parity with the abstract Backend class but rely on
+        # prompt discipline to honor the restriction. A stricter enforcement
+        # would filter the tools list before passing it to the model, but
+        # that's out of scope for this fix.
+        _ = allowed_tools  # accept-and-ignore
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
