@@ -5,7 +5,7 @@ import asyncio
 import os
 import sys
 
-from .tools._common import is_url
+from .tools._common import is_url, maybe_extract_archive
 
 # Profiles that operate on web targets rather than binary files
 _WEB_PROFILES = {"webpentest", "webapi", "webrecon"}
@@ -145,6 +145,17 @@ def _run_agent(args):
         print(f"Error: file not found: {binary}", file=sys.stderr)
         sys.exit(1)
 
+    # If it's a zip archive, extract and use the extraction directory
+    extract_dir, members = maybe_extract_archive(binary)
+    if extract_dir:
+        print(f"Extracted zip to: {extract_dir}", file=sys.stderr)
+        for m in members:
+            print(f"  {os.path.relpath(m, extract_dir)}", file=sys.stderr)
+        if len(members) == 1:
+            binary = members[0]
+        else:
+            binary = extract_dir
+
     from .session_log import session_log_path
 
     log_path = args.log
@@ -214,6 +225,16 @@ def _run_interactive(args):
             if not os.path.isfile(target):
                 print(f"Error: file not found: {target}", file=sys.stderr)
                 sys.exit(1)
+            # If it's a zip archive, extract and use the extraction directory
+            extract_dir, members = maybe_extract_archive(target)
+            if extract_dir:
+                print(f"Extracted zip to: {extract_dir}", file=sys.stderr)
+                for m in members:
+                    print(f"  {os.path.relpath(m, extract_dir)}", file=sys.stderr)
+                if len(members) == 1:
+                    target = members[0]
+                else:
+                    target = extract_dir
 
     from .tui.app import run_tui
     run_tui(

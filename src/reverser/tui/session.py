@@ -1,5 +1,6 @@
 """Agent session manager — runs the agent and streams events to the TUI."""
 
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -276,6 +277,43 @@ you MUST use the `write_file` tool to create the file.
 
 When you respond, present your findings clearly with relevant details.
 """
+        elif os.path.isdir(self.target):
+            # Multi-file target (e.g. extracted zip archive)
+            file_listing = "\n".join(
+                f"  - {self.target}/{entry}"
+                for entry in sorted(os.listdir(self.target))
+                if os.path.isfile(os.path.join(self.target, entry))
+            )
+            base += f"""
+
+## Interactive Mode
+
+You are in interactive mode. The user will send you messages and you should respond helpfully.
+
+**CRITICAL: The target directory containing the challenge files is:**
+**{self.target}**
+
+The directory contains the following files:
+{file_listing}
+
+You MUST analyze ALL files in the target directory — they are likely related (e.g. a VM
+binary + bytecode, an executable + config, etc.). Use the full path to each file in tool calls.
+
+You have access to all reverse engineering tools. Use them when the user asks you to
+investigate the files. Be conversational but efficient — use tools proactively when
+they would help answer the user's question.
+
+**IMPORTANT: Complete all your analysis before giving your final response.** Keep making
+tool calls until you have gathered enough information to fully answer the user's request.
+Do NOT stop after just a few tool calls — continue investigating until you have a
+comprehensive answer. Only give your text response after all tool calls are done.
+
+When the user asks you to write a report, document findings, or save output to a file,
+you MUST use the `write_file` tool to create the file. Do NOT just print the content —
+actually write it to disk. If the user asks for a markdown file, write a .md file.
+
+When you respond, present your findings clearly with relevant details.
+"""
         else:
             base += f"""
 
@@ -333,6 +371,8 @@ When you respond, present your findings clearly with relevant details.
 
         if self._is_web or self._is_url_target:
             parts.append(f"\n\n[IMPORTANT: The target is exactly: {self.target} — use this for all tool calls]")
+        elif os.path.isdir(self.target):
+            parts.append(f"\n\n[IMPORTANT: The target directory is: {self.target} — analyze ALL files within it]")
         else:
             parts.append(f"\n\n[IMPORTANT: The binary path is exactly: {self.target} — use this path for all tool calls]")
         return "\n".join(parts)

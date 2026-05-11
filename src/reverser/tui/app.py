@@ -14,6 +14,7 @@ from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key
 from textual.screen import ModalScreen
+from textual.strip import Strip
 from textual.widgets import (
     Footer,
     Header,
@@ -26,13 +27,91 @@ from textual.widgets import (
 )
 
 
-class SelectableRichLog(RichLog):
-    """RichLog with smart auto-scroll that doesn't yank the user away.
+def _apply_selection_style(strip: Strip, style, start: int, end: int) -> Strip:
+    """Apply a Rich style to a character range within a Strip.
 
-    Inherits text selection from Textual's built-in ALLOW_SELECT.
-    Uses highlight=False (we supply our own Rich markup) and
-    delegates rendering entirely to the base RichLog for cache efficiency.
+    Args:
+        strip: The Strip to modify.
+        style: Rich Style to apply for the selection highlight.
+        start: Start column (inclusive).
+        end: End column (exclusive), or -1 for end of line.
     """
+    from rich.segment import Segment
+    from rich.style import Style as RichStyle
+
+    segments = list(strip._segments)
+    new_segments = []
+    col = 0
+    for seg in segments:
+        seg_len = len(seg.text)
+        seg_end = col + seg_len
+        effective_end = seg_end if end == -1 else end
+
+        if col >= effective_end or seg_end <= start:
+            # Entirely outside selection
+            new_segments.append(seg)
+        elif col >= start and seg_end <= effective_end:
+            # Entirely inside selection
+            new_segments.append(Segment(seg.text, (seg.style or RichStyle()) + style, seg.control))
+        else:
+            # Partially overlapping — split the segment
+            sel_start = max(start - col, 0)
+            sel_end = seg_len if end == -1 else min(end - col, seg_len)
+            if sel_start > 0:
+                new_segments.append(Segment(seg.text[:sel_start], seg.style, seg.control))
+            new_segments.append(Segment(
+                seg.text[sel_start:sel_end],
+                (seg.style or RichStyle()) + style,
+                seg.control,
+            ))
+            if sel_end < seg_len:
+                new_segments.append(Segment(seg.text[sel_end:], seg.style, seg.control))
+        col = seg_end
+
+    return Strip(new_segments, strip.cell_length)
+
+
+class SelectableRichLog(RichLog):
+    """RichLog with text selection and smart auto-scroll.
+
+    RichLog is a ScrollView whose rendering pipeline doesn't support
+    Textual's built-in text selection.  Three things are needed:
+
+    1. ``apply_offsets`` on each rendered strip so the compositor can map
+       mouse positions to text coordinates.
+    2. Selection highlight styling applied to strips that overlap the
+       current selection span.
+    3. Cache invalidation when the selection changes so highlights repaint.
+
+    This mirrors what ``textual.widgets.Log`` does internally.
+    """
+
+    def render_line(self, y: int) -> Strip:
+        """Render a line with offset metadata and selection highlighting."""
+        scroll_x, scroll_y = self.scroll_offset
+        content_y = scroll_y + y
+        strip = super().render_line(y)
+
+        # Apply selection highlight if active
+        selection = self.text_selection
+        if selection is not None:
+            span = selection.get_span(content_y)
+            if span is not None:
+                start, end = span
+                sel_style = self.screen.get_component_rich_style("screen--selection")
+                strip = _apply_selection_style(strip, sel_style, start, end)
+
+        return strip.apply_offsets(scroll_x, content_y)
+
+    def selection_updated(self, selection):
+        """Clear render cache and refresh when selection changes."""
+        self._line_cache.clear()
+        self.refresh()
+
+    def get_selection(self, selection):
+        """Return log text so the selection system can extract from it."""
+        text = "\n".join(line.text for line in self.lines)
+        return selection.extract(text), "\n"
 
     def write(self, content=None, width=None, expand=False, shrink=True, scroll_end=None, animate=False):
         # Only auto-scroll if the user is already at the bottom.
@@ -777,6 +856,13 @@ class ReverserApp(App):
 
         self.push_screen(LoadTargetScreen(self.binary_path), handle_path)
 
+    def on_text_selected(self, event) -> None:
+        """Auto-copy selected text to clipboard when mouse selection ends."""
+        selected = self.screen.get_selected_text()
+        if selected:
+            self.copy_to_clipboard(selected)
+            self.notify("Copied to clipboard", severity="information", timeout=2)
+
     def action_clear_log(self) -> None:
         log = self.query_one("#chat-log", SelectableRichLog)
         log.clear()
@@ -873,6 +959,41 @@ def _register_emergency_hooks(app) -> None:
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
 
+def _patch_textual_utf8_decoder() -> None:
+    """Patch Textual's Linux driver to tolerate malformed UTF-8 from stdin.
+
+    Textual's ``run_input_thread`` creates a strict incremental UTF-8
+    decoder via ``getincrementaldecoder("utf-8")()``.  During rapid
+    terminal resizes the emulator can split a multi-byte escape sequence
+    across reads, causing a ``UnicodeDecodeError`` that crashes the app.
+
+    We swap the module-level ``getincrementaldecoder`` reference in
+    ``textual.drivers.linux_driver`` with a wrapper that returns a
+    ``errors="replace"`` decoder for UTF-8, so malformed bytes become
+    U+FFFD instead of exceptions.
+    """
+    try:
+        import textual.drivers.linux_driver as _ld
+        from codecs import getincrementaldecoder as _orig
+
+        def _tolerant_getincrementaldecoder(encoding):
+            cls = _orig(encoding)
+            if encoding.lower().replace("-", "") == "utf8":
+                # Return a factory whose instances default to replace
+                _real_cls = cls
+
+                class _ReplaceDecoder(_real_cls):
+                    def __init__(self, errors="replace"):
+                        super().__init__(errors)
+
+                return _ReplaceDecoder
+            return cls
+
+        _ld.getincrementaldecoder = _tolerant_getincrementaldecoder
+    except Exception:
+        pass  # Non-Linux or incompatible Textual version — skip silently
+
+
 def run_tui(
     binary_path: str = "",
     profile: str = "general",
@@ -884,6 +1005,7 @@ def run_tui(
     resume_from=None,  # SessionSnapshot | None
 ):
     """Launch the interactive TUI."""
+    _patch_textual_utf8_decoder()
     app = ReverserApp(
         binary_path=binary_path,
         profile_key=profile,

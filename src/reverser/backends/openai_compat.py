@@ -53,6 +53,25 @@ _QWEN3_PARAM_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# Gemma 4 native format:
+# <|tool_call>call:function_name{key:<|"|>value<|"|>}<tool_call|>
+_GEMMA_TOOL_CALL_PATTERN = re.compile(
+    r'<\|tool_call>call:(?P<name>[a-zA-Z_]\w*)\{(?P<body>.*?)\}<tool_call\|>',
+    re.DOTALL,
+)
+
+_GEMMA_PARAM_PATTERN = re.compile(
+    r'(?P<key>[a-zA-Z_]\w*):<\|"\|>(?P<value>.*?)<\|"\|>',
+    re.DOTALL,
+)
+
+# Gemma 4 thinking format:
+# <|channel>thought\n...\n<channel|>
+_GEMMA_THINKING_PATTERN = re.compile(
+    r'<\|channel>thought\s*\n(?P<content>.*?)<channel\|>',
+    re.DOTALL,
+)
+
 
 def _parse_qwen3_xml_calls(text: str, known_tools: set[str]) -> list[tuple[str, str]]:
     """Extract tool calls from Qwen3's native XML format."""
@@ -75,6 +94,30 @@ def _parse_qwen3_xml_calls(text: str, known_tools: set[str]) -> list[tuple[str, 
     return results
 
 
+def _parse_gemma_tool_calls(text: str, known_tools: set[str]) -> list[tuple[str, str]]:
+    """Extract tool calls from Gemma 4's native format.
+
+    Format: <|tool_call>call:func_name{key:<|"|>value<|"|>}<tool_call|>
+    """
+    results = []
+    for m in _GEMMA_TOOL_CALL_PATTERN.finditer(text):
+        name = m.group("name").strip()
+        if name not in known_tools:
+            continue
+        body = m.group("body")
+        args = {}
+        for pm in _GEMMA_PARAM_PATTERN.finditer(body):
+            key = pm.group("key").strip()
+            value = pm.group("value")
+            # Try to parse as JSON value (numbers, bools, etc.)
+            try:
+                args[key] = json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                args[key] = value
+        results.append((name, json.dumps(args)))
+    return results
+
+
 def _extract_text_tool_calls(text: str, known_tools: set[str]) -> list[tuple[str, str]]:
     """Try to extract tool calls from plain text output.
 
@@ -82,11 +125,17 @@ def _extract_text_tool_calls(text: str, known_tools: set[str]) -> list[tuple[str
     - JSON: {"name": "...", "arguments": {...}}
     - JSON in <tool_call> tags or code fences
     - Qwen3 native XML: <tool_call><function=name><parameter=k>v</parameter></function></tool_call>
+    - Gemma 4: <|tool_call>call:name{key:<|"|>value<|"|>}<tool_call|>
 
     Returns list of (tool_name, arguments_json) tuples.
     Only returns matches where the tool name is in known_tools.
     """
-    # Try Qwen3 XML format first (most specific)
+    # Try Gemma format first (most specific delimiters)
+    results = _parse_gemma_tool_calls(text, known_tools)
+    if results:
+        return results
+
+    # Try Qwen3 XML format
     results = _parse_qwen3_xml_calls(text, known_tools)
     if results:
         return results
@@ -123,6 +172,35 @@ class OpenAICompatBackend(Backend):
             api_key=api_key,
         )
 
+    def _filtered_tools(
+        self, allowed_tools: list[str] | None,
+    ) -> tuple[list[dict], set[str]]:
+        """Return (openai_tool_defs, known_names) filtered by allowed_tools.
+
+        allowed_tools entries follow the MCP convention used by the Claude
+        backend: ``mcp__re__<tool_name>`` or glob ``mcp__re__*``.  We strip
+        the ``mcp__re__`` prefix and match against the bare tool name.
+        """
+        if not allowed_tools:
+            return self._openai_tools, self._tool_names
+
+        # Expand allowed set — strip mcp__re__ prefix, honour "*" wildcard
+        allow_all = any(a == "mcp__re__*" or a == "*" for a in allowed_tools)
+        if allow_all:
+            return self._openai_tools, self._tool_names
+
+        bare_names = set()
+        for a in allowed_tools:
+            if a.startswith("mcp__re__"):
+                bare_names.add(a[len("mcp__re__"):])
+            else:
+                bare_names.add(a)
+
+        filtered = [t for t in self._openai_tools
+                     if t["function"]["name"] in bare_names]
+        names = {t["function"]["name"] for t in filtered}
+        return filtered, names
+
     async def run(
         self,
         prompt: str,
@@ -132,14 +210,8 @@ class OpenAICompatBackend(Backend):
         max_budget_usd: float = 5.0,
         allowed_tools: list[str] | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        # OpenAI-compatible backends don't have a native MCP allowed-tools
-        # filter — tool exposure happens at OpenAI tool-call time. For the
-        # manager profile (which sets allowed_tools), we accept the parameter
-        # for signature parity with the abstract Backend class but rely on
-        # prompt discipline to honor the restriction. A stricter enforcement
-        # would filter the tools list before passing it to the model, but
-        # that's out of scope for this fix.
-        _ = allowed_tools  # accept-and-ignore
+        tools_for_model, tool_names = self._filtered_tools(allowed_tools)
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
@@ -156,12 +228,21 @@ class OpenAICompatBackend(Backend):
                 response = await self._client.chat.completions.create(
                     model=self._model,
                     messages=messages,
-                    tools=self._openai_tools if self._openai_tools else None,
+                    tools=tools_for_model if tools_for_model else None,
                     extra_body={"think": True},
                 )
             except Exception as e:
-                yield AgentEvent(kind="error", content=str(e), is_error=True)
-                yield AgentEvent(kind="result", content=f"Error: {e}", subtype="error")
+                err = str(e)
+                if "n_keep" in err and "n_ctx" in err:
+                    err = (
+                        f"{err}\n\n"
+                        "The model's context window is too small for the "
+                        "agent prompt + tools. In LM Studio, select the model "
+                        "and increase 'Context Length' to at least 16384 "
+                        "(32768 recommended), then reload the model."
+                    )
+                yield AgentEvent(kind="error", content=err, is_error=True)
+                yield AgentEvent(kind="result", content=f"Error: {err}", subtype="error")
                 return
 
             choice = response.choices[0]
@@ -190,6 +271,13 @@ class OpenAICompatBackend(Backend):
             else:
                 display_content = raw_content
 
+            # Extract Gemma <|channel>thought...<channel|> blocks
+            for gemma_think in _GEMMA_THINKING_PATTERN.finditer(display_content):
+                think_text = gemma_think.group("content").strip()
+                if think_text and not reasoning:
+                    yield AgentEvent(kind="thinking", content=think_text)
+            display_content = _GEMMA_THINKING_PATTERN.sub('', display_content).strip()
+
             # Also handle unclosed <think> tags (known Qwen3.5 bug)
             if display_content.startswith('<think>'):
                 think_text = display_content[7:].strip()
@@ -199,6 +287,8 @@ class OpenAICompatBackend(Backend):
 
             # Emit visible text content (stripped of thinking/tool XML)
             visible_text = re.sub(r'<tool_call>.*?</tool_call>', '', display_content, flags=re.DOTALL).strip()
+            # Also strip Gemma tool call markers
+            visible_text = re.sub(r'<\|tool_call>.*?<tool_call\|>', '', visible_text, flags=re.DOTALL).strip()
             if visible_text:
                 yield AgentEvent(kind="text", content=visible_text)
 
@@ -209,7 +299,7 @@ class OpenAICompatBackend(Backend):
                 text_calls = []
                 if raw_content:
                     text_calls = _extract_text_tool_calls(
-                        raw_content, self._tool_names,
+                        raw_content, tool_names,
                     )
 
                 if text_calls:

@@ -68,6 +68,9 @@
     # recommended install method is `pip install netexec` anyway.
     neo4j                  # graph database for BloodHound (per-target instances)
     krb5                   # kinit, klist, krb5-config
+    kerbrute               # Kerberos brute-force (user/password enumeration)
+    openldap               # ldapsearch, ldapwhoami — AD/LDAP enumeration
+    dnsrecon               # DNS enumeration and zone-transfer checks
     dnsutils               # dig, nslookup, host
     seclists               # wordlists for gobuster, kerberos, etc.
 
@@ -82,6 +85,7 @@
 
     # Hex viewing
     hexxy
+    tinyxxd                # xxd hex dump (lightweight, no vim dependency)
 
     # Fuzzing
     radamsa

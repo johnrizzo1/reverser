@@ -170,9 +170,21 @@ def new_snapshot(
     )
 
 
+def target_key(target: str) -> str:
+    """Derive a filesystem-safe directory name from a target identifier.
+
+    Absolute paths are reduced to their basename so that session data lives
+    under ``targets/<basename>/sessions/`` instead of leaking into the
+    binary's own parent directory (which breaks ``mkdir``).
+    """
+    if os.path.isabs(target):
+        return os.path.basename(target)
+    return target
+
+
 def snapshot_path(target: str, session_id: str) -> Path:
     """Canonical path for a session snapshot file."""
-    return _targets_root() / target / "sessions" / f"{session_id}.json"
+    return _targets_root() / target_key(target) / "sessions" / f"{session_id}.json"
 
 
 def _from_dict(d: dict) -> SessionSnapshot:
@@ -248,7 +260,7 @@ def list_for_target(
     Skips orphan .tmp files (incomplete writes from crashes) and
     silently skips corrupted snapshot files.
     """
-    sessions_dir = _targets_root() / target / "sessions"
+    sessions_dir = _targets_root() / target_key(target) / "sessions"
     if not sessions_dir.is_dir():
         return []
 

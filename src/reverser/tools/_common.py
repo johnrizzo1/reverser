@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import zipfile
 
 DEFAULT_MAX_OUTPUT = 8000  # characters (~2k tokens)
 DEFAULT_TIMEOUT = 30  # seconds
@@ -20,6 +21,32 @@ def is_url(target: str) -> bool:
     # Must have a dot-separated domain-like structure (e.g. example.com)
     parts = target.split(".", 1)
     return len(parts) == 2 and len(parts[0]) > 0 and len(parts[1]) > 0
+
+
+def maybe_extract_archive(path: str) -> tuple[str, list[str]]:
+    """If *path* is a zip archive, extract it and return (extract_dir, file_list).
+
+    The archive is extracted into a sibling directory named after the zip
+    (without extension).  If *path* is not a zip file the function returns
+    ``("", [])``.
+
+    Returns:
+        (extract_dir, files)  – *extract_dir* is the top-level directory,
+        *files* is a list of extracted member paths (absolute).
+    """
+    if not zipfile.is_zipfile(path):
+        return ("", [])
+
+    base = os.path.splitext(os.path.basename(path))[0]
+    extract_dir = os.path.join(os.path.dirname(path), base)
+    os.makedirs(extract_dir, exist_ok=True)
+
+    with zipfile.ZipFile(path, "r") as zf:
+        zf.extractall(extract_dir)
+        members = [os.path.join(extract_dir, m) for m in zf.namelist()
+                    if not m.endswith("/")]
+
+    return (extract_dir, members)
 
 
 def check_web_authorized() -> dict | None:
