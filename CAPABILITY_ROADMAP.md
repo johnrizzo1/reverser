@@ -4,18 +4,63 @@ Gap analysis of current reverser capabilities vs. an elite penetration tester's
 toolkit (network, web, Windows/AD, cloud, wireless, mobile, OSINT). Items are
 grouped by domain; the **Top 5** highest-ROI items are at the bottom.
 
+**Source-of-truth tracker.** Update this file when a checkbox-worthy item ships.
+Status updates go inline as sub-bullets under the relevant item.
+
 Source context: gap analysis performed 2026-05-03 against the implementation on
 `main` (44 wired tools, 11 profiles, Claude/OpenAI-compatible backends, Incus
 harness). The HTB-style engagement captured in `pentest_report_10.13.38.23.md`
 is referenced as a real-world failure case that motivates several items.
 
+**As of 2026-05-11:** 14 profiles registered, 69 MCP tools (66 unique), Claude
++ Ollama + LM Studio backends, per-target SQLite KB, session stop/resume,
+manager profile (sub-agent coordination), 438 passing tests.
+
+---
+
+## Recently Shipped (since 2026-05-04)
+
+Major capabilities added after the initial roadmap was written. Each links to
+its spec / plan under `docs/superpowers/`.
+
+- **Manager profile + sub-agent dispatch** (2026-05-09 / -10) — `manager`
+  profile coordinates specialist sub-agents (ad/pentest/webpentest/webapi/
+  webrecon) via the SDK Task primitive. Maintains a hypothesis tree
+  (`hypotheses` table in the per-target KB) with 4 CRUD tools + tree-rendering.
+  17-tool allowlist enforced; specialists invoked via `dispatch_specialist`
+  with per-dispatch budget caps. 6 manager skills (Kickoff/Status/Report/
+  Pivot/Budget/Wrap up). Partially addresses Top-5 #5 for manager workflows.
+  Specs/plans: `2026-05-09-manager-profile-{design,plan}.md`.
+- **Stop & resume sessions** (2026-05-09 / -10) — multi-day engagements
+  survive process exit / machine restart. New `reverser.sessions` module
+  owns snapshots at `targets/<target>/sessions/<id>.json`. Lifecycle:
+  active → stopped / completed / abandoned. CLI: top-level `--list-sessions`,
+  `interactive --resume [SESSION_ID]`, `--force` for live takeover. TUI:
+  F6 / `/stop`, `/done`, atexit + SIGTERM emergency snapshot, conversation
+  replay on resume, header shows session info. Spec/plan:
+  `2026-05-09-stop-resume-{design,plan}.md`.
+- **LM Studio backend** (2026-05-10) — `-b lmstudio` shortcut alongside
+  `-b ollama`. Same OpenAI-compatible backend, different default port (1234).
+- **enum4linux-ng MCP wrapper** (2026-05-10) — `enum4linux_ng` tool with
+  modes for all/quick/users/groups/shares/policy/os/ldap/netbios/kerberos/
+  sessions/rid. KB writes for host/domain/notes. Binary install pending on
+  macOS due to upstream samba/clang build issue; doc'd workaround in devenv.nix.
+- **Additional offensive tools in devenv** (2026-05-10/11) — `ffuf`,
+  `nuclei`, `subfinder`, `testssl`, `sqlmap`, `wafw00f`, `pycryptodome`
+  (provides `Crypto` module for ldap3 NTLM), `requests`, `semgrep`.
+- **Tool-allowlist plumbing** (2026-05-09) — `Profile.tools_allowlist`
+  plumbed through TUI session / ClaudeBackend / OpenAICompatBackend. Used
+  by the manager profile; defaults to wildcard for everything else.
+
 ---
 
 ## Active Directory / Windows Internals
-- [ ] BloodHound + SharpHound ingestion with cypher query interface (graph attack-path planning)
+- [x] BloodHound + SharpHound ingestion with cypher query interface (graph attack-path planning)
+  - **Status (2026-05-04):** Shipped via Plan 4. 6 `bloodhound_*` tools: lifecycle (start/stop/status), collection (bloodhound-python collect), canned queries, raw cypher.
 - [ ] Coercion tooling: PetitPotam, PrinterBug, DFSCoerce
 - [ ] ntlmrelayx wrapper (impacket already installed)
 - [ ] secretsdump wrapper
+  - **Partial (2026-05-04):** `netexec_smb action=ntds` provides secretsdump-equivalent functionality via NetExec. Dedicated `impacket-secretsdump` wrapper not yet built.
 - [ ] lsassy wrapper
 - [ ] DPAPI decryption helpers
 - [ ] mimikatz output parsers
@@ -23,13 +68,20 @@ is referenced as a real-world failure case that motivates several items.
 - [ ] Certipy (ADCS ESC1–ESC11 abuse)
 - [ ] SCCM abuse tooling
 - [ ] impacket-mssqlclient + linked-server hopping
+  - **Partial (2026-05-04):** `netexec_mssql` covers basic auth/exec; linked-server hopping not yet wrapped.
 - [ ] psexec / wmiexec / smbexec / dcomexec / atexec wrappers
+  - **Partial (2026-05-04):** `netexec_smb action=exec` covers smbexec/wmiexec patterns.
 - [ ] evil-winrm wrapper
+  - **Partial (2026-05-04):** `netexec_winrm` covers basic WinRM auth + exec.
 - [ ] xfreerdp / RDP automation
 - [ ] PassTheHash flow orchestration
+  - **Partial (2026-05-04):** All `netexec_*` tools accept `nt_hash` arg and pull from KB credential lifecycle.
 - [ ] PowerView-equivalent enumeration / Group3r / ACL chain analysis
+  - **Partial (2026-05-04):** `bloodhound_query` + canned queries cover the graph side; PowerView-style live enumeration not yet wrapped.
 - [ ] PrivescCheck / winPEAS output parser
 - [ ] Token impersonation, UAC bypass triage, persistence inventory
+- [x] SMB/RPC/LDAP/NetBIOS enumeration via enum4linux-ng
+  - **Status (2026-05-10):** MCP wrapper shipped (`enum4linux_ng` tool). Binary install pending on macOS pending upstream samba fix; works on Linux.
 
 ## Web Application Pentest Depth
 - [ ] Burp / ZAP proxy integration for replay & intercept
@@ -49,6 +101,16 @@ is referenced as a real-world failure case that motivates several items.
 - [ ] feroxbuster (recursive intelligent fuzzing — would have helped on 10.13.38.23)
 - [ ] kiterunner for API endpoint discovery
 - [ ] Arjun / x8 parameter mining
+- [x] ffuf for web fuzzing (paths, vhosts, params)
+  - **Status (2026-05-10):** `ffuf_fuzz` MCP tool wired; binary installed via devenv.
+- [x] nuclei template-based vuln scanning
+  - **Status (2026-05-10):** `nuclei_scan` MCP tool wired; binary installed via devenv.
+- [x] sqlmap SQL injection scanning
+  - **Status (2026-05-10):** `sqlmap_test` MCP tool wired; binary installed via pip (devenv venv).
+- [x] subfinder passive subdomain enumeration
+  - **Status (2026-05-10):** `subfinder_enum` MCP tool wired; binary installed via devenv.
+- [x] wafw00f WAF detection
+  - **Status (2026-05-10):** `wafw00f_detect` MCP tool wired; installed via pip.
 
 ## Network Exploitation & Post-Exploitation
 - [ ] Metasploit / msfconsole integration (db_nmap → search → check → exploit)
@@ -77,6 +139,7 @@ is referenced as a real-world failure case that motivates several items.
 
 ## OSINT & Passive Recon
 - [ ] ProjectDiscovery toolchain bundle: amass, assetfinder, httpx, naabu, dnsx
+  - **Partial (2026-05-10):** `subfinder` shipped (one of the bundle). Rest pending.
 - [ ] Shodan API wrapper
 - [ ] Censys API wrapper
 - [ ] FOFA API wrapper
@@ -93,31 +156,76 @@ is referenced as a real-world failure case that motivates several items.
 ## Reporting
 - [ ] Per-finding CVSS + severity scoring with consistent template
 - [ ] Evidence collection bundling (screenshot, request/response, command output)
+  - **Partial (2026-05-04):** `targets/<target>/findings/` directory exists; `kb_add_finding` records metadata. Auto-snapshot of tool output is not yet wired (covered by Cross-Cutting "Evidence pipeline").
 - [ ] Multi-format export: PDF (weasyprint/pandoc), DOCX, SARIF/JSON
+  - **Partial (2026-05-04):** `kb_export_report` produces markdown with attack-tree section. PDF/DOCX/SARIF not yet.
 - [ ] Executive summary auto-generation from finding metadata
 - [ ] Re-test / delta reports between engagements
 
 ## Cross-Cutting Improvements
 - [ ] Vhost / Host-header fuzzing as a first-class step in pentest profile
 - [ ] Tool composition macros (e.g., `ad_initial_foothold(target)` chains nmap → ldap_anon → kerb_enum → asreproast → kerberoast → john)
+  - **Partial (2026-05-09):** Manager profile achieves similar end via `dispatch_specialist` orchestration; macros for non-manager profiles still pending.
 - [ ] Result cache / dedup keyed on (target, args) hash
 - [ ] Target-specific wordlist generation: CeWL, dynamic expansion on hits, gotator/altdns permutations
 - [ ] Failure analysis trigger: after K failed exploit attempts, force "stop, summarize, propose orthogonal directions"
-- [ ] Per-target scope envelope (`scope.toml`: CIDR, port exclusions, hours, no-DoS) consulted before each tool call
+- [x] Per-target scope envelope (`scope.toml`: CIDR, port exclusions, hours, no-DoS) consulted before each tool call
+  - **Status (2026-05-04):** Shipped via Plan 5. Optional `targets/<target>/scope.toml` enforces in-scope CIDRs, no-DoS, no-account-lockout, allowed-hours; checked by every `netexec_*`, `bloodhound_*`, and `enum4linux_ng` tool.
 - [ ] Evidence pipeline: auto-snapshot successful steps into `findings/<id>/` keyed to final report
+- [x] Per-engagement persistence (stop & resume sessions)
+  - **Status (2026-05-10):** Shipped. Snapshot per turn + on-exit; lifecycle states (active/stopped/completed/abandoned); CLI `--list-sessions` / `--resume [ID]`; conversation replay on resume.
+- [x] Tool-allowlist enforcement per profile
+  - **Status (2026-05-09):** Shipped. `Profile.tools_allowlist` plumbed through session/backends. Manager profile uses it to enforce delegation discipline.
+- [x] Multi-backend support (Claude + Ollama + LM Studio + generic OpenAI-compat)
+  - **Status (2026-05-10):** Shipped. `-b lmstudio` shortcut alongside `-b ollama`; arbitrary `--api-base` override for other OpenAI-compatible servers.
 
 ---
 
-## TOP 5 — Do These First
+## TOP 5 — Priority Order (revised 2026-05-11)
 
-- [ ] **5. Restructure pentest/webpentest prompts around hypothesis → cheap experiment → update → pivot**, with explicit "stop spraying, propose three new attack surfaces" trigger after K failed exploitation attempts (the 10.13.38.23 report's failure mode)
-- [x] **4. Build a per-target persistent KB** (`targets/<ip-or-host>/state.db` SQLite) tracking hosts, ports, services, credentials tried/worked, endpoints, findings — loaded automatically on every run, with a credential-lifecycle object fed to every new service
-  - **Status (2026-05-04):** Shipped via Plans 1–2. Per-target SQLite KB with hosts/services/creds/findings/notes, 7 `kb_*` tools, and retrofitted writes across 10 network/web/AD tools. Scope envelope (`scope.toml`) added in Plan 5.
-- [ ] **3. Wire Playwright (already in MCP) into the webpentest profile** — confirms XSS, handles SPAs, captures screenshot evidence
-- [ ] **2. Add searchsploit + msfvenom + Metasploit RPC bridge** — closes the "find the public exploit and try it" loop
-- [x] **1. Wrap NetExec (CME) + BloodHound/SharpHound + cypher queries** — closes ~60% of the AD gap in a weekend; biggest single ROI
-  - **Status (2026-05-04):** Shipped via Plans 3–5. 6 `netexec_*` tools (smb/ldap/winrm/mssql/ssh/ftp+wmi), 6 `bloodhound_*` tools (lifecycle + collect + canned/cypher queries), and a dedicated `ad` profile with 11 skills.
+Numbered in **execution order** — start with #1, then #2, etc. Original
+numbering from 2026-05-03 in parentheses.
 
-> **Status (2026-05-04):** Top-5 items #1 and #4 shipped via Plans 1–5. See
-> `docs/superpowers/specs/2026-05-03-netexec-bloodhound-ad-design.md` and
-> `docs/superpowers/plans/2026-05-03-plan-{1..5}-*.md`.
+- [ ] **1. (was #2) — Metasploit + msfvenom + searchsploit bridge.** Wraps
+  msfconsole RPC (db_nmap → search → check → exploit), msfvenom payload
+  generation, and searchsploit + automated CVE → PoC → adapt → run loop.
+  Closes the "find a known exploit and try it" gap that's currently entirely
+  manual. Highest single-item ROI left; same shape and ~size as the AD pack.
+
+- [x] **2. (was #4) — Per-target persistent KB.** ✅ shipped 2026-05-04.
+  `targets/<ip-or-host>/state.db` SQLite tracking hosts/ports/services/
+  credentials/findings/notes/hypotheses with credential-lifecycle object
+  fed to every new service. See `2026-05-03-plan-{1,2}-*.md`.
+
+- [ ] **3. (was #3) — Wire Playwright into the webpentest profile.**
+  Playwright MCP is already available in the plugin context; needs profile
+  wiring + tool helpers for SPA crawling, XSS confirmation, screenshot
+  evidence capture. Modest implementation; big payoff for web evidence.
+
+- [x] **4. (was #1) — NetExec + BloodHound + cypher.** ✅ shipped 2026-05-04
+  via Plans 3–5. 6 `netexec_*` tools (smb/ldap/winrm/mssql/ssh/ftp+wmi),
+  6 `bloodhound_*` tools (lifecycle + collect + canned/cypher), `ad` profile
+  with 11 skills. ~60% of the AD gap closed.
+
+- [ ] **5. (was #5) — Hypothesis-driven pentest/webpentest prompts.**
+  Restructure `pentest` and `webpentest` profile system prompts around
+  hypothesis → cheap experiment → update → pivot. Reuse the
+  `hypotheses` KB table (already shipped with manager profile) for
+  storage. Add explicit "stop spraying, propose three new attack surfaces"
+  trigger after K failed exploitation attempts (the 10.13.38.23 report's
+  failure mode). Small implementation, big behavior change.
+
+> **Remaining work order:** #1 → #3 → #5 (items #2 and #4 already complete).
+
+---
+
+## Update protocol
+
+- When a roadmap item ships, change `[ ]` to `[x]` and add an inline
+  `**Status (YYYY-MM-DD):**` sub-bullet pointing to the spec/plan.
+- Partials get a `**Partial (YYYY-MM-DD):**` sub-bullet describing what's
+  covered and what's not.
+- Major capabilities not on the roadmap (e.g. manager profile, stop/resume)
+  go in the "Recently Shipped" section at the top.
+- Top-5 reordering: keep the historical numbering in parentheses so the
+  audit trail is preserved across reorderings.
