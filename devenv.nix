@@ -49,6 +49,12 @@
     sslscan
     whatweb
     nbtscan
+    ffuf                  # web fuzzer (paths, vhosts, params)
+    subfinder             # passive subdomain enumeration
+    nuclei                # template-based vuln scanner
+    testssl               # TLS/SSL scanner (testssl.sh)
+    # sqlmap is a Python package (not top-level in nixpkgs); installed via
+    # the Python venv requirements below.
     # enum4linux-ng — NOT included here because it transitively depends on
     # `samba` (for smbclient/rpcclient/nmblookup), and samba-4.22.7 fails
     # to build with current Clang on Darwin (strict-initializer-not-constant
@@ -160,6 +166,10 @@
         pyhidra
         ldap3
         impacket
+        pycryptodome     # provides Crypto module — required by ldap3 NTLM auth
+        requests         # HTTP client used by various web tools
+        wafw00f          # WAF detection CLI (also exposes a Python module)
+        sqlmap           # SQL injection scanner (CLI; not top-level in nixpkgs)
 	invoke
 	pynacl
 	paramiko
