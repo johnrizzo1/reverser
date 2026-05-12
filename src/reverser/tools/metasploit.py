@@ -859,3 +859,337 @@ async def metasploit_status(args: dict) -> dict:
 
 
 TOOLS.append(metasploit_status)
+
+
+# ── Operational tools: search / run / session ───────────────────────
+
+
+_RANK_ORDER = {
+    "excellent": 6,
+    "great":     5,
+    "good":      4,
+    "normal":    3,
+    "average":   2,
+    "low":       1,
+    "manual":    0,
+}
+
+
+def _require_daemon_running() -> dict | None:
+    """If daemon isn't up, return an error tool result. Otherwise None."""
+    pid = _read_pidfile()
+    if pid is None or not _process_alive(pid):
+        return format_error(
+            "msfrpcd is not running. Start it with metasploit_start <target> first."
+        )
+    return None
+
+
+def _filter_modules(modules: list[dict], *,
+                    type_: str | None,
+                    platform: str | None,
+                    rank: str | None) -> list[dict]:
+    """Apply type/platform/rank filters to MSF search results."""
+    out = []
+    rank_min = _RANK_ORDER.get(rank.lower(), 0) if rank else 0
+    for m in modules:
+        if type_ and (m.get("type") or "").lower() != type_.lower():
+            continue
+        if platform:
+            mp = (m.get("platform") or "").lower()
+            if platform.lower() not in mp:
+                continue
+        m_rank = (m.get("rank") or "").lower()
+        if rank and _RANK_ORDER.get(m_rank, 0) < rank_min:
+            continue
+        out.append(m)
+    return out
+
+
+@tool(
+    "metasploit_search",
+    "Search Metasploit modules via msfrpcd. Filter by type "
+    "(exploit/auxiliary/post/payload), platform, and rank. Returns ranked "
+    "candidates. Requires metasploit_start.",
+    {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string",
+                      "description": "Search query (e.g. 'cve:2015-3306' or 'name:proftpd')"},
+            "type": {"type": "string",
+                     "description": "Filter: exploit, auxiliary, post, payload"},
+            "platform": {"type": "string",
+                         "description": "Filter: linux, windows, multi, ..."},
+            "rank": {"type": "string",
+                     "description": "Minimum rank: manual/low/average/normal/good/great/excellent"},
+            "limit": {"type": "integer", "default": 25,
+                      "description": "Max modules returned (default 25)"},
+        },
+        "required": ["query"],
+    },
+)
+async def metasploit_search(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    err = _require_daemon_running()
+    if err:
+        return err
+
+    query = args["query"]
+    type_ = args.get("type") or None
+    platform = args.get("platform") or None
+    rank = args.get("rank") or None
+    limit = int(args.get("limit", 25))
+
+    try:
+        auth = _read_or_create_auth()
+        client = _make_msfrpc_client(auth)
+        raw_modules = client.modules.search(query) or []
+    except Exception as e:
+        return format_error(f"module.search failed: {type(e).__name__}: {e}")
+
+    filtered = _filter_modules(raw_modules,
+                               type_=type_, platform=platform, rank=rank)
+    total = len(filtered)
+    shown = filtered[:limit]
+
+    if not shown:
+        return format_tool_result(
+            f"No modules found for query={query!r} "
+            f"(type={type_}, platform={platform}, rank={rank})."
+        )
+
+    lines = [f"Module search results for {query!r} "
+             f"(showing {len(shown)} of {total}):", ""]
+    for m in shown:
+        refs = m.get("ref") or []
+        cve = next((r for r in refs if str(r).upper().startswith("CVE-")), "")
+        cve_str = f" [{cve}]" if cve else ""
+        lines.append(f"  {m.get('fullname', '<?>')}")
+        lines.append(f"    type={m.get('type','?')}  platform={m.get('platform','?')}  "
+                     f"rank={m.get('rank','?')}  date={m.get('disclosure_date','')}{cve_str}")
+        desc = (m.get("description") or "").strip().replace("\n", " ")
+        if desc:
+            lines.append(f"    {desc[:200]}")
+        lines.append("")
+
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(metasploit_search)
+
+
+_CHECK_VULNERABLE = ("vulnerable",)
+_CHECK_SAFE = ("safe",)
+_CHECK_UNKNOWN = ("unknown", "detected")
+_CHECK_NO_METHOD = ("no_check_method",)
+_CHECK_ERROR = ("error", "appears", "unsupported")
+
+
+def _classify_check_result(raw: Any, raised: BaseException | None) -> tuple[str, str]:
+    """Normalize a check_exploit return value into (code, message).
+
+    code: vulnerable | safe | unknown | detected | no_check_method | error
+    """
+    if raised is not None:
+        # NotImplementedError or AttributeError → no check method
+        if isinstance(raised, (NotImplementedError, AttributeError)):
+            return ("no_check_method", f"{type(raised).__name__}: {raised}")
+        return ("error", f"{type(raised).__name__}: {raised}")
+
+    if isinstance(raw, dict):
+        code = (raw.get("code") or "").lower()
+        msg = raw.get("message") or ""
+        if code in ("vulnerable", "safe", "unknown", "detected",
+                    "no_check_method", "error"):
+            return (code, msg)
+        # MSF sometimes returns Vuln::Code constants as strings
+        if "vulnerable" in code:
+            return ("vulnerable", msg)
+        if "safe" in code:
+            return ("safe", msg)
+        return ("unknown", msg or str(raw))
+
+    if isinstance(raw, str):
+        low = raw.lower()
+        for tag in ("vulnerable", "safe", "unknown", "detected"):
+            if tag in low:
+                return (tag, raw)
+        return ("unknown", raw)
+
+    return ("unknown", str(raw))
+
+
+@tool(
+    "metasploit_run",
+    "Run a Metasploit module against a target. ALWAYS checks first by "
+    "default (D7). Behavior matrix: vulnerable→exploit; safe/unknown/"
+    "detected/no_check_method→skip; force=True overrides skip. Records a "
+    "high-severity finding when an exploit succeeds. Scope-checked BEFORE "
+    "the check fires.",
+    {
+        "type": "object",
+        "properties": {
+            "module": {"type": "string",
+                       "description": "Full module name (e.g. exploit/multi/http/proftpd_modcopy_exec)"},
+            "options": {"type": "object",
+                        "description": "Module options (e.g. {'RHOSTS': '10.10.10.5', 'RPORT': 80})"},
+            "target": {"type": "string",
+                       "description": "Target identifier — for scope check + workspace + KB writes"},
+            "payload": {"type": "string", "default": "",
+                        "description": "Optional payload module (e.g. windows/x64/meterpreter/reverse_tcp)"},
+            "payload_options": {"type": "object", "default": {},
+                                "description": "Payload-side options (e.g. {'LHOST': '10.10.14.5'})"},
+            "force": {"type": "boolean", "default": False,
+                      "description": "Bypass check-then-skip (D7 escape hatch)"},
+            "timeout_seconds": {"type": "integer", "default": 300,
+                                "description": "Max time to wait for exploit to return"},
+        },
+        "required": ["module", "options", "target"],
+    },
+)
+async def metasploit_run(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    err = _require_daemon_running()
+    if err:
+        return err
+
+    module_name = args["module"]
+    options = args.get("options") or {}
+    target = args["target"]
+    payload_name = args.get("payload") or None
+    payload_options = args.get("payload_options") or {}
+    force = bool(args.get("force", False))
+    timeout_seconds = int(args.get("timeout_seconds", 300))
+
+    # ── Scope check BEFORE check fires (D7 + risk row in spec §12) ──
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target)
+    if scope is not None:
+        try:
+            scope.assert_in_scope(target)
+        except ScopeError as e:
+            return format_error(f"scope.toml violation: {e}")
+
+    # Determine module type from name
+    parts = module_name.split("/", 1)
+    if len(parts) != 2:
+        return format_error(
+            f"module name must be 'type/path', got {module_name!r}"
+        )
+    mod_type, mod_path = parts
+
+    try:
+        auth = _read_or_create_auth()
+        client = _make_msfrpc_client(auth)
+        mod = client.modules.use(mod_type, mod_path)
+    except Exception as e:
+        return format_error(f"failed to load module {module_name!r}: "
+                            f"{type(e).__name__}: {e}")
+
+    # Apply options
+    for k, v in options.items():
+        try:
+            mod[k] = v
+        except Exception:
+            pass  # MSF may reject unknown options; surfaced via exploit_output
+
+    # ── Check phase ──
+    check_raw: Any = None
+    check_raised: BaseException | None = None
+    try:
+        check_raw = mod.check_exploit()
+    except BaseException as e:
+        check_raised = e
+
+    check_code, check_msg = _classify_check_result(check_raw, check_raised)
+
+    # ── Decision matrix ──
+    should_run = (check_code in _CHECK_VULNERABLE) or force
+
+    exploit_ran = False
+    exploit_output = ""
+    session_id: int | None = None
+    decision_note = ""
+
+    if should_run:
+        try:
+            if payload_name:
+                payload_mod = client.modules.use("payload", payload_name)
+                for k, v in payload_options.items():
+                    try:
+                        payload_mod[k] = v
+                    except Exception:
+                        pass
+                exploit_raw = mod.execute(payload=payload_mod)
+            else:
+                exploit_raw = mod.execute()
+            exploit_ran = True
+            exploit_output = str(exploit_raw)
+            # Best-effort: look for a session in the post-execute session list
+            try:
+                sessions = client.sessions.list or {}
+                for sid, info in sessions.items():
+                    if (info or {}).get("target_host") == target or \
+                       (info or {}).get("target_host") == options.get("RHOSTS"):
+                        try:
+                            session_id = int(sid)
+                        except (ValueError, TypeError):
+                            session_id = None
+                        break
+            except Exception:
+                pass
+        except Exception as e:
+            exploit_output = f"{type(e).__name__}: {e}"
+    else:
+        decision_note = (
+            f"skipped exploit (check={check_code}); pass force=true to "
+            f"override (D7 escape hatch)."
+        )
+
+    # ── KB finding on successful exploit ──
+    if session_id is not None:
+        try:
+            from ..kb import FindingFact
+            kb = for_target(target)
+            kb.record_finding(FindingFact(
+                title=f"Exploited {module_name} on {target}",
+                severity="high",
+                description=(
+                    f"Module: {module_name}\n"
+                    f"Options: {options}\n"
+                    f"Check: {check_code} — {check_msg}\n"
+                    f"Session: id={session_id}\n"
+                    f"Exploit output (truncated): {exploit_output[:2000]}"
+                ),
+                evidence_paths=[],
+            ))
+        except Exception:
+            pass
+
+    lines = [
+        f"metasploit_run: {module_name}",
+        f"  target:        {target}",
+        f"  check_result:  {check_code}",
+        f"  check_output:  {check_msg[:500]}",
+        f"  exploit_ran:   {exploit_ran}",
+    ]
+    if decision_note:
+        lines.append(f"  decision:      {decision_note}")
+    if exploit_ran:
+        lines.append(f"  exploit_output: {exploit_output[:2000]}")
+    if session_id is not None:
+        lines.append(f"  session_id:    {session_id}")
+        lines.append(f"  finding:       recorded as severity=high")
+
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(metasploit_run)
