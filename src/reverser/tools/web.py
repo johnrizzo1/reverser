@@ -11,11 +11,11 @@ from claude_agent_sdk import tool
 from ._common import (
     DEFAULT_MAX_OUTPUT,
     WEB_TOOL_TIMEOUT,
+    arun_cmd,
     check_web_authorized,
     cmd_result_to_tool_result,
     format_error,
     format_tool_result,
-    run_cmd,
 )
 
 
@@ -29,7 +29,7 @@ _WORDLIST_URLS = {
 }
 
 
-def _find_or_download_wordlist(name: str = "common.txt") -> str | None:
+async def _find_or_download_wordlist(name: str = "common.txt") -> str | None:
     """Find a wordlist on disk or download it from SecLists GitHub."""
     # Check common locations first
     seclists_base = os.environ.get("SECLISTS_PATH", "")
@@ -58,7 +58,7 @@ def _find_or_download_wordlist(name: str = "common.txt") -> str | None:
     dest = os.path.join(_WORDLIST_CACHE_DIR, name)
     os.makedirs(_WORDLIST_CACHE_DIR, exist_ok=True)
 
-    result = run_cmd(
+    result = await arun_cmd(
         ["curl", "-s", "-S", "-L", "-o", dest, "--max-time", "30", url],
         timeout=35,
     )
@@ -122,7 +122,7 @@ async def http_request(args: dict) -> dict:
     cmd.extend(["--max-time", str(timeout)])
     cmd.append(url)
 
-    result = run_cmd(cmd, timeout=timeout + 5)
+    result = await arun_cmd(cmd, timeout=timeout + 5)
     return cmd_result_to_tool_result(result)
 
 
@@ -216,7 +216,7 @@ async def nmap_scan(args: dict) -> dict:
     cmd.append(target)
 
     timeout = 60 if scan_type == "quick" else WEB_TOOL_TIMEOUT
-    result = run_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT * 2)
+    result = await arun_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT * 2)
 
     if result["returncode"] != 0 and not result["stdout"]:
         return cmd_result_to_tool_result(result)
@@ -260,7 +260,7 @@ async def nuclei_scan(args: dict) -> dict:
     if tags:
         cmd.extend(["-tags", tags])
 
-    result = run_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT * 2)
+    result = await arun_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT * 2)
 
     if result["returncode"] != 0 and not result["stdout"]:
         return cmd_result_to_tool_result(result)
@@ -324,13 +324,13 @@ async def ffuf_fuzz(args: dict) -> dict:
 
     # If a bare filename was given (not a full path), treat it as a wordlist name to resolve
     if wordlist and not os.path.isabs(wordlist) and not os.path.exists(wordlist):
-        resolved = _find_or_download_wordlist(os.path.basename(wordlist))
+        resolved = await _find_or_download_wordlist(os.path.basename(wordlist))
         if resolved:
             wordlist = resolved
         # else fall through — ffuf will report the error
 
     if not wordlist:
-        wordlist = _find_or_download_wordlist()
+        wordlist = await _find_or_download_wordlist()
         if not wordlist:
             return format_error(
                 "No wordlist found and download failed.\n"
@@ -355,7 +355,7 @@ async def ffuf_fuzz(args: dict) -> dict:
         if extensions:
             cmd.extend(["-e", extensions])
 
-        result = run_cmd(cmd, timeout=timeout)
+        result = await arun_cmd(cmd, timeout=timeout)
 
         if result["returncode"] != 0 and not os.path.exists(tmp_path):
             return cmd_result_to_tool_result(result)
@@ -413,7 +413,7 @@ async def whatweb_fingerprint(args: dict) -> dict:
     # Try whatweb first
     if shutil.which("whatweb"):
         cmd = ["whatweb", f"--aggression={aggression}", "--log-json=-", target]
-        result = run_cmd(cmd, timeout=30)
+        result = await arun_cmd(cmd, timeout=30)
         # Check for Ruby load errors (broken on Ruby 3.4+)
         if result["returncode"] != 0 and "LoadError" in (result["stderr"] + result["stdout"]):
             pass  # fall through to curl fallback
@@ -428,7 +428,7 @@ async def whatweb_fingerprint(args: dict) -> dict:
         "-A", "Mozilla/5.0 (compatible; reverser/1.0)",
         target,
     ]
-    result = run_cmd(cmd, timeout=20)
+    result = await arun_cmd(cmd, timeout=20)
     if result["returncode"] != 0 and not result["stdout"]:
         return cmd_result_to_tool_result(result)
 
@@ -440,7 +440,7 @@ async def whatweb_fingerprint(args: dict) -> dict:
         "-A", "Mozilla/5.0 (compatible; reverser/1.0)",
         target,
     ]
-    body_result = run_cmd(body_cmd, timeout=20, max_output=DEFAULT_MAX_OUTPUT)
+    body_result = await arun_cmd(body_cmd, timeout=20, max_output=DEFAULT_MAX_OUTPUT)
     body = body_result.get("stdout", "")
 
     # Analyze headers and body for technology fingerprints
@@ -519,7 +519,7 @@ async def nikto_scan(args: dict) -> dict:
     if tuning:
         cmd.extend(["-Tuning", tuning])
 
-    result = run_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT)
+    result = await arun_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT)
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
         from ..kb import for_target
@@ -555,7 +555,7 @@ async def testssl_analyze(args: dict) -> dict:
     timeout = args.get("timeout", 90)
 
     cmd = ["testssl.sh", "--color", "0", target]
-    result = run_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT * 2)
+    result = await arun_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT * 2)
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
         from ..kb import for_target
@@ -619,7 +619,7 @@ async def sqlmap_test(args: dict) -> dict:
         if technique:
             cmd.extend(["--technique", technique])
 
-        result = run_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT)
+        result = await arun_cmd(cmd, timeout=timeout, max_output=DEFAULT_MAX_OUTPUT)
         return cmd_result_to_tool_result(result)
 
 
@@ -644,7 +644,7 @@ async def subfinder_enum(args: dict) -> dict:
     timeout = args.get("timeout", 60)
 
     cmd = ["subfinder", "-d", domain, "-json", "-silent"]
-    result = run_cmd(cmd, timeout=timeout)
+    result = await arun_cmd(cmd, timeout=timeout)
 
     if result["returncode"] != 0 and not result["stdout"]:
         return cmd_result_to_tool_result(result)
@@ -688,7 +688,7 @@ async def wafw00f_detect(args: dict) -> dict:
 
     target = args["target"]
     cmd = ["wafw00f", target, "-o", "-", "-f", "json"]
-    result = run_cmd(cmd, timeout=30)
+    result = await arun_cmd(cmd, timeout=30)
     return cmd_result_to_tool_result(result)
 
 

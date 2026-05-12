@@ -1,6 +1,6 @@
 """Tests for netexec_ssh."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -37,7 +37,7 @@ def test_ssh_unauthorized(monkeypatch, tmp_targets_dir):
 
 def test_ssh_check_auth_success(tmp_targets_dir):
     out = "SSH    10.10.10.5    22   ubuntu   [+] root:Summer2026!\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "root", "password": "Summer2026!",
@@ -49,7 +49,7 @@ def test_ssh_check_auth_success(tmp_targets_dir):
 
 def test_ssh_check_auth_failure_records_invalid(tmp_targets_dir):
     out = "SSH    10.10.10.5    22   ubuntu   [-] root:bad\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "root", "password": "bad",
@@ -66,7 +66,7 @@ def test_ssh_key_file_passed(tmp_targets_dir, tmp_path):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("SSH    [+] root:KEY\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "root", "key_file": str(keyfile),
@@ -80,7 +80,7 @@ def test_ssh_exec_passes_command(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("SSH    [+] uid=0\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "exec",
             "username": "root", "password": "x", "command": "id",
@@ -108,6 +108,6 @@ def test_ssh_kb_fallback(tmp_targets_dir):
     for_target("10.10.10.5").record_credential(CredentialFact(
         username="ubuntu", password="x", status="valid",
     ))
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok("SSH    [+] ok\n")):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok("SSH    [+] ok\n")):
         result = _call({"target": "10.10.10.5", "action": "check_auth"})
     assert "[KB] Using credential: ubuntu" in result["content"][0]["text"]

@@ -1,11 +1,12 @@
 """End-to-end smoke tests verifying retrofitted tools write to the KB.
 
-These tests do NOT exec real binaries — they monkeypatch the run_cmd helper
+These tests do NOT exec real binaries — they monkeypatch the arun_cmd helper
 and feed it canned stdout from the parser fixtures.
 """
 
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -28,14 +29,20 @@ def _call(tool_obj, args):
         loop.close()
 
 
-def _stub_run_cmd(stdout: str, returncode: int = 0):
-    return lambda cmd, **kw: {"stdout": stdout, "stderr": "", "returncode": returncode, "truncated": False}
+def _stub_arun_cmd(stdout: str, returncode: int = 0):
+    return AsyncMock(return_value={"stdout": stdout, "stderr": "", "returncode": returncode, "truncated": False})
+
+
+def _stub_run_sudo_cmd(stdout: str, returncode: int = 0):
+    async def _mock(cmd, sudo, **kw):
+        return {"stdout": stdout, "stderr": "", "returncode": returncode, "truncated": False}
+    return _mock
 
 
 def test_nbtscan_writes_hosts_to_kb(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "nbtscan" / "single_host.txt").read_text()
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(text))
 
     _call(net.nbtscan_scan, {"target": "10.10.10.5"})
     hosts = for_target("10.10.10.5").get_hosts()
@@ -45,7 +52,7 @@ def test_nbtscan_writes_hosts_to_kb(tmp_targets_dir, monkeypatch):
 def test_banner_grab_writes_service_to_kb(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "banner" / "ssh_banner.txt").read_text()
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(text))
 
     _call(net.banner_grab, {"target": "10.10.10.5", "port": 22})
     services = for_target("10.10.10.5").get_services()
@@ -55,8 +62,7 @@ def test_banner_grab_writes_service_to_kb(tmp_targets_dir, monkeypatch):
 def test_nmap_scan_writes_hosts_and_services_to_kb(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "nmap" / "host_with_smb_and_winrm.txt").read_text()
-    monkeypatch.setattr(net, "_run_sudo_cmd",
-                        lambda cmd, sudo, **kw: {"stdout": text, "stderr": "", "returncode": 0, "truncated": False})
+    monkeypatch.setattr(net, "_run_sudo_cmd", _stub_run_sudo_cmd(text))
 
     _call(net.nmap_scan, {"target": "10.10.10.5"})
     kb = for_target("10.10.10.5")
@@ -95,7 +101,7 @@ def test_ldap_search_has_kb_tail_block():
 def test_kerberos_enum_asreproast_writes_creds(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "asreproast" / "two_users.txt").read_text()
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(text))
 
     _call(net.kerberos_enum, {
         "target": "10.10.10.5", "domain": "CORP.LOCAL", "mode": "asreproast",
@@ -110,7 +116,7 @@ def test_kerberos_enum_asreproast_writes_creds(tmp_targets_dir, monkeypatch):
 def test_kerberos_enum_kerberoast_writes_creds(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "kerberoast" / "two_spns.txt").read_text()
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(text))
 
     _call(net.kerberos_enum, {
         "target": "10.10.10.5", "domain": "CORP.LOCAL", "mode": "kerberoast",
@@ -126,10 +132,10 @@ def test_smb_enum_writes_host_signing_to_kb(tmp_targets_dir, monkeypatch):
     smbclient_text = (FIXTURES / "smbclient_shares" / "auth_listing.txt").read_text()
     nmap_text = (FIXTURES / "nmap_smb_scripts" / "dc01_full.txt").read_text()
 
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(smbclient_text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(smbclient_text))
     monkeypatch.setattr(
         net, "_run_sudo_cmd",
-        lambda cmd, sudo, **kw: {"stdout": nmap_text, "stderr": "", "returncode": 0, "truncated": False},
+        _stub_run_sudo_cmd(nmap_text),
     )
 
     _call(net.smb_enum, {"target": "10.10.10.5", "mode": "all"})
@@ -145,7 +151,7 @@ def test_smb_enum_writes_host_signing_to_kb(tmp_targets_dir, monkeypatch):
 def test_whatweb_fingerprint_writes_service_to_kb(tmp_targets_dir, monkeypatch):
     from reverser.tools import web as webmod
     text = (FIXTURES / "whatweb" / "wordpress_site.txt").read_text()
-    monkeypatch.setattr(webmod, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(webmod, "arun_cmd", _stub_arun_cmd(text))
     monkeypatch.setattr(webmod, "shutil",
                         type("S", (), {"which": staticmethod(lambda _: "/usr/bin/whatweb")})(),
                         raising=False)
@@ -161,7 +167,7 @@ def test_whatweb_fingerprint_writes_service_to_kb(tmp_targets_dir, monkeypatch):
 def test_nikto_scan_writes_findings_to_kb(tmp_targets_dir, monkeypatch):
     from reverser.tools import web as webmod
     text = (FIXTURES / "nikto" / "multiple_findings.txt").read_text()
-    monkeypatch.setattr(webmod, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(webmod, "arun_cmd", _stub_arun_cmd(text))
 
     _call(webmod.nikto_scan, {"target": "http://10.10.10.5"})
     kb = for_target("http://10.10.10.5")
@@ -173,7 +179,7 @@ def test_nikto_scan_writes_findings_to_kb(tmp_targets_dir, monkeypatch):
 def test_gobuster_scan_records_artifact(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "gobuster" / "found_paths.txt").read_text()
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(text))
     monkeypatch.setattr(net, "_resolve_wordlist", lambda req, default: ("/tmp/fake.txt", None))
 
     _call(net.gobuster_scan, {"target": "http://10.10.10.5"})
@@ -187,7 +193,7 @@ def test_gobuster_scan_records_artifact(tmp_targets_dir, monkeypatch):
 def test_nikto_scan_in_network_writes_findings(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "nikto" / "cve_finding.txt").read_text()
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(text))
 
     _call(net.nikto_scan, {"target": "10.10.10.5"})
     findings = for_target("10.10.10.5").get_findings()
@@ -197,10 +203,10 @@ def test_nikto_scan_in_network_writes_findings(tmp_targets_dir, monkeypatch):
 def test_ssl_scan_writes_findings(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "ssl" / "expired_cert.txt").read_text()
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(text))
     monkeypatch.setattr(
         net, "_run_sudo_cmd",
-        lambda cmd, sudo, **kw: {"stdout": text, "stderr": "", "returncode": 0, "truncated": False},
+        _stub_run_sudo_cmd(text),
     )
 
     _call(net.ssl_scan, {"target": "10.13.38.23"})
@@ -211,7 +217,7 @@ def test_ssl_scan_writes_findings(tmp_targets_dir, monkeypatch):
 def test_whatweb_scan_in_network_writes_service(tmp_targets_dir, monkeypatch):
     from reverser.tools import network as net
     text = (FIXTURES / "whatweb" / "plain_apache.txt").read_text()
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(text))
 
     _call(net.whatweb_scan, {"target": "http://10.10.10.7"})
     services = for_target("http://10.10.10.7").get_services()
@@ -221,7 +227,7 @@ def test_whatweb_scan_in_network_writes_service(tmp_targets_dir, monkeypatch):
 def test_testssl_analyze_writes_findings(tmp_targets_dir, monkeypatch):
     from reverser.tools import web as webmod
     text = (FIXTURES / "ssl" / "sslscan_full.txt").read_text()
-    monkeypatch.setattr(webmod, "run_cmd", _stub_run_cmd(text))
+    monkeypatch.setattr(webmod, "arun_cmd", _stub_arun_cmd(text))
 
     _call(webmod.testssl_analyze, {"target": "10.10.10.5:443"})
     findings = for_target("10.10.10.5:443").get_findings()
@@ -241,10 +247,10 @@ def test_full_recon_to_kb_show_flow(tmp_targets_dir, monkeypatch):
 
     monkeypatch.setattr(
         net, "_run_sudo_cmd",
-        lambda cmd, sudo, **kw: {"stdout": nmap_text, "stderr": "", "returncode": 0, "truncated": False},
+        _stub_run_sudo_cmd(nmap_text),
     )
-    monkeypatch.setattr(net, "run_cmd", _stub_run_cmd(asrep_text))
-    monkeypatch.setattr(webmod, "run_cmd", _stub_run_cmd(whatweb_text))
+    monkeypatch.setattr(net, "arun_cmd", _stub_arun_cmd(asrep_text))
+    monkeypatch.setattr(webmod, "arun_cmd", _stub_arun_cmd(whatweb_text))
     monkeypatch.setattr(
         webmod, "shutil",
         type("S", (), {"which": staticmethod(lambda _: "/usr/bin/whatweb")})(),

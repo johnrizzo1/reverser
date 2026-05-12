@@ -2,7 +2,7 @@
 
 from claude_agent_sdk import tool
 
-from ._common import run_cmd, paginate, format_tool_result, format_error, cmd_result_to_tool_result, is_pe
+from ._common import arun_cmd, paginate, format_tool_result, format_error, cmd_result_to_tool_result, is_pe
 
 
 @tool(
@@ -11,7 +11,7 @@ from ._common import run_cmd, paginate, format_tool_result, format_error, cmd_re
     {"path": {"type": "string", "description": "Path to the binary file"}},
 )
 async def file_info(args: dict) -> dict:
-    result = run_cmd(["file", "-b", args["path"]])
+    result = await arun_cmd(["file", "-b", args["path"]])
     return cmd_result_to_tool_result(result)
 
 
@@ -33,7 +33,7 @@ async def file_info(args: dict) -> dict:
 async def strings_search(args: dict) -> dict:
     min_len = args.get("min_length", 8)
     cmd = ["strings", "-n", str(min_len), args["path"]]
-    result = run_cmd(cmd, max_output=50000)  # grab more, paginate below
+    result = await arun_cmd(cmd, max_output=50000)  # grab more, paginate below
 
     if result["returncode"] != 0:
         return cmd_result_to_tool_result(result)
@@ -58,7 +58,7 @@ async def strings_search(args: dict) -> dict:
     {"path": {"type": "string", "description": "Path to the binary file"}},
 )
 async def checksec_binary(args: dict) -> dict:
-    result = run_cmd(["checksec", "--output=json", f"--file={args['path']}"])
+    result = await arun_cmd(["checksec", "--output=json", f"--file={args['path']}"])
     return cmd_result_to_tool_result(result)
 
 
@@ -76,7 +76,7 @@ async def checksec_binary(args: dict) -> dict:
 )
 async def readelf_info(args: dict) -> dict:
     flags = args.get("flags", "-h").split()
-    result = run_cmd(["readelf"] + flags + [args["path"]])
+    result = await arun_cmd(["readelf"] + flags + [args["path"]])
     return cmd_result_to_tool_result(result)
 
 
@@ -86,7 +86,7 @@ async def readelf_info(args: dict) -> dict:
     {"path": {"type": "string", "description": "Path to the binary file"}},
 )
 async def binwalk_scan(args: dict) -> dict:
-    result = run_cmd(["binwalk", args["path"]])
+    result = await arun_cmd(["binwalk", args["path"]])
     return cmd_result_to_tool_result(result)
 
 

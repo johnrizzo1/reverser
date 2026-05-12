@@ -1,6 +1,6 @@
 """Tests for netexec_ldap."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -37,7 +37,7 @@ def test_ldap_unauthorized(monkeypatch, tmp_targets_dir):
 
 def test_ldap_check_auth_success(tmp_targets_dir):
     out = "LDAP    10.10.10.5    389   DC01   [+] CORP.LOCAL\\jdoe:Summer2026!\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "jdoe", "password": "Summer2026!", "domain": "CORP.LOCAL",
@@ -52,7 +52,7 @@ def test_ldap_users_action_uses_flag(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("LDAP    [+] jdoe:x\nLDAP    user: alice\nLDAP    user: bob\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "users",
             "username": "jdoe", "password": "x", "domain": "CORP.LOCAL",
@@ -66,7 +66,7 @@ def test_ldap_computers_records_hosts(tmp_targets_dir):
         "LDAP    10.10.10.5    389   DC01   DC01.CORP.LOCAL\n"
         "LDAP    10.10.10.6    389   DC01   WS01.CORP.LOCAL\n"
     )
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "computers",
             "username": "jdoe", "password": "x", "domain": "CORP.LOCAL",
@@ -86,7 +86,7 @@ def test_ldap_kerberoastable_action(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("LDAP    [+] jdoe:x\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "kerberoastable",
             "username": "jdoe", "password": "x",
@@ -104,6 +104,6 @@ def test_ldap_kb_fallback(tmp_targets_dir):
     for_target("10.10.10.5").record_credential(CredentialFact(
         username="jdoe", password="x", domain="CORP.LOCAL", status="valid",
     ))
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok("LDAP    [+] ok\n")):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok("LDAP    [+] ok\n")):
         result = _call({"target": "10.10.10.5", "action": "users"})
     assert "[KB] Using credential: jdoe" in result["content"][0]["text"]

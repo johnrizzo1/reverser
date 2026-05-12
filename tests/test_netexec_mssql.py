@@ -1,6 +1,6 @@
 """Tests for netexec_mssql."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -37,7 +37,7 @@ def test_mssql_unauthorized(monkeypatch, tmp_targets_dir):
 
 def test_mssql_check_auth_success(tmp_targets_dir):
     out = "MSSQL    10.10.10.5    1433   DC01   [+] CORP\\sa:Summer2026! (Pwn3d!)\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "sa", "password": "Summer2026!", "domain": "CORP",
@@ -52,7 +52,7 @@ def test_mssql_databases_uses_query(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("MSSQL    [+] sa:x\n[*] master\n[*] tempdb\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "databases",
             "username": "sa", "password": "x", "local_auth": True,
@@ -66,7 +66,7 @@ def test_mssql_xp_cmdshell(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("MSSQL    [+] command output\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "xp_cmdshell",
             "username": "sa", "password": "x", "local_auth": True,
@@ -81,7 +81,7 @@ def test_mssql_query_action(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("MSSQL    [+] result row\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "query",
             "username": "sa", "password": "x", "local_auth": True,
@@ -110,6 +110,6 @@ def test_mssql_kb_fallback(tmp_targets_dir):
     for_target("10.10.10.5").record_credential(CredentialFact(
         username="sa", password="x", status="valid",
     ))
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok("MSSQL    [+] sa:x\n")):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok("MSSQL    [+] sa:x\n")):
         result = _call({"target": "10.10.10.5", "action": "check_auth"})
     assert "[KB] Using credential: sa" in result["content"][0]["text"]

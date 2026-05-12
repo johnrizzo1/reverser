@@ -3,7 +3,7 @@
 from claude_agent_sdk import tool
 
 from ._common import (
-    run_cmd, format_tool_result, format_error, cmd_result_to_tool_result,
+    arun_cmd, format_tool_result, format_error, cmd_result_to_tool_result,
     is_pe, wine_wrap,
 )
 
@@ -33,7 +33,7 @@ async def run_binary(args: dict) -> dict:
     binary_args = args.get("args", [])
     cmd = wine_wrap([path] + binary_args, path)
 
-    result = run_cmd(
+    result = await arun_cmd(
         cmd,
         timeout=args.get("timeout", 10),
         stdin_data=args.get("stdin_data"),
@@ -86,7 +86,7 @@ async def strace_run(args: dict) -> dict:
     # strace wraps the whole command — wine included
     cmd += wine_wrap([path] + binary_args, path)
 
-    result = run_cmd(
+    result = await arun_cmd(
         cmd,
         timeout=args.get("timeout", 10),
         stdin_data=args.get("stdin_data"),
@@ -137,7 +137,7 @@ async def gdb_batch(args: dict) -> dict:
     else:
         cmd += ["--args", path] + binary_args
 
-    result = run_cmd(cmd, timeout=args.get("timeout", 15))
+    result = await arun_cmd(cmd, timeout=args.get("timeout", 15))
     return cmd_result_to_tool_result(result)
 
 

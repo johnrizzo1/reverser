@@ -6,7 +6,7 @@ from LDAP enum, dumps land in loot/, etc.).
 """
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -39,7 +39,7 @@ def test_full_engagement_walkthrough(tmp_targets_dir):
 
     # Step 1: SMB check_auth with a found credential
     smb_out = "SMB    10.10.10.5    445   DC01   [+] CORP\\jdoe:Summer2026! (Pwn3d!)\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(smb_out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(smb_out)):
         _call(netexec_smb, {
             "target": target, "action": "check_auth",
             "username": "jdoe", "password": "Summer2026!", "domain": "CORP",
@@ -58,7 +58,7 @@ def test_full_engagement_walkthrough(tmp_targets_dir):
         "SMB    10.10.10.5    445   DC01   ADMIN$          READ,WRITE      Remote Admin\n"
         "SMB    10.10.10.5    445   DC01   IPC$            READ            Remote IPC\n"
     )
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(shares_out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(shares_out)):
         result = _call(netexec_smb, {"target": target, "action": "shares"})
     assert "[KB] Using credential: jdoe" in result["content"][0]["text"]
     assert any("ADMIN$" in n for n in kb.get_notes())
@@ -69,7 +69,7 @@ def test_full_engagement_walkthrough(tmp_targets_dir):
         "LDAP    10.10.10.5    389   DC01   DC01.CORP.LOCAL\n"
         "LDAP    10.10.10.6    389   DC01   WS01.CORP.LOCAL\n"
     )
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(ldap_out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(ldap_out)):
         _call(netexec_ldap, {"target": target, "action": "computers"})
     hosts = kb.get_hosts()
     ips = {h.ip for h in hosts}
@@ -78,12 +78,12 @@ def test_full_engagement_walkthrough(tmp_targets_dir):
 
     # Step 4: WinRM check_auth
     winrm_out = "WINRM    10.10.10.5    5985   DC01   [+] CORP\\jdoe:Summer2026!\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(winrm_out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(winrm_out)):
         _call(netexec_winrm, {"target": target, "action": "check_auth"})
 
     # Step 5: SSH check_auth — different user
     ssh_out = "SSH    10.10.10.5    22   ubuntu   [+] root:rootpw\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(ssh_out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(ssh_out)):
         _call(netexec_ssh, {
             "target": target, "action": "check_auth",
             "username": "root", "password": "rootpw",
@@ -91,7 +91,7 @@ def test_full_engagement_walkthrough(tmp_targets_dir):
 
     # Step 6: MSSQL check_auth (failure)
     mssql_out = "MSSQL    10.10.10.5    1433   DC01   [-] sa:bad STATUS_LOGIN_FAILURE\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(mssql_out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(mssql_out)):
         _call(netexec_mssql, {
             "target": target, "action": "check_auth",
             "username": "sa", "password": "bad",
@@ -101,7 +101,7 @@ def test_full_engagement_walkthrough(tmp_targets_dir):
 
     # Step 7: FTP anonymous check
     ftp_out = "FTP    10.10.10.5    21   FTP   [+] anonymous:anonymous\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(ftp_out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(ftp_out)):
         _call(netexec_ftp_wmi, {
             "target": target, "protocol": "ftp", "action": "check_auth",
             "username": "anonymous", "password": "anonymous",
@@ -114,7 +114,7 @@ def test_full_engagement_walkthrough(tmp_targets_dir):
         "Administrator:500:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::\n"
         "krbtgt:502:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::\n"
     )
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(ntds_out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(ntds_out)):
         _call(netexec_smb, {
             "target": target, "action": "ntds",
             "username": "Administrator", "nt_hash": "8846f7eaee8fb117ad06bdd830b7586c",

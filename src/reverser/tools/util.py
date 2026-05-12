@@ -6,7 +6,7 @@ import shlex
 
 from claude_agent_sdk import tool
 
-from ._common import run_cmd, format_tool_result, format_error, cmd_result_to_tool_result
+from ._common import arun_cmd, format_tool_result, format_error, cmd_result_to_tool_result
 
 
 # ── MCP tool redirect ──────────────────────────────────────────────
@@ -244,7 +244,7 @@ async def bash(args: dict) -> dict:
     command = _fix_r2_arg_order(command)
     timeout = min(args.get("timeout", 30), 120)
 
-    result = run_cmd(
+    result = await arun_cmd(
         ["bash", "-c", command],
         timeout=timeout,
         max_output=16000,
@@ -277,7 +277,7 @@ async def list_directory(args: dict) -> dict:
         return format_error(f"Not a directory: {path}")
 
     if recursive:
-        result = run_cmd(["find", path, "-type", "f"], max_output=16000)
+        result = await arun_cmd(["find", path, "-type", "f"], max_output=16000)
         return cmd_result_to_tool_result(result)
 
     try:

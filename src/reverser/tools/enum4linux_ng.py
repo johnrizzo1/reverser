@@ -32,7 +32,7 @@ from pathlib import Path
 
 from claude_agent_sdk import tool
 
-from ._common import format_error, format_tool_result, run_cmd
+from ._common import arun_cmd, format_error, format_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ async def enum4linux_ng(args: dict) -> dict:
     cmd.append(target)
 
     timeout = E4L_TIMEOUT_FULL if mode == "all" else E4L_TIMEOUT_FAST
-    result = run_cmd(cmd, timeout=timeout, max_output=32000)
+    result = await arun_cmd(cmd, timeout=timeout, max_output=32000)
     stdout = result["stdout"] or ""
     stderr = result["stderr"] or ""
 

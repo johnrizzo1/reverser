@@ -1,5 +1,6 @@
 """Shared infrastructure for RE tools: subprocess execution, output truncation, pagination."""
 
+import asyncio
 import os
 import subprocess
 import zipfile
@@ -147,6 +148,30 @@ def run_cmd(
         "returncode": result.returncode,
         "truncated": truncated,
     }
+
+
+async def arun_cmd(
+    cmd: list[str],
+    timeout: int = DEFAULT_TIMEOUT,
+    max_output: int = DEFAULT_MAX_OUTPUT,
+    cwd: str | None = None,
+    stdin_data: str | None = None,
+) -> dict:
+    """Async wrapper around run_cmd. Use this inside async @tool handlers.
+
+    The synchronous run_cmd() blocks the event loop for the duration of the
+    subprocess. When called from an async handler running in Textual's
+    event loop, this freezes the UI. arun_cmd dispatches the blocking
+    subprocess work to a thread via asyncio.to_thread, so the event loop
+    stays responsive.
+
+    Sync callers (helper functions outside async @tool handlers) should
+    keep using run_cmd directly.
+    """
+    return await asyncio.to_thread(
+        run_cmd, cmd, timeout=timeout, max_output=max_output,
+        cwd=cwd, stdin_data=stdin_data,
+    )
 
 
 def paginate(text: str, offset: int = 0, limit: int = 50) -> dict:

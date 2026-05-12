@@ -22,10 +22,10 @@ from typing import Optional
 from claude_agent_sdk import tool
 
 from ._common import (
+    arun_cmd,
     cmd_result_to_tool_result,
     format_error,
     format_tool_result,
-    run_cmd,
 )
 
 logger = logging.getLogger(__name__)
@@ -384,7 +384,7 @@ async def netexec_smb(args: dict) -> dict:
         cmd.extend(shlex.split(extra_args))
 
     timeout = NXC_TIMEOUT_SLOW if action in ("ntds", "lsa", "sam", "spider", "spray") else NXC_TIMEOUT_FAST
-    result = run_cmd(cmd, timeout=timeout, max_output=32000)
+    result = await arun_cmd(cmd, timeout=timeout, max_output=32000)
     stdout = result["stdout"]
     success = _auth_succeeded(stdout)
 
@@ -529,7 +529,7 @@ async def netexec_winrm(args: dict) -> dict:
         cmd.extend(shlex.split(extra_args))
 
     timeout = NXC_TIMEOUT_MEDIUM if action in ("exec", "ps") else NXC_TIMEOUT_FAST
-    result = run_cmd(cmd, timeout=timeout, max_output=16000)
+    result = await arun_cmd(cmd, timeout=timeout, max_output=16000)
     stdout = result["stdout"]
     success = _auth_succeeded(stdout)
 
@@ -646,7 +646,7 @@ async def netexec_ldap(args: dict) -> dict:
         cmd.extend(shlex.split(extra_args))
 
     timeout = NXC_TIMEOUT_MEDIUM if action in ("computers", "users", "groups") else NXC_TIMEOUT_FAST
-    result = run_cmd(cmd, timeout=timeout, max_output=32000)
+    result = await arun_cmd(cmd, timeout=timeout, max_output=32000)
     stdout = result["stdout"]
     success = _auth_succeeded(stdout)
 
@@ -781,7 +781,7 @@ async def netexec_mssql(args: dict) -> dict:
     if extra_args:
         cmd.extend(shlex.split(extra_args))
 
-    result = run_cmd(cmd, timeout=NXC_TIMEOUT_FAST, max_output=16000)
+    result = await arun_cmd(cmd, timeout=NXC_TIMEOUT_FAST, max_output=16000)
     stdout = result["stdout"]
     success = _auth_succeeded(stdout)
 
@@ -905,7 +905,7 @@ async def netexec_ssh(args: dict) -> dict:
     if extra_args:
         cmd.extend(shlex.split(extra_args))
 
-    result = run_cmd(cmd, timeout=NXC_TIMEOUT_FAST, max_output=16000)
+    result = await arun_cmd(cmd, timeout=NXC_TIMEOUT_FAST, max_output=16000)
     stdout = result["stdout"]
     success = _auth_succeeded(stdout)
 
@@ -1038,7 +1038,7 @@ async def netexec_ftp_wmi(args: dict) -> dict:
     if extra_args:
         cmd.extend(shlex.split(extra_args))
 
-    result = run_cmd(cmd, timeout=NXC_TIMEOUT_FAST, max_output=16000)
+    result = await arun_cmd(cmd, timeout=NXC_TIMEOUT_FAST, max_output=16000)
     stdout = result["stdout"]
     success = _auth_succeeded(stdout)
 

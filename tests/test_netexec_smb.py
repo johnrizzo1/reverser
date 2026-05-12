@@ -1,6 +1,6 @@
 """Tests for netexec_smb."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -38,7 +38,7 @@ def test_smb_unauthorized_raises(monkeypatch, tmp_targets_dir):
 
 def test_smb_check_auth_success_records_valid_cred(tmp_targets_dir):
     out = "SMB    10.10.10.5    445   DC01   [+] CORP.LOCAL\\jdoe:Summer2026! (Pwn3d!)\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         result = _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "jdoe", "password": "Summer2026!", "domain": "CORP",
@@ -54,7 +54,7 @@ def test_smb_check_auth_success_records_valid_cred(tmp_targets_dir):
 
 def test_smb_check_auth_failure_records_invalid_cred(tmp_targets_dir):
     out = "SMB    10.10.10.5    445   DC01   [-] CORP\\jdoe:bad STATUS_LOGON_FAILURE\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "jdoe", "password": "bad", "domain": "CORP",
@@ -76,7 +76,7 @@ def test_smb_no_creds_uses_kb_fallback(tmp_targets_dir):
         captured["cmd"] = cmd
         return _ok("SMB    10.10.10.5    445   DC01   [+] jdoe:Summer2026!\n")
 
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         result = _call({"target": "10.10.10.5", "action": "check_auth"})
 
     assert "-u" in captured["cmd"] and "jdoe" in captured["cmd"]
@@ -96,7 +96,7 @@ def test_smb_shares_records_note(tmp_targets_dir):
         "SMB    10.10.10.5    445   DC01   ADMIN$          READ,WRITE      Remote Admin\n"
         "SMB    10.10.10.5    445   DC01   IPC$            READ            Remote IPC\n"
     )
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "shares",
             "username": "jdoe", "password": "x",
@@ -112,7 +112,7 @@ def test_smb_ntds_dump_saves_artifact_and_creds(tmp_targets_dir):
         "Administrator:500:aad3b435b51404eeaad3b435b51404ee:8846f7eaee8fb117ad06bdd830b7586c:::\n"
         "krbtgt:502:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::\n"
     )
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "ntds",
             "username": "admin", "password": "x", "local_auth": True,
@@ -145,7 +145,7 @@ def test_smb_spray_caps_attempts(tmp_targets_dir, monkeypatch):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "spray",
             "username": "jdoe", "password": "Summer2026!",
@@ -160,7 +160,7 @@ def test_smb_module_invocation(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("[*] module ran")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "exec",
             "username": "jdoe", "password": "x",

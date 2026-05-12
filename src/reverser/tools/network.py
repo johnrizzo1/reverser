@@ -6,7 +6,7 @@ import shutil
 
 from claude_agent_sdk import tool
 
-from ._common import run_cmd, format_tool_result, format_error, cmd_result_to_tool_result, get_sudo_password
+from ._common import arun_cmd, format_tool_result, format_error, cmd_result_to_tool_result, get_sudo_password
 
 
 # ── Wordlist discovery ──────────────────────────────────────────────
@@ -111,16 +111,16 @@ def _resolve_wordlist(requested: str, default_shortcut: str) -> tuple[str, str |
 
 # ── Sudo helper ─────────────────────────────────────────────────────
 
-def _run_sudo_cmd(cmd: list[str], use_sudo: bool, **kwargs) -> dict:
+async def _run_sudo_cmd(cmd: list[str], use_sudo: bool, **kwargs) -> dict:
     """Run a command, optionally with sudo -S piping the stored password via stdin."""
     if not use_sudo:
-        return run_cmd(cmd, **kwargs)
+        return await arun_cmd(cmd, **kwargs)
 
     password = get_sudo_password()
     if password is not None:
         # Use sudo -S to read password from stdin
         full_cmd = ["sudo", "-S"] + cmd
-        result = run_cmd(full_cmd, stdin_data=password + "\n", **kwargs)
+        result = await arun_cmd(full_cmd, stdin_data=password + "\n", **kwargs)
         # Strip the sudo password prompt from stderr (noise from -S)
         if result.get("stderr"):
             lines = result["stderr"].split("\n")
@@ -133,7 +133,7 @@ def _run_sudo_cmd(cmd: list[str], use_sudo: bool, **kwargs) -> dict:
         # No stored password — try plain sudo (will fail without tty, but
         # the error message will tell the user to set the password via /sudo)
         full_cmd = ["sudo"] + cmd
-        result = run_cmd(full_cmd, **kwargs)
+        result = await arun_cmd(full_cmd, **kwargs)
         if result["returncode"] != 0 and "password" in result.get("stderr", "").lower():
             result["stderr"] = (
                 "sudo requires a password but none is configured. "
@@ -239,7 +239,7 @@ async def nmap_scan(args: dict) -> dict:
 
     cmd.append(target)
 
-    result = _run_sudo_cmd(cmd, needs_root, timeout=120, max_output=16000)
+    result = await _run_sudo_cmd(cmd, needs_root, timeout=120, max_output=16000)
 
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
@@ -300,7 +300,7 @@ async def nikto_scan(args: dict) -> dict:
         cmd.extend(["-Tuning", tuning])
 
     # Nikto can be slow; give it 3 minutes
-    result = run_cmd(cmd, timeout=180, max_output=16000)
+    result = await arun_cmd(cmd, timeout=180, max_output=16000)
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
         from ..kb import for_target
@@ -372,7 +372,7 @@ async def gobuster_scan(args: dict) -> dict:
     if extra_args:
         cmd.extend(extra_args.split())
 
-    result = run_cmd(cmd, timeout=180, max_output=16000)
+    result = await arun_cmd(cmd, timeout=180, max_output=16000)
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
         import json
@@ -472,7 +472,7 @@ async def curl_request(args: dict) -> dict:
 
     cmd.append(url)
 
-    result = run_cmd(cmd, timeout=30, max_output=16000)
+    result = await arun_cmd(cmd, timeout=30, max_output=16000)
     return cmd_result_to_tool_result(result)
 
 
@@ -498,11 +498,11 @@ async def ssl_scan(args: dict) -> dict:
     port = args.get("port", 443)
 
     # Try sslscan first, fall back to nmap ssl scripts
-    result = run_cmd(["sslscan", "--no-colour", f"{target}:{port}"], timeout=60, max_output=16000)
+    result = await arun_cmd(["sslscan", "--no-colour", f"{target}:{port}"], timeout=60, max_output=16000)
 
     if result["returncode"] != 0 and "not found" in result["stderr"].lower():
         # Fall back to nmap SSL scripts
-        result = _run_sudo_cmd(
+        result = await _run_sudo_cmd(
             ["nmap", "-sV", "--script", "ssl-enum-ciphers,ssl-cert", "-p", str(port), target],
             True, timeout=60, max_output=16000,
         )
@@ -546,7 +546,7 @@ async def whatweb_scan(args: dict) -> dict:
     aggression = args.get("aggression", 1)
 
     cmd = ["whatweb", "--color=never", f"-a{aggression}", target]
-    result = run_cmd(cmd, timeout=60, max_output=16000)
+    result = await arun_cmd(cmd, timeout=60, max_output=16000)
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
         from urllib.parse import urlparse
@@ -601,7 +601,7 @@ async def dns_recon(args: dict) -> dict:
     else:
         cmd = ["dig", target, record_type, "+noall", "+answer", "+authority", "+additional"]
 
-    result = run_cmd(cmd, timeout=15, max_output=8000)
+    result = await arun_cmd(cmd, timeout=15, max_output=8000)
     return cmd_result_to_tool_result(result)
 
 
@@ -634,7 +634,7 @@ async def banner_grab(args: dict) -> dict:
     else:
         cmd.append(f"nc -w 5 {target} {port}")
 
-    result = run_cmd(cmd, timeout=10, max_output=8000)
+    result = await arun_cmd(cmd, timeout=10, max_output=8000)
 
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
@@ -859,10 +859,10 @@ async def smb_enum(args: dict) -> dict:
         if username:
             smb_cmd = ["smbclient", "-L", target, "-U", f"{username}%{password}"]
 
-        result = run_cmd(smb_cmd, timeout=15, max_output=8000)
+        result = await arun_cmd(smb_cmd, timeout=15, max_output=8000)
         if result["returncode"] != 0 and "not found" in result.get("stderr", "").lower():
             # smbclient not available, try nmap
-            result = _run_sudo_cmd(
+            result = await _run_sudo_cmd(
                 ["nmap", "-sV", "--script", "smb-enum-shares", "-p", "445", target],
                 True, timeout=30, max_output=8000,
             )
@@ -872,7 +872,7 @@ async def smb_enum(args: dict) -> dict:
 
     if mode in ("scripts", "all"):
         # Run nmap SMB enumeration scripts
-        nmap_result = _run_sudo_cmd(
+        nmap_result = await _run_sudo_cmd(
             ["nmap", "-sV", "--script",
              "smb-os-discovery,smb-enum-shares,smb-enum-users,smb-security-mode,smb2-security-mode",
              "-p", "139,445", target],
@@ -946,7 +946,7 @@ async def nbtscan_scan(args: dict) -> dict:
         cmd.append("-v")
     cmd.append(target)
 
-    result = run_cmd(cmd, timeout=60, max_output=16000)
+    result = await arun_cmd(cmd, timeout=60, max_output=16000)
 
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
@@ -1032,7 +1032,7 @@ async def kerberos_enum(args: dict) -> dict:
                 "--script-args", f"krb5-enum-users.realm={domain},userdb={resolved}",
                 "-Pn", target,
             ]
-            result = _run_sudo_cmd(nmap_cmd, True, timeout=120, max_output=16000)
+            result = await _run_sudo_cmd(nmap_cmd, True, timeout=120, max_output=16000)
         else:
             # Single user check — create a temp file
             import tempfile
@@ -1045,7 +1045,7 @@ async def kerberos_enum(args: dict) -> dict:
                     "--script-args", f"krb5-enum-users.realm={domain},userdb={tmpfile}",
                     "-Pn", target,
                 ]
-                result = _run_sudo_cmd(nmap_cmd, True, timeout=30, max_output=16000)
+                result = await _run_sudo_cmd(nmap_cmd, True, timeout=30, max_output=16000)
             finally:
                 os.unlink(tmpfile)
 
@@ -1067,14 +1067,14 @@ async def kerberos_enum(args: dict) -> dict:
             # Try without specifying users (requires anonymous LDAP)
             cmd.append("-request")
 
-        result = run_cmd(cmd, timeout=60, max_output=16000)
+        result = await arun_cmd(cmd, timeout=60, max_output=16000)
 
         # Fall back to script path if module invocation fails
         if result["returncode"] != 0 and "No module" in result.get("stderr", ""):
             getnp = shutil.which("GetNPUsers.py") or shutil.which("impacket-GetNPUsers")
             if getnp:
                 cmd[0:3] = [getnp]
-                result = run_cmd(cmd, timeout=60, max_output=16000)
+                result = await arun_cmd(cmd, timeout=60, max_output=16000)
             else:
                 return format_error(
                     "impacket GetNPUsers not found. Install impacket: pip install impacket"
@@ -1105,13 +1105,13 @@ async def kerberos_enum(args: dict) -> dict:
         cmd = ["python3", "-m", "impacket.examples.GetUserSPNs",
                f"{domain}/{username}:{password}", "-dc-ip", target, "-request"]
 
-        result = run_cmd(cmd, timeout=60, max_output=16000)
+        result = await arun_cmd(cmd, timeout=60, max_output=16000)
 
         if result["returncode"] != 0 and "No module" in result.get("stderr", ""):
             getspn = shutil.which("GetUserSPNs.py") or shutil.which("impacket-GetUserSPNs")
             if getspn:
                 cmd[0:3] = [getspn]
-                result = run_cmd(cmd, timeout=60, max_output=16000)
+                result = await arun_cmd(cmd, timeout=60, max_output=16000)
             else:
                 return format_error(
                     "impacket GetUserSPNs not found. Install impacket: pip install impacket"

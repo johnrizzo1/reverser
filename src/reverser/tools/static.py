@@ -2,7 +2,7 @@
 
 from claude_agent_sdk import tool
 
-from ._common import run_cmd, paginate, format_tool_result, format_error, cmd_result_to_tool_result
+from ._common import arun_cmd, paginate, format_tool_result, format_error, cmd_result_to_tool_result
 
 
 @tool(
@@ -94,7 +94,7 @@ async def objdump_disasm(args: dict) -> dict:
         cmd += [f"--disassemble={symbol}"]
     cmd.append(args["path"])
 
-    result = run_cmd(cmd, max_output=100000)
+    result = await arun_cmd(cmd, max_output=100000)
     if result["returncode"] != 0:
         return cmd_result_to_tool_result(result)
 
@@ -115,10 +115,10 @@ async def objdump_disasm(args: dict) -> dict:
     },
 )
 async def nm_symbols(args: dict) -> dict:
-    result = run_cmd(["nm", "-C", args["path"]])
+    result = await arun_cmd(["nm", "-C", args["path"]])
     if result["returncode"] != 0:
         # Try dynamic symbols for stripped binaries
-        result = run_cmd(["nm", "-C", "-D", args["path"]])
+        result = await arun_cmd(["nm", "-C", "-D", args["path"]])
     if result["returncode"] != 0:
         return cmd_result_to_tool_result(result)
 
@@ -166,7 +166,7 @@ async def jadx_decompile(args: dict) -> dict:
         if show_resources:
             cmd.insert(1, "--export-gradle")
 
-        result = run_cmd(cmd, timeout=60, max_output=200000)
+        result = await arun_cmd(cmd, timeout=60, max_output=200000)
         if result["returncode"] != 0 and not result["stdout"]:
             return cmd_result_to_tool_result(result)
 
@@ -229,7 +229,7 @@ async def procyon_decompile(args: dict) -> dict:
     if class_name:
         cmd = ["procyon", "-jar", path, class_name]
 
-    result = run_cmd(cmd, timeout=60, max_output=100000)
+    result = await arun_cmd(cmd, timeout=60, max_output=100000)
     if result["returncode"] != 0 and not result["stdout"]:
         return cmd_result_to_tool_result(result)
 

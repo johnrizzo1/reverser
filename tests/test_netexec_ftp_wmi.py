@@ -1,6 +1,6 @@
 """Tests for netexec_ftp_wmi."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -38,7 +38,7 @@ def test_ftp_wmi_unauthorized(monkeypatch, tmp_targets_dir):
 
 def test_ftp_check_auth_success(tmp_targets_dir):
     out = "FTP    10.10.10.5    21   FTP-SVR   [+] anonymous:anonymous\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "protocol": "ftp", "action": "check_auth",
             "username": "anonymous", "password": "anonymous",
@@ -53,7 +53,7 @@ def test_ftp_list_action(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("FTP    [+] ok\nFTP    file1.txt\nFTP    file2.txt\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "protocol": "ftp", "action": "list",
             "username": "anonymous", "password": "anonymous",
@@ -67,7 +67,7 @@ def test_wmi_exec_action(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("WMI    10.10.10.5    135   DC01   [+] command output\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "protocol": "wmi", "action": "exec",
             "username": "jdoe", "password": "x", "command": "whoami",
@@ -79,7 +79,7 @@ def test_wmi_exec_action(tmp_targets_dir):
 
 def test_wmi_check_auth_records_creds(tmp_targets_dir):
     out = "WMI    10.10.10.5    135   DC01   [+] CORP\\jdoe:Summer2026!\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "protocol": "wmi", "action": "check_auth",
             "username": "jdoe", "password": "Summer2026!", "domain": "CORP",
@@ -110,7 +110,7 @@ def test_kb_fallback(tmp_targets_dir):
     for_target("10.10.10.5").record_credential(CredentialFact(
         username="anonymous", password="anonymous", status="valid",
     ))
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok("FTP    [+] ok\n")):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok("FTP    [+] ok\n")):
         result = _call({
             "target": "10.10.10.5", "protocol": "ftp", "action": "check_auth",
         })

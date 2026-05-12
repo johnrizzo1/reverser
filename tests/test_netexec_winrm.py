@@ -1,6 +1,6 @@
 """Tests for netexec_winrm."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -37,7 +37,7 @@ def test_winrm_unauthorized(monkeypatch, tmp_targets_dir):
 
 def test_winrm_check_auth_success(tmp_targets_dir):
     out = "WINRM    10.10.10.5    5985   DC01   [+] CORP\\jdoe:Summer2026! (Pwn3d!)\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "jdoe", "password": "Summer2026!", "domain": "CORP",
@@ -49,7 +49,7 @@ def test_winrm_check_auth_success(tmp_targets_dir):
 
 def test_winrm_check_auth_failure_records_invalid(tmp_targets_dir):
     out = "WINRM    10.10.10.5    5985   DC01   [-] CORP\\jdoe:bad\n"
-    with patch("reverser.tools.netexec.run_cmd", return_value=_ok(out)):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, return_value=_ok(out)):
         _call({
             "target": "10.10.10.5", "action": "check_auth",
             "username": "jdoe", "password": "bad", "domain": "CORP",
@@ -64,7 +64,7 @@ def test_winrm_exec_passes_command(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("WINRM    [+] whoami: nt authority\\system\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "exec",
             "username": "jdoe", "password": "x",
@@ -79,7 +79,7 @@ def test_winrm_ps_uses_ps_flag(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("[+] ran")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         _call({
             "target": "10.10.10.5", "action": "ps",
             "username": "jdoe", "password": "x",
@@ -112,7 +112,7 @@ def test_winrm_kb_fallback(tmp_targets_dir):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         return _ok("WINRM    [+] jdoe:x\n")
-    with patch("reverser.tools.netexec.run_cmd", side_effect=fake_run):
+    with patch("reverser.tools.netexec.arun_cmd", new_callable=AsyncMock, side_effect=fake_run):
         result = _call({"target": "10.10.10.5", "action": "check_auth"})
     assert "jdoe" in captured["cmd"]
     assert "[KB] Using credential: jdoe" in result["content"][0]["text"]
