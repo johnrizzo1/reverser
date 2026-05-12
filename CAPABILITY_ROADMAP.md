@@ -12,10 +12,11 @@ Source context: gap analysis performed 2026-05-03 against the implementation on
 harness). The HTB-style engagement captured in `pentest_report_10.13.38.23.md`
 is referenced as a real-world failure case that motivates several items.
 
-**As of 2026-05-12:** 15 profiles registered, 77 MCP tools (75 unique), Claude
+**As of 2026-05-12:** 15 profiles registered, 91 MCP tools (89 unique), Claude
 + Ollama + LM Studio backends, per-target SQLite KB, session stop/resume,
 manager profile (sub-agent coordination), exploit profile + msfrpc bridge,
-hypothesis-driven discipline in pentest/webpentest, 540 passing tests.
+hypothesis-driven discipline in pentest/webpentest, Playwright browser
+integration for webpentest/webapi/webrecon, 580 passing tests.
 
 ---
 
@@ -226,10 +227,17 @@ numbering from 2026-05-03 in parentheses.
   credentials/findings/notes/hypotheses with credential-lifecycle object
   fed to every new service. See `2026-05-03-plan-{1,2}-*.md`.
 
-- [ ] **3. (was #3) — Wire Playwright into the webpentest profile.**
-  Playwright MCP is already available in the plugin context; needs profile
-  wiring + tool helpers for SPA crawling, XSS confirmation, screenshot
-  evidence capture. Modest implementation; big payoff for web evidence.
+- [x] **3. (was #3) — Wire Playwright into the webpentest profile.**
+  - **Status (2026-05-12):** Shipped. 14 new MCP tools wrapping the Python
+    playwright library directly: 3 lifecycle (`web_browser_start/status/close`),
+    6 primitives (navigate, click, type, fill_form, evaluate, wait_for), 2
+    observation (snapshot, network_log), 3 composed pentest workflows
+    (capture_finding, confirm_xss, crawl). Singleton browser per agent
+    session; scope.toml enforced on every navigation; screenshots auto-attach
+    to findings via new `kb.append_finding_evidence` method. All three web
+    profiles (webpentest/webapi/webrecon) inherit. Skill-level reinforcement
+    in WEB_RECON / WEB_DISCOVER / WEB_MANUAL. Specs/plans:
+    `2026-05-12-playwright-webpentest-{design,plan}.md`.
 
 - [x] **4. (was #1) — NetExec + BloodHound + cypher.** ✅ shipped 2026-05-04
   via Plans 3–5. 6 `netexec_*` tools (smb/ldap/winrm/mssql/ssh/ftp+wmi),
@@ -243,7 +251,7 @@ numbering from 2026-05-03 in parentheses.
     EXPLOIT, CREDS (pentest) and WEB_RECON, WEB_SQLI, WEB_MANUAL (webpentest).
     Specs/plans: `2026-05-12-hypothesis-driven-prompts-{design,plan}.md`.
 
-> **Remaining work order:** #3 (items #1, #2, #4, and #5 already complete).
+> **All Top 5 items shipped.** ✨
 
 ---
 

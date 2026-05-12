@@ -123,7 +123,12 @@ SKILL_WEB_RECON = Skill(
            "CLAIM (\"The /api/users endpoint is vulnerable to IDOR via the id parameter\"), "
            "not a TODO item (\"Look at the API\"). Confidence values: 80+ = strong "
            "evidence, 50 = plausible, <30 = long shot. Subsequent skills work through "
-           "these in confidence order.",
+           "these in confidence order.\n\n"
+           "If the target is a webapp (not just an API), call "
+           "web_browser_start(target) then web_browser_capture_finding with the existing "
+           "recon finding to grab a landing-page screenshot. One screenshot per subdomain "
+           "is cheap evidence the client will value. Do NOT crawl in recon — that's "
+           "WEB_DISCOVER's job.",
 )
 
 SKILL_WEB_SCAN = Skill(
@@ -140,7 +145,13 @@ SKILL_WEB_DISCOVER = Skill(
     description="Directory and file discovery with fuzzing",
     prompt="Discover hidden directories, files, and endpoints on the target. Use ffuf_fuzz "
            "with the default wordlist first, then try with extensions "
-           ".php,.html,.js,.json,.xml,.bak,.old. Report all interesting findings.",
+           ".php,.html,.js,.json,.xml,.bak,.old. Report all interesting findings.\n\n"
+           "Standard wordlist fuzzing works for server-rendered apps. For SPAs (React/Vue/"
+           "Angular), the routes are JS-rendered and wordlists miss them entirely. After "
+           "ffuf_fuzz returns its results, ALSO call web_browser_crawl(start_url, "
+           "max_pages=30) — it does a JS-aware BFS and discovers routes/forms/APIs that "
+           "no path-fuzzing wordlist will. Compare both result sets: anything in the crawl "
+           "that ffuf missed is an SPA-only route worth deep testing.",
 )
 
 SKILL_WEB_SSL = Skill(
@@ -180,7 +191,17 @@ SKILL_WEB_MANUAL = Skill(
            "header / cookie / CORS / form, state which hypothesis you're testing. After "
            "5 failed manual probes against the same hypothesis (5 different "
            "headers/cookies/parameters that all came back clean), mark the hypothesis "
-           "refuted via kb_update_hypothesis and pivot.",
+           "refuted via kb_update_hypothesis and pivot.\n\n"
+           "For XSS hypotheses: don't trust \"the payload string appears in the response "
+           "body.\" That's high-false-positive. Use web_browser_confirm_xss(payload, "
+           "inject_selector=...) — it injects the payload, listens for dialog events "
+           "and a sentinel function, and returns confirmed/refuted with screenshot "
+           "evidence. This is the difference between \"potentially XSS\" and \"confirmed "
+           "XSS with proof.\" "
+           "For authenticated probing: web_browser_start(target) → web_browser_fill_form "
+           "to log in once → subsequent web_browser_* calls reuse the same session. The "
+           "cookie jar persists across calls. Don't pass credentials in every tool call — "
+           "log in once, then explore.",
 )
 
 SKILL_WEB_REPORT = Skill(

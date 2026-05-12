@@ -368,6 +368,28 @@ class KB:
             assert cursor.lastrowid is not None  # AUTOINCREMENT guarantees this
             return cursor.lastrowid
 
+    def append_finding_evidence(self, finding_id: int, path: str) -> None:
+        """Append a path to an existing finding's evidence_paths JSON list.
+
+        Raises ValueError if no finding with that id exists for this target.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT evidence_paths FROM findings WHERE id = ? AND target_id = ?",
+                (finding_id, self.target_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    f"No finding with id={finding_id} for target={self.target_id}"
+                )
+            paths = json.loads(row[0]) if row[0] else []
+            paths.append(path)
+            conn.execute(
+                "UPDATE findings SET evidence_paths = ? WHERE id = ? AND target_id = ?",
+                (json.dumps(paths), finding_id, self.target_id),
+            )
+            conn.commit()
+
     def get_findings(self, severity: str | None = None) -> list[FindingFact]:
         sql = (
             "SELECT title, severity, cvss, description, evidence_paths "
