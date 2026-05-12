@@ -67,7 +67,9 @@
     # nixpkgs build is currently marked broken on this channel. Upstream's
     # recommended install method is `pip install netexec` anyway.
     # Exploit-db + Metasploit bridge (Top 5 #1)
-    metasploit-framework   # msfconsole, msfrpcd, msfvenom
+    # Note: nixpkgs attribute is `metasploit` (package's display name is
+    # "metasploit-framework" but the attribute path is `pkgs.metasploit`).
+    metasploit             # msfconsole, msfrpcd, msfvenom
     exploitdb              # searchsploit CLI + the exploit database
     neo4j                  # graph database for BloodHound (per-target instances)
     krb5                   # kinit, klist, krb5-config
