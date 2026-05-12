@@ -874,7 +874,7 @@ class ReverserApp(App):
         log.clear()
         log.write(f"[bold]Reverser Agent[/bold] — Profile: [cyan]{self.profile.name}[/cyan]")
         if self.binary_path:
-            label = "Target" if is_network_target(self.binary_path) else "Binary"
+            label = "Target" if is_url(self.binary_path) else "Binary"
             log.write(f"{label}: [green]{self.binary_path}[/green]")
         log.write("")
 
