@@ -140,7 +140,10 @@ from ..kb.store import KB  # noqa: E402
 from ..kb.scope import load_scope  # noqa: E402
 
 
-_DISPATCHABLE_SPECIALTIES = ("pentest", "ad", "webpentest", "webapi", "webrecon")
+_DISPATCHABLE_SPECIALTIES = (
+    "pentest", "ad", "webpentest", "webapi", "webrecon",
+    "exploit",
+)
 
 TOOLS: list = []  # exported for tools/__init__.py registration
 

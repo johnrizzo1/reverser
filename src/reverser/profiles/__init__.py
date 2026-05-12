@@ -66,4 +66,5 @@ from . import (  # noqa: F401, E402  # imported for side effects
     ad,
     ctf,
     manager,
+    exploit,
 )

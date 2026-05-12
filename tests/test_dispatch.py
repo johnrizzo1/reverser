@@ -166,3 +166,13 @@ def test_dispatch_specialist_increments_dispatch_count(monkeypatch, tmp_path):
     fetched = kb.get_hypothesis(h.id)
     assert fetched.dispatch_count == 1
     assert fetched.dispatched_to == "ad"
+
+
+def test_exploit_in_dispatchable_specialties():
+    from reverser.tools.dispatch import _DISPATCHABLE_SPECIALTIES
+    assert "exploit" in _DISPATCHABLE_SPECIALTIES
+
+
+def test_dispatchable_specialties_count_after_exploit():
+    from reverser.tools.dispatch import _DISPATCHABLE_SPECIALTIES
+    assert len(_DISPATCHABLE_SPECIALTIES) == 6

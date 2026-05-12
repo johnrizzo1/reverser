@@ -104,6 +104,7 @@ Profiles specialize the agent's system prompt, tool priorities, and available sk
 | CTF / Crackme | `ctf` | Solve crackmes — find the flag/key/password |
 | Active Directory | `ad` | Internal AD engagement — assumed-breach methodology with NetExec, BloodHound, KB |
 | Manager | `manager` | Network red-team conductor — plans hypotheses and dispatches specialists |
+| Exploit | `exploit` | Public-exploit hunter — searchsploit + msfvenom + Metasploit RPC bridge |
 
 ```sh
 reverser interactive --list-profiles   # show all profiles and their skills
@@ -146,6 +147,33 @@ rate limits or detection thresholds):
 ```sh
 REVERSER_PENTEST_AUTHORIZED=1 reverser i -p manager 10.10.10.5 --max-parallel 3
 ```
+
+**Exploit-hunter engagements:** the `exploit` profile wraps searchsploit, msfvenom, and the \
+Metasploit RPC daemon (`msfrpcd`) into 8 MCP tools so the agent can close the "find a known \
+public exploit, generate a payload, try it" loop. `metasploit_run` is **always-check-first** by \
+default — exploitation only fires when the module's `check` reports `vulnerable`, with `force=True` \
+as an explicit escape hatch. A shared msfrpcd daemon runs at `127.0.0.1:55553` with per-target \
+MSF workspaces; auth credentials persist at `<targets_root>/.shared/msfrpc/auth.json` (mode 0600). \
+Confirmed exploits land as severity=high `FindingFact` entries in the per-target KB; generated \
+payloads land in `targets/<target>/loot/payloads/<name>-<sha8>.<ext>` as `ArtifactFact`s. \
+Dispatchable from the `manager` profile.
+
+```sh
+# Direct exploit-hunter session against a known target
+REVERSER_PENTEST_AUTHORIZED=1 reverser i -p exploit 10.10.10.5
+
+# Or dispatched from the manager — manager kickoff proposes hypotheses,
+# manager dispatches an exploit specialist with a CVE-or-software-version target
+REVERSER_PENTEST_AUTHORIZED=1 reverser i -p manager 10.10.10.5
+```
+
+Skills:
+- `h` — Hunt exploits (searchsploit + metasploit_search; cross-reference, rank candidates)
+- `g` — Generate payload (msfvenom_generate with sensible defaults)
+- `t` — Try exploit (metasploit_run on highest-confidence hypothesis; always check first)
+- `i` — Handle session (characterize a freshly-opened foothold via metasploit_session cmd)
+- `r` — Report (kb_export_report with confirmed exploits + payload artifacts)
+- `w` — Wrap up (mark unresolved hypotheses abandoned; final report; tell user /done)
 
 ### Writeups
 

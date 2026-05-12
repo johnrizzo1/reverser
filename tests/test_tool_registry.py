@@ -55,15 +55,47 @@ def test_all_tools_count_after_manager_work():
     registered (66 unique). enum4linux_ng added post-merge = 69 registered,
     67 unique.
     """
-    assert len(ALL_TOOLS) == 69, (
-        f"expected 69 registered tools, got {len(ALL_TOOLS)}"
+    assert len(ALL_TOOLS) == 77, (
+        f"expected 77 registered tools, got {len(ALL_TOOLS)}"
     )
     unique_names = {t.name for t in ALL_TOOLS}
-    assert len(unique_names) == 67, (
-        f"expected 67 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
+    assert len(unique_names) == 75, (
+        f"expected 75 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
     )
 
 
 def test_enum4linux_ng_registered():
     names = {t.name for t in ALL_TOOLS}
     assert "enum4linux_ng" in names
+
+
+def test_searchsploit_search_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "searchsploit_search" in names
+
+
+def test_msfvenom_generate_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "msfvenom_generate" in names
+
+
+def test_metasploit_lifecycle_tools_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "metasploit_start" in names
+    assert "metasploit_stop" in names
+    assert "metasploit_status" in names
+
+
+def test_metasploit_operational_tools_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "metasploit_search" in names
+    assert "metasploit_run" in names
+    assert "metasploit_session" in names
+
+
+def test_all_eight_metasploit_bridge_tools_registered():
+    names = {t.name for t in ALL_TOOLS}
+    for name in ("searchsploit_search", "msfvenom_generate",
+                 "metasploit_start", "metasploit_stop", "metasploit_status",
+                 "metasploit_search", "metasploit_run", "metasploit_session"):
+        assert name in names, f"missing tool: {name}"

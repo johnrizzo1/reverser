@@ -66,6 +66,9 @@
     # netexec (nxc) is installed from PyPI in the Python venv below — the
     # nixpkgs build is currently marked broken on this channel. Upstream's
     # recommended install method is `pip install netexec` anyway.
+    # Exploit-db + Metasploit bridge (Top 5 #1)
+    metasploit-framework   # msfconsole, msfrpcd, msfvenom
+    exploitdb              # searchsploit CLI + the exploit database
     neo4j                  # graph database for BloodHound (per-target instances)
     krb5                   # kinit, klist, krb5-config
     kerbrute               # Kerberos brute-force (user/password enumeration)
@@ -174,6 +177,7 @@
         requests         # HTTP client used by various web tools
         wafw00f          # WAF detection CLI (also exposes a Python module)
         sqlmap           # SQL injection scanner (CLI; not top-level in nixpkgs)
+        pymetasploit3    # JSON-RPC client to msfrpcd (used by metasploit_* tools)
 	invoke
 	pynacl
 	paramiko

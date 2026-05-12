@@ -15,12 +15,13 @@ from .netexec import TOOLS as netexec_tools
 from .bloodhound import TOOLS as bloodhound_tools
 from .dispatch import TOOLS as dispatch_tools
 from .enum4linux_ng import TOOLS as enum4linux_ng_tools
+from .metasploit import TOOLS as metasploit_tools
 
 ALL_TOOLS = (
     triage_tools + static_tools + dynamic_tools + python_tools
     + exploit_tools + util_tools + network_tools + web_tools
     + kb_tools + netexec_tools + bloodhound_tools + dispatch_tools
-    + enum4linux_ng_tools
+    + enum4linux_ng_tools + metasploit_tools
 )
 
 

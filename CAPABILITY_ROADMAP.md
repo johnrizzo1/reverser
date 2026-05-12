@@ -12,9 +12,10 @@ Source context: gap analysis performed 2026-05-03 against the implementation on
 harness). The HTB-style engagement captured in `pentest_report_10.13.38.23.md`
 is referenced as a real-world failure case that motivates several items.
 
-**As of 2026-05-11:** 14 profiles registered, 69 MCP tools (66 unique), Claude
+**As of 2026-05-11:** 15 profiles registered, 77 MCP tools (75 unique), Claude
 + Ollama + LM Studio backends, per-target SQLite KB, session stop/resume,
-manager profile (sub-agent coordination), 438 passing tests.
+manager profile (sub-agent coordination), exploit profile + msfrpc bridge,
+~490 passing tests.
 
 ---
 
@@ -113,9 +114,12 @@ its spec / plan under `docs/superpowers/`.
   - **Status (2026-05-10):** `wafw00f_detect` MCP tool wired; installed via pip.
 
 ## Network Exploitation & Post-Exploitation
-- [ ] Metasploit / msfconsole integration (db_nmap → search → check → exploit)
-- [ ] msfvenom payload generation
-- [ ] searchsploit + automated CVE → PoC fetch → adapt → run loop
+- [x] Metasploit / msfconsole integration (db_nmap → search → check → exploit)
+  - **Status (2026-05-11):** Shipped as `metasploit_*` tools (start/stop/status/search/run/session). RPC-based; shared daemon + per-target workspace.
+- [x] msfvenom payload generation
+  - **Status (2026-05-11):** Shipped as `msfvenom_generate` tool; payloads land in `targets/<target>/loot/payloads/<name>-<sha8>.<ext>` with KB ArtifactFact.
+- [x] searchsploit + automated CVE → PoC fetch → adapt → run loop
+  - **Status (2026-05-11):** Shipped as `searchsploit_search` + `exploit` profile (6 skills: hunt/generate/try/handle session/report/wrap up).
 - [ ] C2 listener handling: Sliver / Mythic / pwncat-cs / socat
 - [ ] Pivoting: chisel / ligolo-ng / sshuttle wrappers
 - [ ] Payload tooling: donut, sRDI, shellcode encoders
@@ -186,11 +190,16 @@ its spec / plan under `docs/superpowers/`.
 Numbered in **execution order** — start with #1, then #2, etc. Original
 numbering from 2026-05-03 in parentheses.
 
-- [ ] **1. (was #2) — Metasploit + msfvenom + searchsploit bridge.** Wraps
-  msfconsole RPC (db_nmap → search → check → exploit), msfvenom payload
-  generation, and searchsploit + automated CVE → PoC → adapt → run loop.
-  Closes the "find a known exploit and try it" gap that's currently entirely
-  manual. Highest single-item ROI left; same shape and ~size as the AD pack.
+- [x] **1. (was #2) — Metasploit + msfvenom + searchsploit bridge.**
+  - **Status (2026-05-11):** Shipped. 8 MCP tools: `searchsploit_search`,
+    `msfvenom_generate`, `metasploit_{start,stop,status,search,run,session}`.
+    Shared msfrpcd daemon + per-target MSF workspace; auth at
+    `<targets_root>/.shared/msfrpc/auth.json` (0600); `metasploit_run`
+    always-check-first with `force=True` escape hatch; scope.toml enforced
+    BEFORE check fires; auto-finding written on successful exploit. New
+    `exploit` profile joins the manager dispatch pool (5 → 6 specialties).
+    Specs/plans: `2026-05-11-metasploit-bridge-design.md`,
+    `2026-05-11-metasploit-bridge.md`.
 
 - [x] **2. (was #4) — Per-target persistent KB.** ✅ shipped 2026-05-04.
   `targets/<ip-or-host>/state.db` SQLite tracking hosts/ports/services/
@@ -215,7 +224,7 @@ numbering from 2026-05-03 in parentheses.
   trigger after K failed exploitation attempts (the 10.13.38.23 report's
   failure mode). Small implementation, big behavior change.
 
-> **Remaining work order:** #1 → #3 → #5 (items #2 and #4 already complete).
+> **Remaining work order:** #3 → #5 (items #1, #2, and #4 already complete).
 
 ---
 
