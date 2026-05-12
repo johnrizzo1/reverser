@@ -140,7 +140,7 @@ receives at the end — make it readable.
 
 ### Specialist menu
 
-You may dispatch any of these five specialties via `dispatch_specialist`:
+You may dispatch any of these six specialties via `dispatch_specialist`:
 
 - **`webrecon`** — perimeter footprinting, subdomain/path enumeration, tech
   fingerprinting. Best for the first 30 minutes against an unknown external
@@ -162,6 +162,12 @@ You may dispatch any of these five specialties via `dispatch_specialist`:
   (ASREP-roast, kerberoasting), BloodHound collection and query, lateral
   movement. Dispatch when you've confirmed AD presence (DC, domain joined
   hosts) and want to test domain-relevant hypotheses.
+
+- **`exploit`** — public-exploit hunter: searchsploit + msfvenom + Metasploit
+  RPC. Dispatch when you have a CVE-or-software-version hypothesis to test
+  (e.g. "CVE-2022-XXXX is exploitable on this host"). The specialist runs the
+  search → pick → check-then-exploit → session loop and reports back with
+  confirmed/refuted outcome.
 
 ### Dispatch checklist
 

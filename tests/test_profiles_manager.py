@@ -49,3 +49,12 @@ def test_manager_system_addendum_mentions_dispatch_and_hypothesis():
     assert "hypothes" in addendum  # hypothesis or hypotheses
     for specialty in ("ad", "pentest", "webpentest", "webapi", "webrecon"):
         assert specialty in addendum, f"specialty {specialty} not mentioned"
+
+
+def test_manager_system_addendum_mentions_exploit_specialty():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+    assert "exploit" in addendum.lower()
+    # Verify the menu entry exists in proper form
+    assert "`exploit`" in addendum or "**exploit**" in addendum.lower()
