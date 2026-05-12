@@ -483,3 +483,73 @@ def test_wait_for_selector(tmp_targets_dir, monkeypatch):
     assert result.get("is_error") is not True
     fake_page.wait_for_selector.assert_called_once()
     wb._close_browser()
+
+
+def test_snapshot_returns_page_structure(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    fake_page = MagicMock()
+    fake_page.url = "https://example.com/dashboard"
+    fake_page.title.return_value = "Dashboard"
+    fake_page.accessibility.snapshot.return_value = {
+        "role": "WebArea", "name": "Dashboard",
+        "children": [{"role": "button", "name": "Logout"}],
+    }
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_snapshot, {})
+    text = result["content"][0]["text"]
+    assert "Dashboard" in text
+    assert "Logout" in text or "button" in text
+    wb._close_browser()
+
+
+def test_network_log_returns_recent_requests(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": MagicMock(), "target": "example.com",
+    })
+    wb._state["network_log"].append({
+        "method": "GET", "url": "https://example.com/api/users", "resource_type": "xhr",
+    })
+    wb._state["network_log"].append({
+        "method": "POST", "url": "https://example.com/api/login", "resource_type": "xhr",
+    })
+
+    result = _call(wb.web_browser_network_log, {})
+    text = result["content"][0]["text"]
+    assert "/api/users" in text
+    assert "/api/login" in text
+    wb._close_browser()
+
+
+def test_network_log_filter_url(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": MagicMock(), "target": "example.com",
+    })
+    wb._state["network_log"].extend([
+        {"method": "GET", "url": "https://example.com/api/users", "resource_type": "xhr"},
+        {"method": "GET", "url": "https://example.com/static/app.js", "resource_type": "script"},
+        {"method": "POST", "url": "https://example.com/api/login", "resource_type": "xhr"},
+    ])
+
+    result = _call(wb.web_browser_network_log, {"filter_url": "/api/"})
+    text = result["content"][0]["text"]
+    assert "/api/users" in text
+    assert "/api/login" in text
+    assert "/static/app.js" not in text
+    wb._close_browser()

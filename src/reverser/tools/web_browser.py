@@ -20,6 +20,7 @@ import atexit
 import hashlib
 import json
 import os
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -94,6 +95,8 @@ _state: dict[str, Any] = {
     "target": None,            # current target identifier
     "started_at": None,        # ISO timestamp
     "screenshots_taken": 0,
+    "network_log": deque(maxlen=200),   # recent requests
+    "console_errors": deque(maxlen=50), # recent console errors
 }
 
 
@@ -121,6 +124,19 @@ def _ensure_browser(target: str, viewport: tuple[int, int] = (1280, 800)):
         viewport={"width": viewport[0], "height": viewport[1]}
     )
     page = context.new_page()
+
+    # Install network + console listeners. Best-effort; failures don't break launch.
+    try:
+        page.on("request", lambda req: _state["network_log"].append({
+            "method": req.method, "url": req.url,
+            "resource_type": req.resource_type,
+        }))
+        page.on("console", lambda msg:
+            _state["console_errors"].append(msg.text) if msg.type == "error" else None
+        )
+    except Exception:
+        pass
+
     _state.update({
         "playwright": pw,
         "browser": browser,
@@ -146,6 +162,8 @@ def _close_browser() -> None:
     for k in ("playwright", "browser", "context", "page", "target", "started_at"):
         _state[k] = None
     _state["screenshots_taken"] = 0
+    _state["network_log"].clear()
+    _state["console_errors"].clear()
 
 
 # Register the cleanup hook so a process crash doesn't leak the browser
@@ -618,3 +636,94 @@ async def web_browser_wait_for(args: dict) -> dict:
 
 
 TOOLS.extend([web_browser_fill_form, web_browser_evaluate, web_browser_wait_for])
+
+
+@tool(
+    "web_browser_snapshot",
+    "Return a compact accessibility-tree snapshot of the current page — the "
+    "agent's 'look at the page' tool. Cheaper than reading full HTML. "
+    "Includes interactive elements and recent console errors.",
+    {"type": "object", "properties": {}, "required": []},
+)
+async def web_browser_snapshot(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    page = _state["page"]
+
+    def _do():
+        return {
+            "url": page.url,
+            "title": page.title(),
+            "ax_tree": page.accessibility.snapshot(),
+            "console_errors": list(_state["console_errors"])[-10:],
+        }
+
+    try:
+        snap = await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(f"snapshot failed: {type(e).__name__}: {e}")
+
+    # Compactly render the ax-tree as JSON. Truncate to keep token cost low.
+    tree_str = json.dumps(snap["ax_tree"], indent=2)
+    if len(tree_str) > 6000:
+        tree_str = tree_str[:6000] + "\n... [TRUNCATED — ax-tree too large; "\
+                                     "use evaluate(`document.querySelectorAll(...)`) instead]"
+
+    err_lines = "\n  ".join(snap["console_errors"]) or "(none)"
+    return format_tool_result(
+        f"Page snapshot:\n"
+        f"  url:    {snap['url']}\n"
+        f"  title:  {snap['title']}\n"
+        f"\n--- accessibility tree ---\n{tree_str}\n"
+        f"\n--- recent console errors ---\n  {err_lines}"
+    )
+
+
+@tool(
+    "web_browser_network_log",
+    "Return recent HTTP requests/responses seen by the browser. Critical "
+    "for API discovery — the SPA called /api/v2/users/me, that's not in "
+    "any path-fuzzing wordlist. last_n defaults to 50; filter_url is an "
+    "optional substring filter.",
+    {
+        "type": "object",
+        "properties": {
+            "last_n": {"type": "integer", "default": 50},
+            "filter_url": {"type": "string", "default": ""},
+        },
+        "required": [],
+    },
+)
+async def web_browser_network_log(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    last_n = int(args.get("last_n", 50))
+    filter_url = (args.get("filter_url") or "").strip()
+
+    requests = list(_state["network_log"])
+    if filter_url:
+        requests = [r for r in requests if filter_url in r["url"]]
+    requests = requests[-last_n:]
+
+    if not requests:
+        return format_tool_result("No requests logged.")
+
+    lines = [f"Recent {len(requests)} request(s):", ""]
+    for r in requests:
+        lines.append(f"  {r['method']:6s} {r['url']}  [{r['resource_type']}]")
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.extend([web_browser_snapshot, web_browser_network_log])
