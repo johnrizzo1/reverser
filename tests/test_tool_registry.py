@@ -55,12 +55,12 @@ def test_all_tools_count_after_manager_work():
     registered (66 unique). enum4linux_ng added post-merge = 69 registered,
     67 unique.
     """
-    assert len(ALL_TOOLS) == 71, (
-        f"expected 71 registered tools, got {len(ALL_TOOLS)}"
+    assert len(ALL_TOOLS) == 74, (
+        f"expected 74 registered tools, got {len(ALL_TOOLS)}"
     )
     unique_names = {t.name for t in ALL_TOOLS}
-    assert len(unique_names) == 69, (
-        f"expected 69 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
+    assert len(unique_names) == 72, (
+        f"expected 72 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
     )
 
 
@@ -77,3 +77,10 @@ def test_searchsploit_search_registered():
 def test_msfvenom_generate_registered():
     names = {t.name for t in ALL_TOOLS}
     assert "msfvenom_generate" in names
+
+
+def test_metasploit_lifecycle_tools_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "metasploit_start" in names
+    assert "metasploit_stop" in names
+    assert "metasploit_status" in names
