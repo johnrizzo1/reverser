@@ -379,3 +379,141 @@ async def msfvenom_generate(args: dict) -> dict:
 
 
 TOOLS.append(msfvenom_generate)
+
+
+# ── Pidfile + process liveness ──────────────────────────────────────
+
+def _read_pidfile() -> int | None:
+    """Read the pidfile or return None if missing/corrupted."""
+    path = _pidfile_path()
+    if not path.is_file():
+        return None
+    try:
+        return int(path.read_text().strip())
+    except (ValueError, OSError):
+        return None
+
+
+def _write_pidfile(pid: int) -> None:
+    """Atomically write the daemon PID."""
+    path = _pidfile_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(pid))
+
+
+def _remove_pidfile() -> None:
+    """Remove the pidfile; no-op if absent."""
+    path = _pidfile_path()
+    if path.is_file():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _process_alive(pid: int) -> bool:
+    """Return True iff signal 0 to pid succeeds (process exists)."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+# ── Start-lock (D11: concurrent-start serialization) ────────────────
+
+import fcntl
+
+
+@contextmanager
+def _start_lock():
+    """Acquire an fcntl flock on auth.json.lock for the duration of start.
+
+    Linux + macOS supported (fcntl.flock works on both). Windows is not
+    supported (msfrpcd doesn't run on Windows anyway).
+    """
+    lock_path = _lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield fd
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+
+
+# ── pymetasploit3 wrappers ──────────────────────────────────────────
+
+import time
+
+from ..kb.store import normalize_target
+
+
+def _make_msfrpc_client(auth: dict):
+    """Construct an authed pymetasploit3.MsfRpcClient.
+
+    Pulled out for test mocking — tests can monkey-patch this function to
+    avoid importing pymetasploit3 in the test process.
+    """
+    from pymetasploit3.msfrpc import MsfRpcClient
+    return MsfRpcClient(
+        auth["password"],
+        username=auth.get("user", DEFAULT_RPC_USER),
+        server=auth["host"],
+        port=auth["port"],
+        ssl=bool(auth.get("ssl", False)),
+    )
+
+
+def _wait_for_rpc_ready(auth: dict, *,
+                        timeout_seconds: int = _RPC_READY_TIMEOUT_DEFAULT) -> bool:
+    """Poll core.version every 1s up to timeout_seconds. Returns True on success."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            client = _make_msfrpc_client(auth)
+            _ = client.core.version
+            return True
+        except Exception:
+            time.sleep(1.0)
+    return False
+
+
+def _workspace_name_for(target: str) -> str:
+    """Return the MSF workspace name for a target.
+
+    Uses normalize_target (lowercase + strip) so the same target always maps
+    to the same workspace regardless of the casing the user typed.
+    """
+    return normalize_target(target)
+
+
+def _msf_client(target: str):
+    """Return an authed client with the per-target workspace active.
+
+    Workflow:
+      1. Read shared auth.
+      2. Construct authenticated MsfRpcClient.
+      3. Ensure workspace exists (workspace -a <name>; idempotent).
+      4. Switch active workspace (workspace <name>).
+      5. Return the client.
+    """
+    auth = _read_or_create_auth()
+    client = _make_msfrpc_client(auth)
+    ws = _workspace_name_for(target)
+
+    console = client.consoles.console()
+    try:
+        # workspace -a is idempotent in MSF (adds if missing, no-op if present)
+        console.run_with_output(f"workspace -a {ws}")
+        # Switch active
+        console.run_with_output(f"workspace {ws}")
+    except Exception:
+        # If the console layer fails, the client is still usable — return it
+        pass
+
+    return client
