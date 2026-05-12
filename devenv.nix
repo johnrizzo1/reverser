@@ -159,7 +159,7 @@
         openai
         angr
         capstone
-        unicorn
+        # unicorn       # disabled: wheel build fails on macOS py3.13; not imported anywhere in src/
         pwntools
         r2pipe
         rzpipe
@@ -172,7 +172,7 @@
         pefile
         malduck
         flare-floss
-        pyhidra
+        # pyhidra       # disabled: depends on Jpype1 which needs `ant` to build on macOS; not imported anywhere in src/
         ldap3
         impacket
         pycryptodome     # provides Crypto module — required by ldap3 NTLM auth
