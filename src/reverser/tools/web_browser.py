@@ -727,3 +727,86 @@ async def web_browser_network_log(args: dict) -> dict:
 
 
 TOOLS.extend([web_browser_snapshot, web_browser_network_log])
+
+
+# ── Composed workflow helpers ──────────────────────────────────────
+
+
+def _capture_to_finding(page, target: str, finding_id: int) -> dict:
+    """Screenshot → save → hash → record_artifact → append_finding_evidence.
+
+    Returns: {path, sha256, screenshot_index}
+    """
+    from ..kb import for_target as _for_target, ArtifactFact as _ArtifactFact
+
+    path = _next_screenshot_path(target, finding_id)
+    page.screenshot(path=str(path), full_page=True)
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    kb = _for_target(target)
+    kb.record_artifact(_ArtifactFact(
+        kind="screenshot", path=str(path), sha256=sha,
+        source_tool="web_browser",
+    ))
+    kb.append_finding_evidence(finding_id, str(path))
+    _state["screenshots_taken"] += 1
+    return {
+        "path": str(path),
+        "sha256": sha,
+        "screenshot_index": _state["screenshots_taken"],
+    }
+
+
+@tool(
+    "web_browser_capture_finding",
+    "Take a full-page screenshot of the current page, save it under "
+    "targets/<target>/findings/<finding_id>/screenshot-<n>.png, record an "
+    "ArtifactFact, and append the path to the finding's evidence_paths. "
+    "ONE call → deliverable-ready evidence.",
+    {
+        "type": "object",
+        "properties": {
+            "finding_id": {"type": "integer",
+                           "description": "Existing finding id to attach evidence to"},
+            "description": {"type": "string", "default": "",
+                            "description": "Optional context note (logged, not stored)"},
+        },
+        "required": ["finding_id"],
+    },
+)
+async def web_browser_capture_finding(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    finding_id = int(args["finding_id"])
+    description = args.get("description", "")
+    target = _state["target"]
+    page = _state["page"]
+
+    def _do():
+        return _capture_to_finding(page, target, finding_id)
+
+    try:
+        result = await asyncio.to_thread(_do)
+    except ValueError as e:
+        # Raised by append_finding_evidence when finding_id doesn't exist
+        return format_error(str(e))
+    except Exception as e:
+        return format_error(f"capture_finding failed: {type(e).__name__}: {e}")
+
+    desc_note = f"  description:      {description}\n" if description else ""
+    return format_tool_result(
+        f"Screenshot captured.\n"
+        f"  finding_id:       {finding_id}\n"
+        f"  path:             {result['path']}\n"
+        f"  sha256:           {result['sha256']}\n"
+        f"  screenshot_index: {result['screenshot_index']}\n"
+        f"{desc_note}"
+    )
+
+
+TOOLS.append(web_browser_capture_finding)

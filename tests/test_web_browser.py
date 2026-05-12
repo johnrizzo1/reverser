@@ -553,3 +553,48 @@ def test_network_log_filter_url(tmp_targets_dir, monkeypatch):
     assert "/api/login" in text
     assert "/static/app.js" not in text
     wb._close_browser()
+
+
+def test_capture_finding_writes_screenshot_and_artifact(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    from reverser.kb import for_target, FindingFact
+    wb._close_browser()
+
+    # First create a real finding for the artifact append to land on
+    kb = for_target("10.10.10.5")
+    fid = kb.record_finding(FindingFact(
+        title="Test finding", severity="high", description="",
+    ))
+
+    fake_page = MagicMock()
+    def fake_screenshot(path, full_page):
+        Path(path).write_bytes(b"\x89PNGfake-screenshot-bytes")
+    fake_page.screenshot.side_effect = fake_screenshot
+
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "10.10.10.5",
+    })
+
+    result = _call(wb.web_browser_capture_finding, {
+        "finding_id": fid, "description": "Confirmed XSS in /search",
+    })
+
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "screenshot-1.png" in text
+    assert "sha256" in text.lower()
+
+    # Artifact was recorded
+    artifacts = kb.get_artifacts()
+    assert len(artifacts) == 1
+    assert artifacts[0].kind == "screenshot"
+    assert artifacts[0].source_tool == "web_browser"
+
+    # Finding's evidence_paths updated
+    findings = kb.get_findings()
+    assert len(findings) == 1
+    assert any("screenshot-1.png" in p for p in findings[0].evidence_paths)
+    wb._close_browser()
