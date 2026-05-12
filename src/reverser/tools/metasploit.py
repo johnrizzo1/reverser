@@ -517,3 +517,114 @@ def _msf_client(target: str):
         pass
 
     return client
+
+
+# ── Lifecycle tools: start / stop / status ──────────────────────────
+
+import signal
+
+
+@tool(
+    "metasploit_start",
+    "Start the shared msfrpcd daemon (if not already running) and activate "
+    "the per-target MSF workspace. Idempotent: returns 'already_running' "
+    "if the daemon is up. Stale pidfiles are auto-recovered. The daemon "
+    "binds 127.0.0.1:55553 with a random 32-char password persisted at "
+    "<targets_root>/.shared/msfrpc/auth.json (mode 0600).",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string",
+                       "description": "Target identifier — determines the MSF workspace"},
+        },
+        "required": ["target"],
+    },
+)
+async def metasploit_start(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    target = args["target"]
+
+    with _start_lock():
+        existing_pid = _read_pidfile()
+        if existing_pid is not None and _process_alive(existing_pid):
+            # Already running — just activate the workspace.
+            try:
+                _msf_client(target)
+            except Exception:
+                pass  # workspace activation is best-effort here
+            auth = _read_or_create_auth()
+            return format_tool_result(
+                f"msfrpcd already running.\n"
+                f"  status:    already_running\n"
+                f"  pid:       {existing_pid}\n"
+                f"  workspace: {_workspace_name_for(target)}\n"
+                f"  rpc_url:   http{'s' if auth['ssl'] else ''}"
+                f"://{auth['host']}:{auth['port']}\n"
+                f"  rpc_user:  {auth['user']}"
+            )
+
+        stale_recovered = False
+        if existing_pid is not None and not _process_alive(existing_pid):
+            _remove_pidfile()
+            stale_recovered = True
+
+        auth = _read_or_create_auth()
+
+        cmd = [
+            "msfrpcd",
+            "-U", auth["user"],
+            "-P", auth["password"],
+            "-a", auth["host"],
+            "-p", str(auth["port"]),
+            "-S",   # no SSL (D9)
+            "-f",   # foreground (so we can capture pid)
+        ]
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except FileNotFoundError:
+            return format_error(
+                "msfrpcd not found in PATH. Install metasploit-framework."
+            )
+
+        if not _wait_for_rpc_ready(auth):
+            # Daemon failed to come up — kill it and clean up
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+            return format_error(
+                "msfrpcd did not become RPC-ready within "
+                f"{_RPC_READY_TIMEOUT_DEFAULT}s. Daemon killed; pidfile not written."
+            )
+
+        _write_pidfile(proc.pid)
+
+        try:
+            _msf_client(target)  # activate workspace
+        except Exception:
+            pass  # daemon is up; workspace setup is best-effort
+
+        status = "recovered_stale_pidfile" if stale_recovered else "started"
+        return format_tool_result(
+            f"msfrpcd started.\n"
+            f"  status:    {status}\n"
+            f"  pid:       {proc.pid}\n"
+            f"  workspace: {_workspace_name_for(target)}\n"
+            f"  rpc_url:   http{'s' if auth['ssl'] else ''}"
+            f"://{auth['host']}:{auth['port']}\n"
+            f"  rpc_user:  {auth['user']}"
+        )
+
+
+TOOLS.append(metasploit_start)
