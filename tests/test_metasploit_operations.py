@@ -345,3 +345,129 @@ def test_run_failed_exploit_no_finding(tmp_targets_dir, monkeypatch):
     kb = for_target("10.10.10.5")
     findings = kb.get_findings(severity="high")
     assert len(findings) == 0
+
+
+# ── metasploit_session ──────────────────────────────────────────────
+
+
+def test_session_list(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_session, _write_pidfile
+    _write_pidfile(os.getpid())
+
+    fake_client = MagicMock()
+    fake_client.sessions.list = {
+        "1": {"type": "meterpreter", "target_host": "10.10.10.5"},
+        "2": {"type": "shell", "target_host": "10.10.10.6"},
+    }
+    with patch("reverser.tools.metasploit._make_msfrpc_client",
+               return_value=fake_client):
+        result = _call(metasploit_session, {"action": "list"})
+
+    text = result["content"][0]["text"]
+    assert "1" in text and "meterpreter" in text
+    assert "2" in text and "shell" in text
+
+
+def test_session_cmd_captures_output(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_session, _write_pidfile
+    _write_pidfile(os.getpid())
+
+    fake_session = MagicMock()
+    fake_session.run_with_output.return_value = "root\n"
+    fake_client = MagicMock()
+    fake_client.sessions.session.return_value = fake_session
+    fake_client.sessions.list = {"1": {"type": "shell", "target_host": "10.10.10.5"}}
+    with patch("reverser.tools.metasploit._make_msfrpc_client",
+               return_value=fake_client):
+        result = _call(metasploit_session, {
+            "action": "cmd",
+            "session_id": 1,
+            "command": "whoami",
+        })
+
+    text = result["content"][0]["text"]
+    assert "root" in text
+
+
+def test_session_cmd_timeout_marked_partial(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_session, _write_pidfile
+    _write_pidfile(os.getpid())
+
+    fake_session = MagicMock()
+    # Simulate timeout: run_with_output raises a TimeoutError (or generic exc)
+    fake_session.run_with_output.side_effect = TimeoutError("timed out")
+    fake_client = MagicMock()
+    fake_client.sessions.session.return_value = fake_session
+    fake_client.sessions.list = {"1": {"type": "shell", "target_host": "10.10.10.5"}}
+    with patch("reverser.tools.metasploit._make_msfrpc_client",
+               return_value=fake_client):
+        result = _call(metasploit_session, {
+            "action": "cmd",
+            "session_id": 1,
+            "command": "sleep 1000",
+            "timeout_seconds": 5,
+        })
+
+    text = result["content"][0]["text"]
+    assert "partial" in text.lower() or "timeout" in text.lower()
+
+
+def test_session_close(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_session, _write_pidfile
+    _write_pidfile(os.getpid())
+
+    fake_session = MagicMock()
+    fake_client = MagicMock()
+    fake_client.sessions.session.return_value = fake_session
+    fake_client.sessions.list = {"1": {"type": "shell", "target_host": "10.10.10.5"}}
+    with patch("reverser.tools.metasploit._make_msfrpc_client",
+               return_value=fake_client):
+        result = _call(metasploit_session, {
+            "action": "close",
+            "session_id": 1,
+        })
+
+    text = result["content"][0]["text"]
+    assert "closed" in text.lower()
+    fake_session.stop.assert_called()
+
+
+def test_session_cmd_requires_session_id(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_session, _write_pidfile
+    _write_pidfile(os.getpid())
+    result = _call(metasploit_session, {"action": "cmd", "command": "whoami"})
+    assert result.get("is_error") is True
+    assert "session_id" in result["content"][0]["text"].lower()
+
+
+def test_session_cmd_requires_command(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_session, _write_pidfile
+    _write_pidfile(os.getpid())
+    result = _call(metasploit_session, {"action": "cmd", "session_id": 1})
+    assert result.get("is_error") is True
+    assert "command" in result["content"][0]["text"].lower()
+
+
+def test_session_unknown_session(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_session, _write_pidfile
+    _write_pidfile(os.getpid())
+
+    fake_client = MagicMock()
+    fake_client.sessions.list = {}
+    with patch("reverser.tools.metasploit._make_msfrpc_client",
+               return_value=fake_client):
+        result = _call(metasploit_session, {
+            "action": "cmd",
+            "session_id": 999,
+            "command": "whoami",
+        })
+
+    text = result["content"][0]["text"]
+    assert "not_found" in text.lower() or "not found" in text.lower()

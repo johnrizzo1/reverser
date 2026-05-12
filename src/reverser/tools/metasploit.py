@@ -1193,3 +1193,115 @@ async def metasploit_run(args: dict) -> dict:
 
 
 TOOLS.append(metasploit_run)
+
+
+@tool(
+    "metasploit_session",
+    "Interact with a Metasploit session opened by metasploit_run. Actions: "
+    "list (enumerate), cmd (single command, captured up to timeout_seconds), "
+    "close (kill session). Single command per cmd call — no interactive REPL. "
+    "Sessions die when metasploit_stop runs.",
+    {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "cmd", "close"]},
+            "session_id": {"type": "integer",
+                           "description": "Required for cmd/close"},
+            "command": {"type": "string",
+                        "description": "Required for cmd"},
+            "timeout_seconds": {"type": "integer", "default": 30,
+                                "description": "Max time to wait for cmd output"},
+        },
+        "required": ["action"],
+    },
+)
+async def metasploit_session(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    err = _require_daemon_running()
+    if err:
+        return err
+
+    action = args["action"]
+    session_id = args.get("session_id")
+    command = args.get("command") or ""
+    timeout = int(args.get("timeout_seconds", 30))
+
+    # Validate required args early, before connecting to msfrpcd
+    if action in ("cmd", "close") and session_id is None:
+        return format_error("action=cmd|close requires session_id argument.")
+    if action == "cmd" and not command:
+        return format_error("action=cmd requires command argument.")
+
+    try:
+        auth = _read_or_create_auth()
+        client = _make_msfrpc_client(auth)
+    except Exception as e:
+        return format_error(f"failed to connect to msfrpcd: "
+                            f"{type(e).__name__}: {e}")
+
+    if action == "list":
+        try:
+            sessions = client.sessions.list or {}
+        except Exception as e:
+            return format_error(f"sessions.list failed: {e}")
+        if not sessions:
+            return format_tool_result("No open sessions.")
+        lines = [f"Open sessions ({len(sessions)}):"]
+        for sid, info in sessions.items():
+            i = info or {}
+            lines.append(
+                f"  [{sid}] type={i.get('type','?')}  "
+                f"target_host={i.get('target_host','?')}  "
+                f"opened_at={i.get('opened_at','?')}"
+            )
+        return format_tool_result("\n".join(lines))
+
+    sid_key = str(session_id)
+    sessions = client.sessions.list or {}
+    if sid_key not in sessions:
+        return format_tool_result(
+            f"Session {session_id} not found.\n  status: not_found"
+        )
+
+    try:
+        session = client.sessions.session(sid_key)
+    except Exception as e:
+        return format_error(f"failed to get session {session_id}: "
+                            f"{type(e).__name__}: {e}")
+
+    if action == "cmd":
+        try:
+            output = session.run_with_output(command, timeout=timeout)
+            return format_tool_result(
+                f"Session {session_id} output (cmd={command!r}):\n"
+                f"  status: open\n"
+                f"---\n{output}"
+            )
+        except TimeoutError as e:
+            return format_tool_result(
+                f"Session {session_id} cmd={command!r}: TIMEOUT after {timeout}s\n"
+                f"  status: open (output partial; re-invoke to wait longer)\n"
+                f"  error:  {e}"
+            )
+        except Exception as e:
+            return format_error(
+                f"session.run_with_output failed: {type(e).__name__}: {e}"
+            )
+
+    if action == "close":
+        try:
+            session.stop()
+        except Exception as e:
+            return format_error(f"session.stop failed: {type(e).__name__}: {e}")
+        return format_tool_result(
+            f"Session {session_id} closed.\n  status: closed"
+        )
+
+    return format_error(f"Unknown action: {action!r}. Valid: list, cmd, close")
+
+
+TOOLS.append(metasploit_session)
