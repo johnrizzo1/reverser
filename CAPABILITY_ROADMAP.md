@@ -12,10 +12,10 @@ Source context: gap analysis performed 2026-05-03 against the implementation on
 harness). The HTB-style engagement captured in `pentest_report_10.13.38.23.md`
 is referenced as a real-world failure case that motivates several items.
 
-**As of 2026-05-11:** 15 profiles registered, 77 MCP tools (75 unique), Claude
+**As of 2026-05-12:** 15 profiles registered, 77 MCP tools (75 unique), Claude
 + Ollama + LM Studio backends, per-target SQLite KB, session stop/resume,
 manager profile (sub-agent coordination), exploit profile + msfrpc bridge,
-~490 passing tests.
+524 passing tests.
 
 ---
 
@@ -24,9 +24,23 @@ manager profile (sub-agent coordination), exploit profile + msfrpc bridge,
 Major capabilities added after the initial roadmap was written. Each links to
 its spec / plan under `docs/superpowers/`.
 
+- **Exploit profile + Metasploit bridge** (2026-05-11 / -12) — closes Top 5 #1.
+  8 new MCP tools wrapping `searchsploit`, `msfvenom`, and the `msfrpcd`
+  RPC daemon: `searchsploit_search`, `msfvenom_generate`, and
+  `metasploit_{start,stop,status,search,run,session}`. Shared msfrpcd daemon
+  at `127.0.0.1:55553` with per-target MSF workspaces; auth at
+  `<targets_root>/.shared/msfrpc/auth.json` (mode 0600); `fcntl.flock`
+  serializes concurrent starts. `metasploit_run` is always-check-first
+  with a `force=True` escape hatch; `scope.toml` enforced BEFORE the check
+  fires; auto-`FindingFact(severity=high)` written on confirmed exploits;
+  payloads land in `targets/<target>/loot/payloads/<name>-<sha8>.<ext>` as
+  `ArtifactFact`s. New `exploit` profile joins the manager dispatch pool
+  (5 → 6 specialties) with 6 skills (Hunt/Generate payload/Try exploit/
+  Handle session/Report/Wrap up). Specs/plans:
+  `2026-05-11-metasploit-bridge-{design,plan}.md`.
 - **Manager profile + sub-agent dispatch** (2026-05-09 / -10) — `manager`
   profile coordinates specialist sub-agents (ad/pentest/webpentest/webapi/
-  webrecon) via the SDK Task primitive. Maintains a hypothesis tree
+  webrecon/exploit) via the SDK Task primitive. Maintains a hypothesis tree
   (`hypotheses` table in the per-target KB) with 4 CRUD tools + tree-rendering.
   17-tool allowlist enforced; specialists invoked via `dispatch_specialist`
   with per-dispatch budget caps. 6 manager skills (Kickoff/Status/Report/
