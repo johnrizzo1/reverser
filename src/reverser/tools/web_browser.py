@@ -376,3 +376,93 @@ async def web_browser_navigate(args: dict) -> dict:
 
 
 TOOLS.append(web_browser_navigate)
+
+
+@tool(
+    "web_browser_click",
+    "Click an element on the current page. Selector is CSS or Playwright's "
+    "text=/role= form (e.g. 'text=Login', 'role=button[name=\"Submit\"]').",
+    {
+        "type": "object",
+        "properties": {
+            "selector": {"type": "string"},
+            "timeout_ms": {"type": "integer", "default": 5000},
+        },
+        "required": ["selector"],
+    },
+)
+async def web_browser_click(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    selector = args["selector"]
+    timeout_ms = int(args.get("timeout_ms", 5000))
+    page = _state["page"]
+
+    def _do():
+        page.click(selector, timeout=timeout_ms)
+        return page.url
+
+    try:
+        post_url = await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(f"Click failed on {selector!r}: {type(e).__name__}: {e}")
+
+    return format_tool_result(
+        f"Clicked.\n  selector:       {selector}\n  post_click_url: {post_url}"
+    )
+
+
+@tool(
+    "web_browser_type",
+    "Type text into an input element. clear_first=True (default) uses "
+    "Playwright's fill() which replaces existing value; clear_first=False "
+    "uses type() which appends.",
+    {
+        "type": "object",
+        "properties": {
+            "selector": {"type": "string"},
+            "text": {"type": "string"},
+            "clear_first": {"type": "boolean", "default": True},
+            "timeout_ms": {"type": "integer", "default": 5000},
+        },
+        "required": ["selector", "text"],
+    },
+)
+async def web_browser_type(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    selector = args["selector"]
+    text = args["text"]
+    clear_first = bool(args.get("clear_first", True))
+    timeout_ms = int(args.get("timeout_ms", 5000))
+    page = _state["page"]
+
+    def _do():
+        if clear_first:
+            page.fill(selector, text, timeout=timeout_ms)
+        else:
+            page.type(selector, text, timeout=timeout_ms)
+
+    try:
+        await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(f"Type failed on {selector!r}: {type(e).__name__}: {e}")
+
+    return format_tool_result(
+        f"Typed.\n  selector:    {selector}\n  text_length: {len(text)}"
+    )
+
+
+TOOLS.extend([web_browser_click, web_browser_type])

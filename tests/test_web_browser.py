@@ -387,3 +387,40 @@ def test_navigate_without_browser_returns_error(tmp_targets_dir, monkeypatch):
     result = _call(wb.web_browser_navigate, {"url": "https://example.com"})
     assert result.get("is_error") is True
     assert "start" in result["content"][0]["text"].lower()
+
+
+def test_click_calls_page_click(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    fake_page = MagicMock()
+    fake_page.url = "https://example.com/clicked"
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_click, {"selector": "button.submit"})
+    assert result.get("is_error") is not True
+    fake_page.click.assert_called_once_with("button.submit", timeout=5000)
+    wb._close_browser()
+
+
+def test_type_clears_then_types(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    fake_page = MagicMock()
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_type, {
+        "selector": "input[name='username']", "text": "admin",
+    })
+    assert result.get("is_error") is not True
+    fake_page.fill.assert_called()  # clear_first=True default uses fill (which replaces)
+    wb._close_browser()
