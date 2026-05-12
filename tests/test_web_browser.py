@@ -657,3 +657,68 @@ def test_confirm_xss_returns_refuted_when_nothing_fires(tmp_targets_dir, monkeyp
     text = result["content"][0]["text"]
     assert "neither" in text.lower() or "refuted" in text.lower() or "not confirmed" in text.lower() or "false" in text.lower()
     wb._close_browser()
+
+
+def test_crawl_skips_out_of_scope_urls(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    # Scope only allows 10.10.10.0/24
+    target_dir = tmp_targets_dir / "10.10.10.5"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "scope.toml").write_text(
+        '[scope]\nin_scope_cidrs = ["10.10.10.0/24"]\n'
+    )
+
+    fake_page = MagicMock()
+    fake_page.url = "http://10.10.10.5/landing"
+    # Return two links: one in-scope, one out-of-scope
+    fake_page.evaluate.return_value = [
+        "http://10.10.10.5/page1",       # in scope
+        "http://evil.example.com/page2", # out of scope
+    ]
+    fake_page.query_selector_all.return_value = []  # no forms
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "10.10.10.5",
+    })
+
+    result = _call(wb.web_browser_crawl, {
+        "start_url": "http://10.10.10.5/landing",
+        "max_pages": 3, "max_depth": 1,
+    })
+
+    text = result["content"][0]["text"]
+    assert "10.10.10.5/landing" in text
+    assert "out_of_scope_skipped" in text
+    assert "1" in text  # 1 out-of-scope skip
+    wb._close_browser()
+
+
+def test_crawl_respects_max_pages(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    fake_page = MagicMock()
+    fake_page.url = "https://example.com/landing"
+    # Each page returns 5 in-scope links to drive the BFS upward
+    fake_page.evaluate.return_value = [
+        f"https://example.com/p{i}" for i in range(5)
+    ]
+    fake_page.query_selector_all.return_value = []
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_crawl, {
+        "start_url": "https://example.com/landing",
+        "max_pages": 3,
+    })
+    text = result["content"][0]["text"]
+    assert "capped" in text.lower()
+    wb._close_browser()

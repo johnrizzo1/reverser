@@ -930,3 +930,150 @@ async def web_browser_confirm_xss(args: dict) -> dict:
 
 
 TOOLS.append(web_browser_confirm_xss)
+
+
+@tool(
+    "web_browser_crawl",
+    "BFS crawl with JS rendering. Follows links, optionally fills forms "
+    "with placeholder values to discover routes. Scope-checked per URL "
+    "(out-of-scope silently skipped, counted). Hard caps: max_pages, "
+    "max_depth, same_origin. Returns discovered URLs/forms/APIs — does "
+    "NOT auto-write to KB (agent decides what to persist).",
+    {
+        "type": "object",
+        "properties": {
+            "start_url": {"type": "string"},
+            "max_pages": {"type": "integer", "default": 30},
+            "max_depth": {"type": "integer", "default": 2},
+            "same_origin": {"type": "boolean", "default": True},
+            "fill_forms": {"type": "boolean", "default": False},
+        },
+        "required": ["start_url"],
+    },
+)
+async def web_browser_crawl(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    start_url = args["start_url"]
+    max_pages = int(args.get("max_pages", 30))
+    max_depth = int(args.get("max_depth", 2))
+    same_origin = bool(args.get("same_origin", True))
+    fill_forms = bool(args.get("fill_forms", False))
+
+    target = _state["target"]
+    page = _state["page"]
+
+    from ..kb.scope import ScopeError
+
+    start_origin = urlparse(start_url).netloc
+
+    def _do():
+        visited: list[str] = []
+        forms: list[dict] = []
+        queue: list[tuple[str, int]] = [(start_url, 0)]  # (url, depth)
+        seen: set[str] = set()
+        out_of_scope = 0
+        api_set: set[str] = set()
+        # Snapshot network log before crawl so we can diff to find APIs
+        baseline_net = len(_state["network_log"])
+
+        while queue and len(visited) < max_pages:
+            url, depth = queue.pop(0)
+            if url in seen:
+                continue
+            seen.add(url)
+
+            try:
+                _assert_url_in_scope(url, target)
+            except ScopeError:
+                out_of_scope += 1
+                continue
+
+            if same_origin and urlparse(url).netloc != start_origin:
+                continue
+
+            try:
+                page.goto(url, wait_until="load", timeout=15000)
+                visited.append(url)
+            except Exception:
+                continue
+
+            # Find forms (best-effort)
+            try:
+                form_els = page.query_selector_all("form")
+                for fe in form_els:
+                    forms.append({
+                        "action": fe.get_attribute("action") or url,
+                        "method": (fe.get_attribute("method") or "GET").upper(),
+                    })
+                    if fill_forms:
+                        # Fill inputs with placeholder values to potentially
+                        # discover server-side routes
+                        try:
+                            inputs = fe.query_selector_all("input")
+                            for inp in inputs:
+                                t = inp.get_attribute("type") or "text"
+                                if t in ("text", "email", "search"):
+                                    inp.fill("test")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            if depth < max_depth:
+                try:
+                    links = page.evaluate(
+                        "() => Array.from(document.querySelectorAll('a[href]'))"
+                        ".map(a => a.href).filter(u => u.startsWith('http'))"
+                    ) or []
+                    for link in links:
+                        if link not in seen:
+                            queue.append((link, depth + 1))
+                except Exception:
+                    pass
+
+        # Diff network log to extract APIs called during the crawl
+        new_requests = list(_state["network_log"])[baseline_net:]
+        for r in new_requests:
+            if r["resource_type"] in ("xhr", "fetch"):
+                api_set.add(r["url"])
+
+        return {
+            "pages_visited": visited,
+            "forms_discovered": forms,
+            "apis_called": sorted(api_set),
+            "out_of_scope_skipped": out_of_scope,
+            "capped": len(visited) >= max_pages,
+        }
+
+    try:
+        result = await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(f"crawl failed: {type(e).__name__}: {e}")
+
+    lines = [
+        f"Crawl complete:",
+        f"  pages_visited:        {len(result['pages_visited'])}",
+        f"  forms_discovered:     {len(result['forms_discovered'])}",
+        f"  apis_called:          {len(result['apis_called'])}",
+        f"  out_of_scope_skipped: {result['out_of_scope_skipped']}",
+        f"  capped:               {result['capped']}",
+        "",
+        "Visited URLs:",
+    ]
+    for u in result["pages_visited"][:30]:
+        lines.append(f"  {u}")
+    if result["apis_called"]:
+        lines.append("\nAPI endpoints observed:")
+        for u in result["apis_called"][:20]:
+            lines.append(f"  {u}")
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(web_browser_crawl)
