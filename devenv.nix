@@ -267,7 +267,19 @@
   '';
 
   enterShell = ''
-    pip install -q --no-deps -e "$REVERSER_HOME" 2>/dev/null || true
+    # Defensive venv-bin discovery: devenv normally prepends the venv to PATH
+    # before this hook runs, but cached-shell entries can skip that step,
+    # leaving pip / nxc / pytest unreachable. Resolve venv/bin explicitly and
+    # use absolute paths so the hook works regardless of activation timing.
+    VENV_BIN="$DEVENV_ROOT/.devenv/state/venv/bin"
+    if [ -d "$VENV_BIN" ]; then
+      case ":$PATH:" in
+        *":$VENV_BIN:"*) : ;;
+        *) export PATH="$VENV_BIN:$PATH" ;;
+      esac
+    fi
+
+    "$VENV_BIN/pip" install -q --no-deps -e "$REVERSER_HOME" 2>/dev/null || true
 
     # NetExec (nxc): install from upstream git into the venv so the `nxc`
     # binary lands in venv/bin and is reachable on PATH. Idempotent — only
@@ -276,8 +288,8 @@
     # broken on this channel, so explicit pip-from-git is the fallback.
     if ! command -v nxc >/dev/null 2>&1; then
       echo "Installing NetExec (nxc) into venv from upstream git..."
-      if pip install -q --upgrade "git+https://github.com/Pennyw0rth/NetExec.git@v1.5.1"; then
-        echo "  ✓ NetExec installed: $(nxc --version 2>&1 | head -1)"
+      if "$VENV_BIN/pip" install -q --upgrade "git+https://github.com/Pennyw0rth/NetExec.git@v1.5.1"; then
+        echo "  ✓ NetExec installed: $("$VENV_BIN/nxc" --version 2>&1 | head -1)"
       else
         echo "  ✗ NetExec install failed — install manually with:"
         echo "    pip install git+https://github.com/Pennyw0rth/NetExec.git"
