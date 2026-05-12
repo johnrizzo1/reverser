@@ -53,5 +53,35 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# ── Scope enforcement ──────────────────────────────────────────────
+
+
+def _assert_url_in_scope(url: str, target: str) -> None:
+    """Parse URL, extract host, route through scope.toml. Raises ScopeError on violation.
+
+    Per spec D8 + §6.3. Used by web_browser_navigate and web_browser_crawl
+    (per discovered URL). Relative URLs / data: URIs have no host and are
+    not blocked (Playwright resolves them against the current origin).
+
+    If no scope.toml exists for the target, no enforcement happens
+    (existing convention from kb/scope.py).
+    """
+    from ..kb.scope import load_scope, ScopeError
+    scope = load_scope(target)
+    if scope is None:
+        return
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        return
+    try:
+        scope.assert_in_scope(host)
+    except ScopeError as e:
+        raise ScopeError(
+            f"web_browser refusing to navigate to {url!r} — "
+            f"host {host!r} is out of scope. ({e})"
+        )
+
+
 # Tools list — populated as @tool handlers are added in subsequent tasks
 TOOLS: list = []
