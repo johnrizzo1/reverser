@@ -53,14 +53,14 @@ def test_all_tools_count_after_manager_work():
     `nikto_scan` were each registered twice as a pre-existing quirk).
     Manager work added 4 hypothesis CRUD + 1 dispatch_specialist = 68
     registered (66 unique). enum4linux_ng added post-merge = 69 registered,
-    67 unique.
+    67 unique. web_browser_* tools (14) added = 91 registered, 89 unique.
     """
-    assert len(ALL_TOOLS) == 77, (
-        f"expected 77 registered tools, got {len(ALL_TOOLS)}"
+    assert len(ALL_TOOLS) == 91, (
+        f"expected 91 registered tools, got {len(ALL_TOOLS)}"
     )
     unique_names = {t.name for t in ALL_TOOLS}
-    assert len(unique_names) == 75, (
-        f"expected 75 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
+    assert len(unique_names) == 89, (
+        f"expected 89 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
     )
 
 
@@ -99,3 +99,17 @@ def test_all_eight_metasploit_bridge_tools_registered():
                  "metasploit_start", "metasploit_stop", "metasploit_status",
                  "metasploit_search", "metasploit_run", "metasploit_session"):
         assert name in names, f"missing tool: {name}"
+
+
+def test_all_web_browser_tools_registered():
+    """All 14 web_browser_* tools are in the registry."""
+    names = {t.name for t in ALL_TOOLS}
+    expected = {
+        "web_browser_start", "web_browser_status", "web_browser_close",
+        "web_browser_navigate", "web_browser_click", "web_browser_type",
+        "web_browser_fill_form", "web_browser_evaluate", "web_browser_wait_for",
+        "web_browser_snapshot", "web_browser_network_log",
+        "web_browser_capture_finding", "web_browser_confirm_xss", "web_browser_crawl",
+    }
+    missing = expected - names
+    assert not missing, f"missing web_browser tools: {missing}"
