@@ -63,9 +63,18 @@
     #   pipx install git+https://github.com/cddmp/enum4linux-ng.git
     # On Linux, samba builds OK — re-enable the `enum4linux-ng` package
     # here (it's wired into reverser as the `enum4linux_ng` MCP tool).
-    # netexec (nxc) is installed from PyPI in the Python venv below — the
-    # nixpkgs build is currently marked broken on this channel. Upstream's
-    # recommended install method is `pip install netexec` anyway.
+    # netexec (nxc) is installed via pip-from-git in the enterShell hook
+    # below, NOT from nixpkgs. Nixpkgs does carry `pkgs.netexec` (visible via
+    # `nix search`) but it's marked `meta.broken = true` on this channel
+    # because a transitive Python dep — `psrpcore` via `pypsrp` — fails its
+    # test suite in the Nix sandbox with `OSError: AF_UNIX path too long`
+    # (Nix store paths exceed the ~104-byte AF_UNIX socket name limit on
+    # macOS). Nothing wrong with netexec itself. Bypassing the broken flag
+    # would require nixpkgs.config.allowBroken=true plus a doCheck=false
+    # override on psrpcore — two layers of risk for an older version
+    # (nixpkgs has 1.4.0; pip-from-git pins us to v1.5.1). When upstream
+    # nixpkgs fixes the psrpcore test, swap to `pkgs.netexec` here and drop
+    # the enterShell hook.
     # Exploit-db + Metasploit bridge (Top 5 #1)
     # Note: nixpkgs attribute is `metasploit` (package's display name is
     # "metasploit-framework" but the attribute path is `pkgs.metasploit`).
