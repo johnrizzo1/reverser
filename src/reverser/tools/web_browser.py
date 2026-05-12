@@ -152,5 +152,51 @@ def _close_browser() -> None:
 atexit.register(_close_browser)
 
 
-# Tools list — populated as @tool handlers are added in subsequent tasks
+# ── Tool imports (lazy — only when we have a real @tool to register) ─
+
+
+from claude_agent_sdk import tool
+
+from ..kb import require_pentest_auth, AuthorizationError
+from ._common import format_tool_result, format_error
+
+
+# ── Tools: lifecycle ───────────────────────────────────────────────
+
+
+@tool(
+    "web_browser_status",
+    "Report browser state. Read-only: does not launch a browser, does not "
+    "modify state. Returns running/not-running, current URL, target, screenshots taken.",
+    {"type": "object", "properties": {}, "required": []},
+)
+async def web_browser_status(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    running = bool(_state["browser"]) and _state["browser"].is_connected() if _state["browser"] else False
+
+    if not running:
+        return format_tool_result(
+            "web_browser status:\n"
+            "  daemon:  not_running\n"
+            "  start with: web_browser_start(target)"
+        )
+
+    page = _state["page"]
+    current_url = page.url if page else "<unknown>"
+    lines = [
+        "web_browser status:",
+        f"  daemon:            running",
+        f"  target:            {_state['target']}",
+        f"  current_url:       {current_url}",
+        f"  started_at:        {_state['started_at']}",
+        f"  screenshots_taken: {_state['screenshots_taken']}",
+    ]
+    return format_tool_result("\n".join(lines))
+
+
 TOOLS: list = []
+TOOLS.append(web_browser_status)

@@ -169,3 +169,62 @@ def test_close_browser_is_idempotent(tmp_targets_dir):
     # Call again — should not raise
     wb._close_browser()
     assert wb._state["browser"] is None
+
+
+import asyncio
+
+
+def _call(tool_obj, args):
+    """Invoke a @tool-decorated SdkMcpTool object synchronously for testing."""
+    fn = getattr(tool_obj, "handler", None) or getattr(tool_obj, "fn", None) or tool_obj
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(fn(args))
+    finally:
+        loop.close()
+
+
+def test_status_when_browser_not_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()  # ensure clean state
+
+    result = _call(wb.web_browser_status, {})
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "not running" in text.lower() or "not_running" in text.lower()
+
+
+def test_status_when_browser_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    fake_page = MagicMock()
+    fake_page.url = "https://example.com/page"
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser,
+        "page": fake_page,
+        "target": "10.10.10.5",
+        "started_at": "2026-05-12T10:00:00",
+        "screenshots_taken": 2,
+    })
+
+    result = _call(wb.web_browser_status, {})
+    text = result["content"][0]["text"]
+    assert "running" in text.lower()
+    assert "10.10.10.5" in text
+    assert "https://example.com/page" in text
+    assert "2" in text  # screenshots_taken
+    wb._close_browser()
+
+
+def test_status_requires_pentest_auth(tmp_targets_dir, monkeypatch):
+    monkeypatch.delenv("REVERSER_PENTEST_AUTHORIZED", raising=False)
+    monkeypatch.chdir(tmp_targets_dir)
+    from reverser.tools import web_browser as wb
+    result = _call(wb.web_browser_status, {})
+    assert result.get("is_error") is True
+    assert "authoriz" in result["content"][0]["text"].lower()
