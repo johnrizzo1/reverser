@@ -83,5 +83,74 @@ def _assert_url_in_scope(url: str, target: str) -> None:
         )
 
 
+# ── Singleton state + lifecycle ────────────────────────────────────
+
+
+_state: dict[str, Any] = {
+    "playwright": None,        # PlaywrightContextManager instance
+    "browser": None,           # Browser
+    "context": None,           # BrowserContext
+    "page": None,              # Page
+    "target": None,            # current target identifier
+    "started_at": None,        # ISO timestamp
+    "screenshots_taken": 0,
+}
+
+
+def _ensure_browser(target: str, viewport: tuple[int, int] = (1280, 800)):
+    """Idempotent lazy-launch. Returns the Page reference.
+
+    Per spec D7: raises RuntimeError if called with a different target while
+    a browser is already running for another target. Caller must explicitly
+    web_browser_close() before switching.
+    """
+    if _state["browser"] and _state["browser"].is_connected():
+        if _state["target"] != target:
+            raise RuntimeError(
+                f"Browser is running for target={_state['target']!r}. "
+                f"Call web_browser_close() before switching to {target!r}."
+            )
+        return _state["page"]
+
+    # Lazy import — only loaded when we actually launch a browser
+    from playwright.sync_api import sync_playwright
+
+    pw = sync_playwright().start()
+    browser = pw.chromium.launch(headless=True)
+    context = browser.new_context(
+        viewport={"width": viewport[0], "height": viewport[1]}
+    )
+    page = context.new_page()
+    _state.update({
+        "playwright": pw,
+        "browser": browser,
+        "context": context,
+        "page": page,
+        "target": target,
+        "started_at": _now_iso(),
+        "screenshots_taken": 0,
+    })
+    return page
+
+
+def _close_browser() -> None:
+    """Idempotent teardown. Safe to call on empty state."""
+    try:
+        if _state["browser"] and _state["browser"].is_connected():
+            _state["browser"].close()
+        if _state["playwright"]:
+            _state["playwright"].stop()
+    except Exception:
+        # Best-effort cleanup; never raise from teardown
+        pass
+    for k in ("playwright", "browser", "context", "page", "target", "started_at"):
+        _state[k] = None
+    _state["screenshots_taken"] = 0
+
+
+# Register the cleanup hook so a process crash doesn't leak the browser
+atexit.register(_close_browser)
+
+
 # Tools list — populated as @tool handlers are added in subsequent tasks
 TOOLS: list = []

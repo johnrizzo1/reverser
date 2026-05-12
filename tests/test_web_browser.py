@@ -70,3 +70,102 @@ def test_assert_url_in_scope_allows_relative_url(tmp_targets_dir):
     # Should not raise
     _assert_url_in_scope("/api/users", "10.10.10.5")
     _assert_url_in_scope("data:text/html,<h1>test</h1>", "10.10.10.5")
+
+
+def test_state_dict_initial_values(tmp_targets_dir):
+    """Singleton state dict starts with all None / 0."""
+    from reverser.tools import web_browser as wb
+    # Reset state (in case prior test left it dirty)
+    wb._close_browser()
+    assert wb._state["browser"] is None
+    assert wb._state["page"] is None
+    assert wb._state["target"] is None
+    assert wb._state["screenshots_taken"] == 0
+
+
+def test_ensure_browser_launches_when_state_empty(tmp_targets_dir):
+    """_ensure_browser launches Chromium when no singleton exists."""
+    import sys
+    from reverser.tools import web_browser as wb
+    wb._close_browser()  # reset
+
+    fake_page = MagicMock()
+    fake_context = MagicMock()
+    fake_context.new_page.return_value = fake_page
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    fake_browser.new_context.return_value = fake_context
+    fake_pw_chromium = MagicMock()
+    fake_pw_chromium.launch.return_value = fake_browser
+    fake_pw = MagicMock()
+    fake_pw.chromium = fake_pw_chromium
+    fake_sync = MagicMock()
+    fake_sync.start.return_value = fake_pw
+
+    fake_sync_api_mod = MagicMock()
+    fake_sync_api_mod.sync_playwright = MagicMock(return_value=fake_sync)
+    fake_playwright_mod = MagicMock()
+
+    prev_playwright = sys.modules.get("playwright")
+    prev_sync_api = sys.modules.get("playwright.sync_api")
+    sys.modules["playwright"] = fake_playwright_mod
+    sys.modules["playwright.sync_api"] = fake_sync_api_mod
+    try:
+        page = wb._ensure_browser("10.10.10.5", viewport=(1280, 800))
+    finally:
+        if prev_playwright is None:
+            sys.modules.pop("playwright", None)
+        else:
+            sys.modules["playwright"] = prev_playwright
+        if prev_sync_api is None:
+            sys.modules.pop("playwright.sync_api", None)
+        else:
+            sys.modules["playwright.sync_api"] = prev_sync_api
+
+    assert page is fake_page
+    assert wb._state["browser"] is fake_browser
+    assert wb._state["target"] == "10.10.10.5"
+    wb._close_browser()
+
+
+def test_ensure_browser_idempotent_for_same_target(tmp_targets_dir):
+    """Second call for the same target returns existing page without re-launch."""
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    fake_page = MagicMock()
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state["browser"] = fake_browser
+    wb._state["page"] = fake_page
+    wb._state["target"] = "10.10.10.5"
+
+    # No mock for sync_playwright — if it gets called, the test will error
+    page = wb._ensure_browser("10.10.10.5")
+    assert page is fake_page
+    wb._close_browser()
+
+
+def test_ensure_browser_refuses_target_switch(tmp_targets_dir):
+    """Calling with a different target while browser is running raises (D7)."""
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state["browser"] = fake_browser
+    wb._state["page"] = MagicMock()
+    wb._state["target"] = "10.10.10.5"
+
+    with pytest.raises(RuntimeError, match="web_browser_close"):
+        wb._ensure_browser("10.10.10.6")
+    wb._close_browser()
+
+
+def test_close_browser_is_idempotent(tmp_targets_dir):
+    """_close_browser on empty state is a no-op (no error)."""
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    # Call again — should not raise
+    wb._close_browser()
+    assert wb._state["browser"] is None
