@@ -117,7 +117,13 @@ SKILL_WEB_RECON = Skill(
     description="Reconnaissance: subdomain enum, port scan, fingerprinting, WAF detection",
     prompt="Perform web reconnaissance on the target. Run in parallel: nmap_scan for open "
            "ports, subfinder_enum for subdomains, whatweb_fingerprint for technology stack, "
-           "and wafw00f_detect for WAF detection. Summarize the attack surface.",
+           "and wafw00f_detect for WAF detection. Summarize the attack surface.\n\n"
+           "After recon completes, propose 3 root hypotheses about the most exploitable "
+           "surface. Call kb_add_hypothesis for each one — a hypothesis is a falsifiable "
+           "CLAIM (\"The /api/users endpoint is vulnerable to IDOR via the id parameter\"), "
+           "not a TODO item (\"Look at the API\"). Confidence values: 80+ = strong "
+           "evidence, 50 = plausible, <30 = long shot. Subsequent skills work through "
+           "these in confidence order.",
 )
 
 SKILL_WEB_SCAN = Skill(
@@ -150,7 +156,15 @@ SKILL_WEB_SQLI = Skill(
     key="q",
     description="Test for SQL injection vulnerabilities",
     prompt="Test the target for SQL injection. Start by using http_request to identify "
-           "forms and parameters, then use sqlmap_test on promising endpoints. Report findings.",
+           "forms and parameters, then use sqlmap_test on promising endpoints. Report findings.\n\n"
+           "Before running, call kb_list_hypotheses status=proposed and pick the "
+           "highest-confidence unconfirmed one mentioning SQLi / injection. State the "
+           "hypothesis OUT LOUD. After sqlmap_test returns, call "
+           "kb_update_hypothesis(id=X, status=...) with confirmed/refuted/inconclusive "
+           "plus a one-line outcome. Five-failure pivot: if you've made 5 failed SQLi "
+           "attempts against this hypothesis, mark it refuted, STOP, and propose three "
+           "orthogonal hypotheses (different endpoint, different injection class like "
+           "SSRF or auth bypass, or different auth tier).",
 )
 
 SKILL_WEB_MANUAL = Skill(
@@ -160,7 +174,13 @@ SKILL_WEB_MANUAL = Skill(
     prompt="Perform manual HTTP testing on the target. Use http_request to: check security "
            "headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, etc.), test CORS "
            "configuration, examine cookies (HttpOnly, Secure, SameSite flags), check for "
-           "information disclosure in headers and error pages. Report all findings.",
+           "information disclosure in headers and error pages. Report all findings.\n\n"
+           "Manual probing is the second-most-common place to grind past usefulness "
+           "(after fuzzing). Anchor every probe to a hypothesis: before checking a "
+           "header / cookie / CORS / form, state which hypothesis you're testing. After "
+           "5 failed manual probes against the same hypothesis (5 different "
+           "headers/cookies/parameters that all came back clean), mark the hypothesis "
+           "refuted via kb_update_hypothesis and pivot.",
 )
 
 SKILL_WEB_REPORT = Skill(
