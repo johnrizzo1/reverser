@@ -294,3 +294,85 @@ async def web_browser_close(args: dict) -> dict:
 
 
 TOOLS.append(web_browser_close)
+
+
+def _require_running() -> dict | None:
+    """Returns an error dict if no browser is running. None if running.
+
+    Used by navigation/interaction/observation tools that need the singleton
+    populated. (web_browser_start handles its own lazy launch; everything
+    else just checks.)
+    """
+    if not _state["browser"] or not _state["browser"].is_connected():
+        return format_error(
+            "Browser is not running. Call web_browser_start(target) first."
+        )
+    return None
+
+
+@tool(
+    "web_browser_navigate",
+    "Navigate the current page to a URL. Scope-checked: URL's host must be "
+    "in_scope per scope.toml if present. wait_until: 'load' (default) | "
+    "'domcontentloaded' | 'networkidle'. Returns final URL (post-redirects), "
+    "HTTP status, and page title.",
+    {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Target URL"},
+            "wait_until": {"type": "string", "default": "load",
+                           "enum": ["load", "domcontentloaded", "networkidle"]},
+            "timeout_ms": {"type": "integer", "default": 30000},
+        },
+        "required": ["url"],
+    },
+)
+async def web_browser_navigate(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    err = _require_running()
+    if err:
+        return err
+
+    url = args["url"]
+    wait_until = args.get("wait_until", "load")
+    timeout_ms = int(args.get("timeout_ms", 30000))
+    target = _state["target"]
+
+    from ..kb.scope import ScopeError
+    try:
+        _assert_url_in_scope(url, target)
+    except ScopeError as e:
+        return format_error(f"scope.toml violation: {e}")
+
+    page = _state["page"]
+
+    def _do():
+        resp = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+        return {
+            "url_requested": url,
+            "url_final": page.url,
+            "status": resp.status if resp else None,
+            "title": page.title(),
+        }
+
+    try:
+        result = await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(
+            f"Navigation failed: {type(e).__name__}: {e}"
+        )
+
+    return format_tool_result(
+        f"Navigated.\n"
+        f"  url_requested: {result['url_requested']}\n"
+        f"  url_final:     {result['url_final']}\n"
+        f"  status:        {result['status']}\n"
+        f"  title:         {result['title']}"
+    )
+
+
+TOOLS.append(web_browser_navigate)

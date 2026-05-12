@@ -326,3 +326,64 @@ def test_close_when_running_tears_down(tmp_targets_dir, monkeypatch):
     assert wb._state["browser"] is None
     fake_browser.close.assert_called_once()
     fake_pw.stop.assert_called_once()
+
+
+def test_navigate_calls_page_goto_and_returns_status(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    fake_resp = MagicMock()
+    fake_resp.status = 200
+    fake_page = MagicMock()
+    fake_page.goto.return_value = fake_resp
+    fake_page.title.return_value = "Example Page"
+    fake_page.url = "https://example.com/landing"
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_navigate, {"url": "https://example.com/landing"})
+    text = result["content"][0]["text"]
+    assert "200" in text
+    assert "example.com" in text
+    assert "Example Page" in text
+    fake_page.goto.assert_called_once()
+    wb._close_browser()
+
+
+def test_navigate_refuses_out_of_scope_url(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    target_dir = tmp_targets_dir / "10.10.10.5"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "scope.toml").write_text(
+        '[scope]\nin_scope_cidrs = ["192.168.0.0/24"]\n'
+    )
+
+    fake_page = MagicMock()
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "10.10.10.5",
+    })
+
+    result = _call(wb.web_browser_navigate, {"url": "https://10.10.10.5/admin"})
+    assert result.get("is_error") is True
+    assert "scope" in result["content"][0]["text"].lower()
+    fake_page.goto.assert_not_called()
+    wb._close_browser()
+
+
+def test_navigate_without_browser_returns_error(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    result = _call(wb.web_browser_navigate, {"url": "https://example.com"})
+    assert result.get("is_error") is True
+    assert "start" in result["content"][0]["text"].lower()
