@@ -16,6 +16,7 @@
     sqlite
     jq
     unzip
+    cmake     # needed by transitive Python deps (e.g. angr → unicorn's C-extension build) on first venv build
 
     # Disassemblers / Decompilers
     radare2
