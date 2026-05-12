@@ -189,6 +189,7 @@
         wafw00f          # WAF detection CLI (also exposes a Python module)
         sqlmap           # SQL injection scanner (CLI; not top-level in nixpkgs)
         pymetasploit3    # JSON-RPC client to msfrpcd (used by metasploit_* tools)
+        playwright       # browser automation for webpentest profile
 	invoke
 	pynacl
 	paramiko
@@ -289,6 +290,23 @@
     fi
 
     "$VENV_BIN/pip" install -q --no-deps -e "$REVERSER_HOME" 2>/dev/null || true
+
+    # Playwright Chromium: install on first shell entry. ~150MB download.
+    # Cached in ~/.cache/ms-playwright/ — survives across devenv shell entries.
+    # Pulled out from nixpkgs deliberately: nixpkgs's playwright-driver.browsers
+    # has known version-drift issues with the playwright Python lib. enterShell
+    # install matches the pattern we use for NetExec.
+    if "$VENV_BIN/playwright" --version >/dev/null 2>&1; then
+      if [ ! -d "$HOME/.cache/ms-playwright" ] || \
+         [ -z "$(ls -A "$HOME/.cache/ms-playwright" 2>/dev/null)" ]; then
+        echo "Installing Playwright Chromium browser (~150MB, one-time)..."
+        if "$VENV_BIN/playwright" install chromium 2>&1 | tail -3; then
+          echo "  ✓ Chromium installed to ~/.cache/ms-playwright/"
+        else
+          echo "  ✗ Chromium install failed — run manually: playwright install chromium"
+        fi
+      fi
+    fi
 
     # NetExec (nxc): install from upstream git into the venv so the `nxc`
     # binary lands in venv/bin and is reachable on PATH. Idempotent — only
