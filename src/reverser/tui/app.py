@@ -675,8 +675,12 @@ class ReverserApp(App):
             try:
                 self.budget = float(arg)
                 log.write(f"Budget set to ${self.budget:.2f}")
-                if self.binary_path:
-                    self._init_session()
+                # Mutate the live session in place — DO NOT call _init_session
+                # here. _init_session constructs a brand-new AgentSession and
+                # would discard the conversation/exchanges.
+                if self.session is not None:
+                    self.session.update_budget(self.budget)
+                    self._update_status()
             except ValueError:
                 log.write("[red]Usage: /budget <amount>[/red]")
 
@@ -684,8 +688,10 @@ class ReverserApp(App):
             try:
                 self.max_turns = int(arg)
                 log.write(f"Max turns set to {self.max_turns}")
-                if self.binary_path:
-                    self._init_session()
+                # Same in-place mutation pattern as /budget.
+                if self.session is not None:
+                    self.session.update_max_turns(self.max_turns)
+                    self._update_status()
             except ValueError:
                 log.write("[red]Usage: /turns <number>[/red]")
 

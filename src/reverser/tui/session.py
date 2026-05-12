@@ -412,6 +412,33 @@ When you respond, present your findings clearly with relevant details.
         self._snapshot.stopped_at = _now_iso_session()
         self._snapshot.pid = None
         save_snapshot(self._snapshot)
+
+    def update_budget(self, new_budget: float) -> None:
+        """Update the budget cap in-place. Preserves conversation history.
+
+        Updates the four touchpoints that read budget: self.budget (used by
+        run_turn for remaining-budget calc), self.stats.budget (display),
+        self._snapshot.config.budget (resume persistence). The snapshot is
+        saved so the change survives a stop/resume cycle.
+        """
+        from ..sessions import save as save_snapshot
+        self.budget = float(new_budget)
+        self.stats.budget = float(new_budget)
+        self._snapshot.config.budget = float(new_budget)
+        save_snapshot(self._snapshot)
+
+    def update_max_turns(self, new_max_turns: int) -> None:
+        """Update the max-turns cap in-place. Preserves conversation history.
+
+        Updates: self.max_turns (used by run_turn for remaining-turns calc),
+        self.stats.max_turns (display), self._snapshot.config.max_turns
+        (resume persistence). Snapshot saved.
+        """
+        from ..sessions import save as save_snapshot
+        self.max_turns = int(new_max_turns)
+        self.stats.max_turns = int(new_max_turns)
+        self._snapshot.config.max_turns = int(new_max_turns)
+        save_snapshot(self._snapshot)
         try:
             self._slog.log_session_completed(
                 cost=self.stats.total_cost, turns=self.stats.turns,
