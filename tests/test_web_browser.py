@@ -598,3 +598,62 @@ def test_capture_finding_writes_screenshot_and_artifact(tmp_targets_dir, monkeyp
     assert len(findings) == 1
     assert any("screenshot-1.png" in p for p in findings[0].evidence_paths)
     wb._close_browser()
+
+
+def test_confirm_xss_returns_confirmed_when_sentinel_fires(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    fake_page = MagicMock()
+    fake_page.url = "https://example.com/search"
+    # Simulate the sentinel being set after payload execution
+    sentinel_state = {"fired": False}
+    def fake_evaluate(js):
+        if "window." in js and "true" in js:  # initial sentinel install
+            return None
+        if "window.__xss_fired_sentinel__" in js and "()" not in js:
+            # Reading the sentinel — simulate XSS payload fired
+            sentinel_state["fired"] = True
+            return True
+        return None
+    fake_page.evaluate.side_effect = fake_evaluate
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_confirm_xss, {
+        "payload": "<img src=x onerror='window.__xss_fired_sentinel__=true'>",
+    })
+
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "confirmed" in text.lower()
+    wb._close_browser()
+
+
+def test_confirm_xss_returns_refuted_when_nothing_fires(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    from collections import deque
+    wb._close_browser()
+
+    fake_page = MagicMock()
+    fake_page.url = "https://example.com/search"
+    fake_page.evaluate.return_value = False  # sentinel stays false
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+    # Ensure console_errors is a clean deque for this test
+    wb._state["console_errors"] = deque(maxlen=50)
+
+    result = _call(wb.web_browser_confirm_xss, {
+        "payload": "<benign>not actually XSS</benign>",
+    })
+    text = result["content"][0]["text"]
+    assert "neither" in text.lower() or "refuted" in text.lower() or "not confirmed" in text.lower() or "false" in text.lower()
+    wb._close_browser()

@@ -810,3 +810,123 @@ async def web_browser_capture_finding(args: dict) -> dict:
 
 
 TOOLS.append(web_browser_capture_finding)
+
+
+@tool(
+    "web_browser_confirm_xss",
+    "Multi-step XSS confirmation: install sentinel + dialog handler → "
+    "inject payload → submit → wait → check whether the payload actually "
+    "executed. Returns confirmed/refuted with evidence type. Won't catch "
+    "silent-side-effect payloads (e.g. fetch() exfil).",
+    {
+        "type": "object",
+        "properties": {
+            "payload": {"type": "string"},
+            "navigate_to": {"type": "string", "default": ""},
+            "inject_selector": {"type": "string", "default": ""},
+            "submit_selector": {"type": "string", "default": ""},
+            "sentinel_global": {"type": "string", "default": "__xss_fired_sentinel__"},
+            "wait_ms": {"type": "integer", "default": 500},
+            "finding_id": {"type": "integer", "default": 0,
+                           "description": "If >0, auto-capture screenshot via capture_finding on confirmed"},
+        },
+        "required": ["payload"],
+    },
+)
+async def web_browser_confirm_xss(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    payload = args["payload"]
+    navigate_to = (args.get("navigate_to") or "").strip()
+    inject_selector = (args.get("inject_selector") or "").strip()
+    submit_selector = (args.get("submit_selector") or "").strip()
+    sentinel = args.get("sentinel_global") or "__xss_fired_sentinel__"
+    wait_ms = int(args.get("wait_ms", 500))
+    finding_id = int(args.get("finding_id", 0))
+
+    page = _state["page"]
+    target = _state["target"]
+
+    # Track dialog firings
+    dialog_fired = {"hit": False}
+    try:
+        page.on("dialog", lambda d: (dialog_fired.update({"hit": True}), d.dismiss()))
+    except Exception:
+        pass
+
+    def _do():
+        if navigate_to:
+            from ..kb.scope import ScopeError
+            try:
+                _assert_url_in_scope(navigate_to, target)
+            except ScopeError as e:
+                return {"error": f"scope.toml violation: {e}"}
+            page.goto(navigate_to, wait_until="load")
+
+        # Install sentinel global
+        page.evaluate(f"() => {{ window.{sentinel} = false; }}")
+
+        if inject_selector:
+            page.fill(inject_selector, payload)
+        if submit_selector:
+            page.click(submit_selector)
+
+        # Brief wait for payload execution
+        page.wait_for_timeout(wait_ms)
+
+        # Check sentinel
+        sentinel_fired = bool(page.evaluate(f"window.{sentinel}"))
+        return {"sentinel_fired": sentinel_fired}
+
+    try:
+        result = await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(f"confirm_xss failed: {type(e).__name__}: {e}")
+
+    if "error" in result:
+        return format_error(result["error"])
+
+    sentinel_fired = result["sentinel_fired"]
+    recent_errors = list(_state["console_errors"])[-5:]
+    eval_error = any(
+        "Uncaught" in e or "SyntaxError" in e or "ReferenceError" in e
+        for e in recent_errors
+    )
+
+    if sentinel_fired:
+        evidence = "sentinel_global"
+        confirmed = True
+    elif dialog_fired["hit"]:
+        evidence = "dialog_fired"
+        confirmed = True
+    elif eval_error:
+        evidence = "console_eval"
+        confirmed = True
+    else:
+        evidence = "neither"
+        confirmed = False
+
+    screenshot_path = None
+    if confirmed and finding_id > 0:
+        try:
+            cap = _capture_to_finding(page, target, finding_id)
+            screenshot_path = cap["path"]
+        except Exception:
+            pass
+
+    return format_tool_result(
+        f"XSS check:\n"
+        f"  confirmed:        {confirmed}\n"
+        f"  evidence:         {evidence}\n"
+        f"  payload:          {payload[:120]}\n"
+        f"  screenshot_path:  {screenshot_path or '(none)'}"
+    )
+
+
+TOOLS.append(web_browser_confirm_xss)
