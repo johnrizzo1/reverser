@@ -167,3 +167,172 @@ def test_metasploit_start_acquires_flock(tmp_targets_dir, monkeypatch):
         _call(metasploit_start, {"target": "10.10.10.5"})
 
     assert order == ["lock_acquired", "popen", "lock_released"]
+
+
+# ── metasploit_stop ─────────────────────────────────────────────────
+
+
+def test_metasploit_stop_when_not_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_stop
+    result = _call(metasploit_stop, {})
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "not running" in text.lower() or "not_running" in text.lower()
+
+
+def test_metasploit_stop_clears_pidfile_after_sigterm(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_stop, _write_pidfile, _read_pidfile
+    _write_pidfile(7777)
+
+    # Fake: process exits after SIGTERM
+    states = {"alive": True}
+    def fake_alive(pid):
+        return states["alive"]
+    def fake_kill(pid, sig):
+        if sig == signal.SIGTERM:
+            states["alive"] = False
+
+    with patch("reverser.tools.metasploit._process_alive", side_effect=fake_alive), \
+         patch("os.kill", side_effect=fake_kill), \
+         patch("reverser.tools.metasploit._msf_client") as mock_client:
+        mock_client.return_value.sessions.list = {}
+        result = _call(metasploit_stop, {})
+
+    assert result.get("is_error") is not True
+    assert "stopped" in result["content"][0]["text"].lower()
+    assert _read_pidfile() is None
+
+
+def test_metasploit_stop_warns_when_sessions_open(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_stop, _write_pidfile
+    _write_pidfile(7777)
+
+    states = {"alive": True}
+    def fake_alive(pid):
+        return states["alive"]
+    def fake_kill(pid, sig):
+        if sig == signal.SIGTERM:
+            states["alive"] = False
+
+    fake_client = MagicMock()
+    fake_client.sessions.list = {
+        "1": {"type": "meterpreter", "target_host": "10.10.10.5",
+              "opened_at": "2026-05-11T12:00:00"},
+        "2": {"type": "shell", "target_host": "10.10.10.6",
+              "opened_at": "2026-05-11T12:05:00"},
+        "3": {"type": "shell", "target_host": "10.10.10.7",
+              "opened_at": "2026-05-11T12:10:00"},
+    }
+    with patch("reverser.tools.metasploit._process_alive", side_effect=fake_alive), \
+         patch("os.kill", side_effect=fake_kill), \
+         patch("reverser.tools.metasploit._msf_client", return_value=fake_client):
+        result = _call(metasploit_stop, {})
+
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    # Per D10: warning surfaced but NOT a refusal
+    assert "3" in text  # sessions_lost count
+    assert "warning" in text.lower() or "session" in text.lower()
+    assert "stopped" in text.lower()
+
+
+def test_metasploit_stop_force_uses_sigkill_on_timeout(tmp_targets_dir, monkeypatch):
+    """With force=True, persistent process is SIGKILLed after 10s SIGTERM wait."""
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_stop, _write_pidfile
+    _write_pidfile(7777)
+
+    signals_received = []
+    states = {"alive": True}
+    def fake_alive(pid):
+        return states["alive"]
+    def fake_kill(pid, sig):
+        signals_received.append(sig)
+        if sig == signal.SIGKILL:
+            states["alive"] = False
+
+    # _msf_client throws because the daemon isn't really there
+    with patch("reverser.tools.metasploit._process_alive", side_effect=fake_alive), \
+         patch("os.kill", side_effect=fake_kill), \
+         patch("reverser.tools.metasploit._msf_client",
+               side_effect=ConnectionError("refused")), \
+         patch("time.sleep"):  # skip the 10s wait
+        result = _call(metasploit_stop, {"force": True})
+
+    assert result.get("is_error") is not True
+    assert signal.SIGTERM in signals_received
+    assert signal.SIGKILL in signals_received
+
+
+# ── metasploit_status ───────────────────────────────────────────────
+
+
+def test_metasploit_status_daemon_not_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_status
+    result = _call(metasploit_status, {})
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "not running" in text.lower() or "not_running" in text.lower()
+
+
+def test_metasploit_status_stale_pidfile(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_status, _write_pidfile
+    _write_pidfile(2_000_000_000)  # bogus PID
+    result = _call(metasploit_status, {})
+    text = result["content"][0]["text"]
+    # Should still report not-running (stale pidfile detected)
+    assert "not running" in text.lower() or "not_running" in text.lower() or "stale" in text.lower()
+
+
+def test_metasploit_status_daemon_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_status, _write_pidfile
+    _write_pidfile(os.getpid())  # self-pid for liveness
+
+    fake_client = MagicMock()
+    fake_client.core.version = {"version": "6.4.0"}
+    fake_client.sessions.list = {
+        "1": {"type": "meterpreter", "target_host": "10.10.10.5",
+              "opened_at": "2026-05-11T12:00:00"},
+    }
+    fake_console = MagicMock()
+    fake_console.run_with_output.return_value = (
+        "Workspaces\n"
+        "==========\n"
+        "  current  name\n"
+        "  -------  ----\n"
+        "  *        10.10.10.5\n"
+        "           default\n"
+    )
+    fake_client.consoles.console.return_value = fake_console
+
+    with patch("reverser.tools.metasploit._make_msfrpc_client",
+               return_value=fake_client):
+        result = _call(metasploit_status, {})
+
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert str(os.getpid()) in text
+    assert "running" in text.lower()
+    assert "6.4.0" in text or "version" in text.lower()
+    assert "10.10.10.5" in text  # workspace OR session host
+
+
+def test_metasploit_status_auth_error(tmp_targets_dir, monkeypatch):
+    """Daemon process is alive but auth fails — surface the auth error."""
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_status, _write_pidfile
+    _write_pidfile(os.getpid())
+
+    with patch("reverser.tools.metasploit._make_msfrpc_client",
+               side_effect=PermissionError("bad password")):
+        result = _call(metasploit_status, {})
+
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "auth" in text.lower() or "error" in text.lower()

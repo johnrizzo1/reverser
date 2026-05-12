@@ -628,3 +628,234 @@ async def metasploit_start(args: dict) -> dict:
 
 
 TOOLS.append(metasploit_start)
+
+
+def _count_open_sessions() -> tuple[int, list[dict]]:
+    """Best-effort count of open sessions. Returns (count, summary list).
+
+    Returns (0, []) if the daemon isn't reachable.
+    """
+    try:
+        client = _msf_client("")
+        sessions = client.sessions.list or {}
+    except Exception:
+        return (0, [])
+    summary = []
+    for sid, info in sessions.items():
+        summary.append({
+            "id": sid,
+            "type": (info or {}).get("type", "?"),
+            "target_host": (info or {}).get("target_host", "?"),
+        })
+    return (len(summary), summary)
+
+
+@tool(
+    "metasploit_stop",
+    "Stop the shared msfrpcd daemon. SIGTERM → 10s wait → SIGKILL if "
+    "force=True. Warns (but does NOT refuse) when sessions are open. "
+    "Open sessions die when the daemon stops — documented loss-on-stop.",
+    {
+        "type": "object",
+        "properties": {
+            "force": {"type": "boolean", "default": False,
+                      "description": "If true, escalate to SIGKILL after 10s of SIGTERM ignored"},
+        },
+        "required": [],
+    },
+)
+async def metasploit_stop(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    force = bool(args.get("force", False))
+
+    pid = _read_pidfile()
+    if pid is None:
+        return format_tool_result("msfrpcd is not running (no pidfile).\n  status: not_running")
+
+    if not _process_alive(pid):
+        _remove_pidfile()
+        return format_tool_result(
+            f"msfrpcd was not actually running (stale pidfile cleared).\n"
+            f"  status:  not_running\n"
+            f"  pid_was: {pid}"
+        )
+
+    # Best-effort session count BEFORE we kill the daemon
+    sessions_lost, _summary = _count_open_sessions()
+
+    # SIGTERM and wait up to 10s
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError) as e:
+        return format_error(f"failed to send SIGTERM to {pid}: {e}")
+
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        if not _process_alive(pid):
+            break
+        time.sleep(0.5)
+
+    timed_out = _process_alive(pid)
+    if timed_out and force:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        time.sleep(0.5)
+        timed_out = _process_alive(pid)
+
+    if timed_out:
+        # Did not die even after escalation
+        return format_error(
+            f"msfrpcd (pid {pid}) did not exit after SIGTERM"
+            f"{' + SIGKILL' if force else ''}. Investigate manually.\n"
+            f"  status:  stop_timeout"
+        )
+
+    _remove_pidfile()
+
+    warning = None
+    if sessions_lost > 0:
+        warning = f"{sessions_lost} open session(s) killed when daemon stopped"
+
+    lines = [
+        f"msfrpcd stopped.",
+        f"  status:        stopped",
+        f"  pid_was:       {pid}",
+        f"  sessions_lost: {sessions_lost}",
+    ]
+    if warning:
+        lines.append(f"  warning:       {warning}")
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(metasploit_stop)
+
+
+def _parse_workspace_list(console_output: str) -> tuple[list[str], str | None]:
+    """Parse msfconsole `workspace` output → (all_workspaces, active).
+
+    Format:
+      Workspaces
+      ==========
+        current  name
+        -------  ----
+        *        myws
+                 default
+    """
+    workspaces: list[str] = []
+    active: str | None = None
+    for line in console_output.splitlines():
+        s = line.strip()
+        if not s or s.startswith(("Workspaces", "===", "current", "---")):
+            continue
+        if s.startswith("*"):
+            # active workspace
+            name = s.lstrip("*").strip()
+            if name:
+                workspaces.append(name)
+                active = name
+        else:
+            workspaces.append(s)
+    return workspaces, active
+
+
+@tool(
+    "metasploit_status",
+    "Report msfrpcd daemon state. Read-only: does not auto-start, does not "
+    "auto-fix. Returns daemon liveness, version, auth ok/error, active "
+    "workspace, all workspaces, and open sessions.",
+    {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+)
+async def metasploit_status(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    pid = _read_pidfile()
+    if pid is None:
+        return format_tool_result(
+            "msfrpcd status:\n"
+            "  daemon:   not_running (no pidfile)\n"
+            "  start with: metasploit_start"
+        )
+
+    if not _process_alive(pid):
+        return format_tool_result(
+            f"msfrpcd status:\n"
+            f"  daemon:   not_running (pidfile is stale; pid {pid} dead)\n"
+            f"  start with: metasploit_start (will recover stale pidfile)"
+        )
+
+    # Daemon is alive — probe RPC
+    auth_ok = True
+    auth_err: str | None = None
+    version: str | None = None
+    workspaces: list[str] = []
+    active_workspace: str | None = None
+    sessions: list[dict] = []
+
+    try:
+        auth = _read_or_create_auth()
+        client = _make_msfrpc_client(auth)
+        v = client.core.version
+        if isinstance(v, dict):
+            version = v.get("version", "?")
+        else:
+            version = str(v)
+
+        # Workspaces via console
+        try:
+            console = client.consoles.console()
+            ws_out = console.run_with_output("workspace")
+            workspaces, active_workspace = _parse_workspace_list(ws_out)
+        except Exception:
+            pass
+
+        # Sessions
+        try:
+            for sid, info in (client.sessions.list or {}).items():
+                sessions.append({
+                    "id": sid,
+                    "type": (info or {}).get("type", "?"),
+                    "target_host": (info or {}).get("target_host", "?"),
+                })
+        except Exception:
+            pass
+    except Exception as e:
+        auth_ok = False
+        auth_err = f"{type(e).__name__}: {e}"
+
+    lines = [
+        "msfrpcd status:",
+        f"  daemon:           running (pid {pid})",
+        f"  version:          {version or '<unknown>'}",
+        f"  auth:             {'ok' if auth_ok else 'FAILED'}",
+    ]
+    if auth_err:
+        lines.append(f"  auth_error:       {auth_err}")
+    lines.append(f"  active_workspace: {active_workspace or '<unknown>'}")
+    if workspaces:
+        lines.append(f"  workspaces:       {', '.join(workspaces)}")
+    if sessions:
+        lines.append(f"  sessions ({len(sessions)}):")
+        for s in sessions:
+            lines.append(
+                f"    [{s['id']}] {s['type']} → {s['target_host']}"
+            )
+    else:
+        lines.append("  sessions:         (none)")
+
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(metasploit_status)
