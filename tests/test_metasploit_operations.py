@@ -260,3 +260,88 @@ def test_run_force_overrides_no_check_method(tmp_targets_dir, monkeypatch):
             "force": True,
         })
     mod.execute.assert_called()
+
+
+# ── metasploit_run: scope + auto-finding ────────────────────────────
+
+
+def test_run_scope_violation_before_check(tmp_targets_dir, monkeypatch):
+    """If target is out of scope, scope_toml must abort BEFORE check fires."""
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_run, _write_pidfile
+    _write_pidfile(os.getpid())
+
+    # Write a scope.toml that excludes 10.10.10.5
+    target_dir = tmp_targets_dir / "10.10.10.5"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "scope.toml").write_text(
+        '[scope]\nin_scope_cidrs = ["192.168.0.0/24"]\n'
+    )
+
+    mod = MagicMock()
+    mod.check_exploit.return_value = {"code": "vulnerable", "message": ""}
+    fake_client = MagicMock()
+    fake_client.modules.use.return_value = mod
+
+    with patch("reverser.tools.metasploit._make_msfrpc_client",
+               return_value=fake_client):
+        result = _call(metasploit_run, {
+            "module": "exploit/multi/http/proftpd_modcopy_exec",
+            "options": {"RHOSTS": "10.10.10.5"},
+            "target": "10.10.10.5",
+        })
+
+    assert result.get("is_error") is True
+    assert "scope" in result["content"][0]["text"].lower()
+    # KEY: check_exploit was NEVER called (scope abort came first)
+    mod.check_exploit.assert_not_called()
+
+
+def test_run_successful_exploit_writes_finding(tmp_targets_dir, monkeypatch):
+    """When a session opens, a FindingFact must land in the KB."""
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_run, _write_pidfile
+    from reverser.kb import for_target
+    _write_pidfile(os.getpid())
+
+    client, mod = _setup_run_test(monkeypatch, check_code="vulnerable",
+                                   exploit_yields_session=True,
+                                   sessions={"7": {"type": "meterpreter",
+                                                   "target_host": "10.10.10.5"}})
+    with patch("reverser.tools.metasploit._make_msfrpc_client", return_value=client):
+        _call(metasploit_run, {
+            "module": "exploit/multi/http/proftpd_modcopy_exec",
+            "options": {"RHOSTS": "10.10.10.5"},
+            "target": "10.10.10.5",
+        })
+
+    kb = for_target("10.10.10.5")
+    findings = kb.get_findings(severity="high")
+    assert len(findings) == 1
+    f = findings[0]
+    assert "proftpd_modcopy_exec" in f.title
+    assert "10.10.10.5" in f.title
+    assert f.severity == "high"
+    assert "session" in f.description.lower()
+
+
+def test_run_failed_exploit_no_finding(tmp_targets_dir, monkeypatch):
+    """If no session opens, no finding is written."""
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools.metasploit import metasploit_run, _write_pidfile
+    from reverser.kb import for_target
+    _write_pidfile(os.getpid())
+
+    client, mod = _setup_run_test(monkeypatch, check_code="vulnerable",
+                                   exploit_yields_session=False,
+                                   sessions={})
+    with patch("reverser.tools.metasploit._make_msfrpc_client", return_value=client):
+        _call(metasploit_run, {
+            "module": "exploit/multi/http/proftpd_modcopy_exec",
+            "options": {"RHOSTS": "10.10.10.5"},
+            "target": "10.10.10.5",
+        })
+
+    kb = for_target("10.10.10.5")
+    findings = kb.get_findings(severity="high")
+    assert len(findings) == 0
