@@ -228,3 +228,71 @@ def test_status_requires_pentest_auth(tmp_targets_dir, monkeypatch):
     result = _call(wb.web_browser_status, {})
     assert result.get("is_error") is True
     assert "authoriz" in result["content"][0]["text"].lower()
+
+
+def test_start_launches_browser_and_returns_status(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    fake_page = MagicMock()
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    with patch("reverser.tools.web_browser._ensure_browser") as mock_ensure:
+        # Make _ensure_browser populate state as a side effect (real impl does this)
+        def side_effect(target, viewport=(1280, 800)):
+            wb._state.update({
+                "browser": fake_browser, "page": fake_page,
+                "target": target, "started_at": "2026-05-12T10:00:00",
+            })
+            return fake_page
+        mock_ensure.side_effect = side_effect
+
+        result = _call(wb.web_browser_start, {"target": "10.10.10.5"})
+
+    assert result.get("is_error") is not True
+    text = result["content"][0]["text"]
+    assert "started" in text.lower() or "running" in text.lower()
+    assert "10.10.10.5" in text
+    mock_ensure.assert_called_once()
+    wb._close_browser()
+
+
+def test_start_refuses_out_of_scope_target(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    # Set up scope.toml that excludes 10.10.10.5
+    target_dir = tmp_targets_dir / "10.10.10.5"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "scope.toml").write_text(
+        '[scope]\nin_scope_cidrs = ["192.168.0.0/24"]\n'
+    )
+
+    # _ensure_browser must NOT be called because scope check fails first
+    with patch("reverser.tools.web_browser._ensure_browser") as mock_ensure:
+        result = _call(wb.web_browser_start, {"target": "10.10.10.5"})
+
+    assert result.get("is_error") is True
+    assert "scope" in result["content"][0]["text"].lower()
+    mock_ensure.assert_not_called()
+
+
+def test_start_idempotent_when_already_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    # Pre-populate state to simulate already-running browser
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": MagicMock(),
+        "target": "10.10.10.5", "started_at": "2026-05-12T09:00:00",
+    })
+
+    result = _call(wb.web_browser_start, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+    assert "already" in text.lower() or "running" in text.lower()
+    wb._close_browser()
