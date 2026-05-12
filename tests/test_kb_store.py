@@ -352,3 +352,68 @@ def test_list_targets_ignores_non_target_dirs(tmp_targets_dir):
     for_target("10.10.10.5")
     (tmp_targets_dir / "junk").mkdir()
     assert list_targets() == ["10.10.10.5"]
+
+
+def test_append_finding_evidence_to_existing_finding(tmp_targets_dir):
+    """append_finding_evidence adds a path to an existing finding's evidence_paths."""
+    from reverser.kb import for_target, FindingFact
+
+    kb = for_target("10.10.10.5")
+    fid = kb.record_finding(FindingFact(
+        title="Test finding",
+        severity="high",
+        description="Body",
+        evidence_paths=["existing/path.txt"],
+    ))
+
+    kb.append_finding_evidence(fid, "targets/10.10.10.5/findings/1/screenshot-1.png")
+
+    findings = kb.get_findings()
+    assert len(findings) == 1
+    assert findings[0].evidence_paths == [
+        "existing/path.txt",
+        "targets/10.10.10.5/findings/1/screenshot-1.png",
+    ]
+
+
+def test_append_finding_evidence_to_finding_with_no_existing_evidence(tmp_targets_dir):
+    """append_finding_evidence works when evidence_paths is empty."""
+    from reverser.kb import for_target, FindingFact
+
+    kb = for_target("10.10.10.5")
+    fid = kb.record_finding(FindingFact(
+        title="Bare finding",
+        severity="low",
+        description="No initial evidence",
+    ))
+
+    kb.append_finding_evidence(fid, "first/screenshot.png")
+
+    findings = kb.get_findings()
+    assert findings[0].evidence_paths == ["first/screenshot.png"]
+
+
+def test_append_finding_evidence_raises_for_unknown_finding(tmp_targets_dir):
+    """append_finding_evidence raises ValueError if finding_id doesn't exist."""
+    import pytest
+    from reverser.kb import for_target
+    kb = for_target("10.10.10.5")
+    with pytest.raises(ValueError, match="No finding with id="):
+        kb.append_finding_evidence(99999, "some/path.png")
+
+
+def test_append_finding_evidence_preserves_order(tmp_targets_dir):
+    """Multiple appends maintain insertion order."""
+    from reverser.kb import for_target, FindingFact
+
+    kb = for_target("10.10.10.5")
+    fid = kb.record_finding(FindingFact(
+        title="Multi-evidence finding", severity="medium", description="",
+    ))
+
+    kb.append_finding_evidence(fid, "a.png")
+    kb.append_finding_evidence(fid, "b.png")
+    kb.append_finding_evidence(fid, "c.png")
+
+    findings = kb.get_findings()
+    assert findings[0].evidence_paths == ["a.png", "b.png", "c.png"]
