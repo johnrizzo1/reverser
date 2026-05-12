@@ -296,3 +296,33 @@ def test_start_idempotent_when_already_running(tmp_targets_dir, monkeypatch):
     text = result["content"][0]["text"]
     assert "already" in text.lower() or "running" in text.lower()
     wb._close_browser()
+
+
+def test_close_when_not_running(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    result = _call(wb.web_browser_close, {})
+    text = result["content"][0]["text"]
+    assert "not_running" in text.lower() or "not running" in text.lower()
+
+
+def test_close_when_running_tears_down(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    fake_pw = MagicMock()
+    wb._state.update({
+        "browser": fake_browser, "playwright": fake_pw,
+        "page": MagicMock(), "target": "10.10.10.5",
+    })
+
+    result = _call(wb.web_browser_close, {})
+    text = result["content"][0]["text"]
+    assert "closed" in text.lower()
+    assert wb._state["browser"] is None
+    fake_browser.close.assert_called_once()
+    fake_pw.stop.assert_called_once()

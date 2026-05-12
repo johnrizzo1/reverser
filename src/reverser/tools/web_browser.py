@@ -268,3 +268,29 @@ async def web_browser_start(args: dict) -> dict:
 
 
 TOOLS.append(web_browser_start)
+
+
+@tool(
+    "web_browser_close",
+    "Clean shutdown — close page, context, browser; stop playwright; clear "
+    "singleton state. Idempotent. Call this before switching to a different "
+    "target.",
+    {"type": "object", "properties": {}, "required": []},
+)
+async def web_browser_close(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    was_running = bool(_state["browser"])
+    await asyncio.to_thread(_close_browser)
+
+    if was_running:
+        return format_tool_result("web_browser closed.\n  status: closed")
+    return format_tool_result(
+        "web_browser was not running.\n  status: not_running"
+    )
+
+
+TOOLS.append(web_browser_close)
