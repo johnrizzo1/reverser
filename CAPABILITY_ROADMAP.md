@@ -15,7 +15,7 @@ is referenced as a real-world failure case that motivates several items.
 **As of 2026-05-12:** 15 profiles registered, 77 MCP tools (75 unique), Claude
 + Ollama + LM Studio backends, per-target SQLite KB, session stop/resume,
 manager profile (sub-agent coordination), exploit profile + msfrpc bridge,
-524 passing tests.
+hypothesis-driven discipline in pentest/webpentest, 540 passing tests.
 
 ---
 
@@ -186,7 +186,13 @@ its spec / plan under `docs/superpowers/`.
   - **Partial (2026-05-09):** Manager profile achieves similar end via `dispatch_specialist` orchestration; macros for non-manager profiles still pending.
 - [ ] Result cache / dedup keyed on (target, args) hash
 - [ ] Target-specific wordlist generation: CeWL, dynamic expansion on hits, gotator/altdns permutations
-- [ ] Failure analysis trigger: after K failed exploit attempts, force "stop, summarize, propose orthogonal directions"
+- [x] Failure analysis trigger: after K failed exploit attempts, force "stop, summarize, propose orthogonal directions"
+  - **Status (2026-05-12):** Shipped. After K failed exploit attempts against
+    a hypothesis, the pentest (K=3) and webpentest (K=5) profile prompts now
+    require mark-refuted + propose-three-orthogonal-surfaces. AD profile
+    already had this discipline; manager profile achieves the same end via
+    `dispatch_specialist`. Other profiles (general/linux/windows/etc.) are
+    out of scope — they don't have an exploit-attempt surface.
 - [x] Per-target scope envelope (`scope.toml`: CIDR, port exclusions, hours, no-DoS) consulted before each tool call
   - **Status (2026-05-04):** Shipped via Plan 5. Optional `targets/<target>/scope.toml` enforces in-scope CIDRs, no-DoS, no-account-lockout, allowed-hours; checked by every `netexec_*`, `bloodhound_*`, and `enum4linux_ng` tool.
 - [ ] Evidence pipeline: auto-snapshot successful steps into `findings/<id>/` keyed to final report
@@ -230,15 +236,14 @@ numbering from 2026-05-03 in parentheses.
   6 `bloodhound_*` tools (lifecycle + collect + canned/cypher), `ad` profile
   with 11 skills. ~60% of the AD gap closed.
 
-- [ ] **5. (was #5) — Hypothesis-driven pentest/webpentest prompts.**
-  Restructure `pentest` and `webpentest` profile system prompts around
-  hypothesis → cheap experiment → update → pivot. Reuse the
-  `hypotheses` KB table (already shipped with manager profile) for
-  storage. Add explicit "stop spraying, propose three new attack surfaces"
-  trigger after K failed exploitation attempts (the 10.13.38.23 report's
-  failure mode). Small implementation, big behavior change.
+- [x] **5. (was #5) — Hypothesis-driven pentest/webpentest prompts.**
+  - **Status (2026-05-12):** Shipped via this work. Hypothesis-loop block
+    inserted into `pentest` (K=3, every-5-calls) and `webpentest` (K=5,
+    every-8-calls) system addenda. Skill-level reinforcement added to RECON,
+    EXPLOIT, CREDS (pentest) and WEB_RECON, WEB_SQLI, WEB_MANUAL (webpentest).
+    Specs/plans: `2026-05-12-hypothesis-driven-prompts-{design,plan}.md`.
 
-> **Remaining work order:** #3 → #5 (items #1, #2, and #4 already complete).
+> **Remaining work order:** #3 (items #1, #2, #4, and #5 already complete).
 
 ---
 
