@@ -55,15 +55,20 @@ def test_all_tools_count_after_manager_work():
     registered (66 unique). enum4linux_ng added post-merge = 69 registered,
     67 unique.
     """
-    assert len(ALL_TOOLS) == 69, (
-        f"expected 69 registered tools, got {len(ALL_TOOLS)}"
+    assert len(ALL_TOOLS) == 70, (
+        f"expected 70 registered tools, got {len(ALL_TOOLS)}"
     )
     unique_names = {t.name for t in ALL_TOOLS}
-    assert len(unique_names) == 67, (
-        f"expected 67 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
+    assert len(unique_names) == 68, (
+        f"expected 68 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
     )
 
 
 def test_enum4linux_ng_registered():
     names = {t.name for t in ALL_TOOLS}
     assert "enum4linux_ng" in names
+
+
+def test_searchsploit_search_registered():
+    names = {t.name for t in ALL_TOOLS}
+    assert "searchsploit_search" in names
