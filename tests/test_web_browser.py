@@ -424,3 +424,62 @@ def test_type_clears_then_types(tmp_targets_dir, monkeypatch):
     assert result.get("is_error") is not True
     fake_page.fill.assert_called()  # clear_first=True default uses fill (which replaces)
     wb._close_browser()
+
+
+def test_fill_form_fills_multiple_fields(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    fake_page = MagicMock()
+    fake_page.url = "https://example.com/dashboard"
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_fill_form, {
+        "fields": {"input[name=u]": "admin", "input[name=p]": "secret"},
+        "submit_selector": "button[type=submit]",
+    })
+    assert result.get("is_error") is not True
+    # fill called for each field, click for submit
+    assert fake_page.fill.call_count == 2
+    fake_page.click.assert_called_with("button[type=submit]")
+    wb._close_browser()
+
+
+def test_evaluate_runs_js_and_returns_result(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    fake_page = MagicMock()
+    fake_page.evaluate.return_value = {"answer": 42}
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_evaluate, {"js": "({answer: 42})"})
+    text = result["content"][0]["text"]
+    assert "42" in text
+    fake_page.evaluate.assert_called_once_with("({answer: 42})")
+    wb._close_browser()
+
+
+def test_wait_for_selector(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.tools import web_browser as wb
+    wb._close_browser()
+    fake_page = MagicMock()
+    fake_browser = MagicMock()
+    fake_browser.is_connected.return_value = True
+    wb._state.update({
+        "browser": fake_browser, "page": fake_page, "target": "example.com",
+    })
+
+    result = _call(wb.web_browser_wait_for, {"selector": ".result-row"})
+    assert result.get("is_error") is not True
+    fake_page.wait_for_selector.assert_called_once()
+    wb._close_browser()

@@ -466,3 +466,155 @@ async def web_browser_type(args: dict) -> dict:
 
 
 TOOLS.extend([web_browser_click, web_browser_type])
+
+
+@tool(
+    "web_browser_fill_form",
+    "Fill multiple form fields in one call, optionally submitting. fields "
+    "is a {selector: value} dict. submit_selector triggers a click after "
+    "filling. Convenience wrapper for the common login-form pattern.",
+    {
+        "type": "object",
+        "properties": {
+            "fields": {"type": "object",
+                       "description": "{selector: value} dict"},
+            "submit_selector": {"type": "string", "default": ""},
+            "submit_wait_until": {"type": "string", "default": "load"},
+        },
+        "required": ["fields"],
+    },
+)
+async def web_browser_fill_form(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    fields: dict = args.get("fields") or {}
+    submit_selector = (args.get("submit_selector") or "").strip()
+    page = _state["page"]
+
+    def _do():
+        count = 0
+        for sel, val in fields.items():
+            page.fill(sel, str(val))
+            count += 1
+        submitted = False
+        post_url = page.url
+        if submit_selector:
+            page.click(submit_selector)
+            submitted = True
+            post_url = page.url
+        return count, submitted, post_url
+
+    try:
+        count, submitted, post_url = await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(f"fill_form failed: {type(e).__name__}: {e}")
+
+    return format_tool_result(
+        f"Form filled.\n"
+        f"  fields_filled:   {count}\n"
+        f"  submitted:       {submitted}\n"
+        f"  post_submit_url: {post_url}"
+    )
+
+
+@tool(
+    "web_browser_evaluate",
+    "Run arbitrary JavaScript in the page context. Returns the serialized "
+    "result. The power tool for 'did this payload actually fire?' checks "
+    "and SPA-state inspection.",
+    {
+        "type": "object",
+        "properties": {
+            "js": {"type": "string", "description": "JS expression or function body"},
+        },
+        "required": ["js"],
+    },
+)
+async def web_browser_evaluate(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    js = args["js"]
+    page = _state["page"]
+
+    def _do():
+        return page.evaluate(js)
+
+    try:
+        result = await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(f"evaluate failed: {type(e).__name__}: {e}")
+
+    return format_tool_result(
+        f"JS evaluated.\n  result: {result!r}"
+    )
+
+
+@tool(
+    "web_browser_wait_for",
+    "Block until a selector becomes visible OR text appears on the page. "
+    "Exactly one of selector/text must be given. Used for async UI waits "
+    "(modals, search results, SPA route changes).",
+    {
+        "type": "object",
+        "properties": {
+            "selector": {"type": "string", "default": ""},
+            "text": {"type": "string", "default": ""},
+            "timeout_ms": {"type": "integer", "default": 5000},
+        },
+        "required": [],
+    },
+)
+async def web_browser_wait_for(args: dict) -> dict:
+    try:
+        require_pentest_auth()
+    except AuthorizationError as e:
+        return format_error(str(e))
+    err = _require_running()
+    if err:
+        return err
+
+    selector = (args.get("selector") or "").strip()
+    text = (args.get("text") or "").strip()
+    timeout_ms = int(args.get("timeout_ms", 5000))
+
+    if not selector and not text:
+        return format_error("Must provide either selector or text")
+    if selector and text:
+        return format_error("Provide either selector OR text, not both")
+
+    page = _state["page"]
+
+    def _do():
+        if selector:
+            page.wait_for_selector(selector, timeout=timeout_ms)
+            return f"selector {selector!r} appeared"
+        else:
+            page.wait_for_function(
+                f"() => document.body && document.body.innerText.includes({json.dumps(text)})",
+                timeout=timeout_ms,
+            )
+            return f"text {text!r} appeared"
+
+    try:
+        msg = await asyncio.to_thread(_do)
+    except Exception as e:
+        return format_error(
+            f"wait_for timed out or failed: {type(e).__name__}: {e}"
+        )
+
+    return format_tool_result(f"Wait succeeded.\n  {msg}")
+
+
+TOOLS.extend([web_browser_fill_form, web_browser_evaluate, web_browser_wait_for])
