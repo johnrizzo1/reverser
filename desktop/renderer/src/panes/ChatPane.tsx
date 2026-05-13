@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { getSessionStore } from "@/state/session-store";
 import { useSendMessage } from "@/api/queries";
 
-export function ChatPane({ sessionId }: { sessionId: string }) {
+export function ChatPane({ sessionId, readOnly }: { sessionId: string; readOnly?: boolean }) {
   const store = getSessionStore(sessionId);
   const messages = useStore(store, (s) => s.messages);
   const pending = useStore(store, (s) => s.pendingAssistantText);
@@ -47,23 +47,25 @@ export function ChatPane({ sessionId }: { sessionId: string }) {
           </div>
         )}
       </div>
-      <div className="border-t border-neutral-800 p-2 flex items-end gap-2">
-        <Textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          rows={2}
-          placeholder="type a message — ⌘/Ctrl+Enter to send"
-        />
-        <Button onClick={submit} disabled={!input.trim() || send.isPending || status === "running"}>
-          Send
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="border-t border-neutral-800 p-2 flex items-end gap-2">
+          <Textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            rows={2}
+            placeholder="type a message — ⌘/Ctrl+Enter to send"
+          />
+          <Button onClick={submit} disabled={!input.trim() || send.isPending || status === "running"}>
+            Send
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

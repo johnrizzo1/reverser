@@ -2,7 +2,7 @@ import { useStore } from "zustand";
 import { getSessionStore } from "@/state/session-store";
 import { Check, Loader2, X } from "lucide-react";
 
-export function ToolTimelinePane({ sessionId }: { sessionId: string }) {
+export function ToolTimelinePane({ sessionId, readOnly }: { sessionId: string; readOnly?: boolean }) {
   const store = getSessionStore(sessionId);
   const toolCalls = useStore(store, (s) => s.toolCalls);
 
@@ -13,7 +13,11 @@ export function ToolTimelinePane({ sessionId }: { sessionId: string }) {
       </div>
       <div className="flex-1 min-h-0 overflow-auto p-2 space-y-1 text-xs font-mono">
         {toolCalls.length === 0 && (
-          <p className="text-neutral-500 px-2">no tools called yet</p>
+          <p className="text-neutral-500 px-2">
+            {readOnly
+              ? "no recorded tool calls for this session (Phase 3 will replay from the session log)"
+              : "no tools called yet"}
+          </p>
         )}
         {toolCalls.map((c) => (
           <div key={c.id} className="border border-neutral-800 rounded p-2 bg-neutral-950">
