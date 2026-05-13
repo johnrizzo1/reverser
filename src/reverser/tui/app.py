@@ -584,6 +584,11 @@ class ReverserApp(App):
 
     @on(Input.Submitted, "#user-input")
     async def on_user_input(self, event: Input.Submitted) -> None:
+        # Reset connection-failure circuit breakers — user input is the
+        # 'yield acknowledged' signal (per spec §8.3).
+        from ..tools import _conn_breaker
+        _conn_breaker.reset_all()
+
         text = event.value.strip()
         if not text:
             return
