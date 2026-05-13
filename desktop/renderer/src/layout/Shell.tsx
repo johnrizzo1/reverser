@@ -1,7 +1,20 @@
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { StatusBar } from "./StatusBar";
 import { ActivityBar } from "./ActivityBar";
 import { Footer } from "./Footer";
+import { SessionsPanel } from "./SessionsPanel";
+import { TargetsPanel } from "./TargetsPanel";
+
+function SidePanel() {
+  const { pathname } = useLocation();
+  if (pathname.startsWith("/sessions") || pathname.startsWith("/session/")) {
+    return <SessionsPanel />;
+  }
+  if (pathname.startsWith("/targets") || pathname.startsWith("/target/")) {
+    return <TargetsPanel />;
+  }
+  return null;
+}
 
 export function Shell() {
   return (
@@ -9,7 +22,8 @@ export function Shell() {
       <StatusBar />
       <div className="flex-1 flex min-h-0">
         <ActivityBar />
-        <main className="flex-1 min-w-0 overflow-auto">
+        <div className="w-60 min-w-0 shrink-0"><SidePanel /></div>
+        <main className="flex-1 min-w-0 overflow-hidden">
           <Outlet />
         </main>
       </div>

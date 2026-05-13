@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Shell } from "@/layout/Shell";
 import { Dashboard } from "@/pages/Dashboard";
 import { Health } from "@/pages/Health";
@@ -7,7 +7,15 @@ import { Settings } from "@/pages/Settings";
 import { CrashScreen } from "@/pages/CrashScreen";
 import { NewEngagement } from "@/pages/NewEngagement";
 import { SessionLayout } from "@/layout/SessionLayout";
+import { SessionsIndex } from "@/pages/SessionsIndex";
+import { TargetsIndex } from "@/pages/TargetsIndex";
+import { TargetOverview } from "@/pages/TargetOverview";
 import { useConnection } from "@/state/connection";
+
+function LegacySessionRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/sessions/${id}`} replace />;
+}
 
 export default function App() {
   const status = useConnection((s) => s.status);
@@ -32,11 +40,15 @@ export default function App() {
       <Route element={<Shell />}>
         <Route index element={<Dashboard />} />
         <Route path="/new" element={<NewEngagement />} />
+        <Route path="/sessions" element={<SessionsIndex />} />
+        <Route path="/sessions/:id" element={<SessionLayout />} />
+        <Route path="/targets" element={<TargetsIndex />} />
+        <Route path="/target/:name" element={<TargetOverview />} />
         <Route path="/health" element={<Health />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
-      <Route path="/session/:id" element={<SessionLayout />} />
+      <Route path="/session/:id" element={<LegacySessionRedirect />} />
     </Routes>
   );
 }
