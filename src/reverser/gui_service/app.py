@@ -3,6 +3,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 
 from .auth import is_authorized
 from .config import ServiceConfig
+from .routes import health as health_routes
 
 
 def _require_token_dep(config: ServiceConfig):
@@ -27,10 +28,6 @@ def create_app(config: ServiceConfig) -> FastAPI:
 
     require_token = Depends(_require_token_dep(config))
 
-    # Route modules will be wired in subsequent tasks.
-    # Placeholder /api/health is added here so the auth gate is testable now.
-    @app.get("/api/health", dependencies=[require_token])
-    def _health_placeholder():
-        return {"ok": True}
+    app.include_router(health_routes.router, dependencies=[require_token])
 
     return app
