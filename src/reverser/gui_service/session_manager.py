@@ -176,17 +176,29 @@ class SessionManager:
         if self.active is not None:
             for row in out:
                 if row["id"] == self.active.session_id:
-                    row["state"] = "active"
-                    row.update(self.active.stats)
+                    serialized = self._serialize(self.active)
+                    row.update({
+                        "state": "active",
+                        "turns": serialized["turns"],
+                        "total_cost": serialized["total_cost"],
+                        "budget": serialized["budget"],
+                        "max_turns": serialized["max_turns"],
+                    })
                     break
             else:
-                out.append({"id": self.active.session_id, **self.active.stats, "state": "active"})
+                out.append(self._serialize(self.active))
         return out
 
     @staticmethod
     def _serialize(gs: GUISession) -> dict[str, Any]:
+        s = gs.stats
         return {
             "id": gs.session_id,
             "state": "active",
-            **gs.stats,
+            "target": s["target"],
+            "profile": s["profile_key"],
+            "turns": s["turns"],
+            "total_cost": s["total_cost"],
+            "budget": s["budget"],
+            "max_turns": s["max_turns"],
         }

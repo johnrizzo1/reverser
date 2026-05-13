@@ -82,3 +82,18 @@ def test_pentest_authorization_required_for_network_profile(manager, tmp_path, m
             backend_name="claude", model=None, api_base=None,
             budget=5.0, max_turns=50,
         ))
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_active_row_has_profile_key(manager, tmp_path):
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        await manager.create_session(
+            target=str(tmp_path / "bin"),
+            profile_key="general",
+            backend_name="claude", model=None, api_base=None,
+            budget=5.0, max_turns=50,
+        )
+    rows = manager.list_sessions()
+    for row in rows:
+        assert "profile" in row
+        assert "profile_key" not in row  # should be normalized to "profile"
