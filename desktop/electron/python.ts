@@ -22,31 +22,47 @@ export type SupervisorOptions = {
   onLogLine: (line: string) => void;
 };
 
+/** Build the env we'll hand the spawned Python process: inherits the
+ *  caller env, then prepends <projectRoot>/src to PYTHONPATH so `reverser`
+ *  is importable without requiring `pip install -e .`. This matches the
+ *  pytest config (`pythonpath = ["src"]`) and works regardless of whether
+ *  the user is inside `devenv shell`. */
+function buildPythonEnv(projectRoot: string): NodeJS.ProcessEnv {
+  const srcDir = path.join(projectRoot, "src");
+  const existing = process.env.PYTHONPATH ?? "";
+  const sep = process.platform === "win32" ? ";" : ":";
+  const pythonpath = existing ? `${srcDir}${sep}${existing}` : srcDir;
+  return { ...process.env, PYTHONPATH: pythonpath };
+}
+
 /** Pick the first Python interpreter on PATH that can import the gui_service
  *  module. Tries `python` then `python3`. Returns null if neither works. */
 function findPython(projectRoot: string): { cmd: string; reason: string } | null {
+  const env = buildPythonEnv(projectRoot);
+  let lastReason = "";
   for (const cmd of ["python", "python3"]) {
     try {
       // -c "import reverser.gui_service" verifies both that the interpreter
-      // exists AND that the project deps are available in the env we'd spawn into.
+      // exists AND that the project deps are available (with PYTHONPATH=src
+      // prepended, the project itself is reachable; this catches missing
+      // runtime deps like fastapi).
       const r = spawnSync(cmd, ["-c", "import reverser.gui_service"], {
         cwd: projectRoot,
-        env: process.env,
+        env,
         stdio: ["ignore", "pipe", "pipe"],
         encoding: "utf8",
       });
       if (r.status === 0) return { cmd, reason: "" };
-      // Found the binary but the import failed — capture the stderr so the
-      // crash screen can show the actual ImportError (likely "no module
-      // named reverser" because the user isn't in `devenv shell`).
+      // Found the binary but the import failed — capture stderr; keep
+      // trying the next candidate in case it's the one that works.
       if (r.status !== null) {
-        return { cmd: "", reason: `${cmd} -c "import reverser.gui_service" failed:\n${r.stderr.trim()}` };
+        lastReason = `${cmd} -c "import reverser.gui_service" failed:\n${r.stderr.trim()}`;
       }
     } catch {
       // ENOENT — try the next candidate.
     }
   }
-  return null;
+  return lastReason ? { cmd: "", reason: lastReason } : null;
 }
 
 
@@ -71,6 +87,8 @@ export class PythonSupervisor {
     }
 
     // The interpreter we picked is reachable AND can import the project module.
+    // Reuse the same env (PYTHONPATH=src) so the spawn behaves identically
+    // to the probe.
     const proc = spawn(
       probe.cmd,
       ["-u", "-m", "reverser.gui_service",
@@ -78,7 +96,7 @@ export class PythonSupervisor {
        "--project-root", this.opts.projectRoot],
       {
         cwd: this.opts.projectRoot,
-        env: process.env,
+        env: buildPythonEnv(this.opts.projectRoot),
         stdio: ["ignore", "pipe", "pipe"],
       }
     );
