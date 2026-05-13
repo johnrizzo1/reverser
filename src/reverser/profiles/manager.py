@@ -138,6 +138,41 @@ Every dispatch must be tied to a hypothesis. Workflow:
 The hypothesis tree IS the engagement plan. It's also the artifact the client
 receives at the end — make it readable.
 
+### Two-failure pivot rule (NON-NEGOTIABLE)
+
+Manager engagements fail when the lead keeps re-dispatching the same hypothesis
+without pivoting. The 10.129.60.148 engagement is the cautionary tale — 25
+retries of the same primitive across 2h49m, no foothold, no flag.
+
+**After 2 dispatches against the same hypothesis**, you MUST:
+1. `kb_update_hypothesis(id=X, status=refuted)` with a one-line reason
+   synthesizing both dispatch reports.
+2. Stop dispatching against that hypothesis.
+3. Propose THREE orthogonal hypotheses via `kb_add_hypothesis`. Orthogonal means:
+   different target host, different attack surface (web vs. SSH vs. SMB),
+   different exploitation class (creds vs. RCE vs. info-disclosure), or
+   different specialist (try `ad` instead of `webpentest` if AD signals appeared).
+
+**What counts as a failed dispatch:**
+- Specialist returned `Hypothesis outcome: refuted` or `inconclusive`.
+- Specialist exited `budget_exhausted` or `turn_limit` without producing a
+  confirmed outcome.
+- Specialist exited `error` AND the report body has no actionable findings
+  (specifically: no `### Findings`, `### Suggested follow-up`, or
+  `### Hypothesis outcome` sections — this is the `Status: partial`
+  detection in reverse).
+
+**What does NOT count as a failed dispatch:**
+- A dispatch that returned `confirmed` (obviously — that's success).
+- A dispatch that returned `Status: partial` with actionable findings — treat
+  as "needs follow-up dispatch with the new context", NOT as a failure.
+- A dispatch that the manager hasn't yet read fully or updated the hypothesis
+  from.
+
+The hypothesis tree IS the engagement plan. Update it. `kb_list_hypotheses`
+at the start of every new session shows where you left off. Don't re-derive
+things you already disproved.
+
 ### Specialist menu
 
 You may dispatch any of these six specialties via `dispatch_specialist`:

@@ -147,3 +147,37 @@ def test_dispatch_result_partial_includes_read_body_note():
     report = "### Findings\nUseful intel that's long enough to qualify."
     result = _build_dispatch_result(report_text=report, status="error", hypothesis_id=1)
     assert "READ THE REPORT BODY BELOW" in result
+
+
+# ── Manager prompt content ───────────────────────────────────────────
+
+
+def test_manager_addendum_mentions_two_failure_pivot():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+    assert "Two-failure pivot rule" in addendum
+    assert "NON-NEGOTIABLE" in addendum
+
+
+def test_manager_addendum_specifies_what_counts_as_failed_dispatch():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+    assert "What counts as a failed dispatch" in addendum
+
+
+def test_manager_addendum_lists_what_does_NOT_count_as_failed():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+    assert "What does NOT count" in addendum
+    assert "confirmed" in addendum.lower()
+
+
+def test_manager_addendum_mentions_orthogonal_hypotheses():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+    assert "orthogonal" in addendum.lower()
+    assert "three" in addendum.lower() or "3" in addendum
