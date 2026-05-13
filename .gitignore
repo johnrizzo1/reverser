@@ -62,3 +62,8 @@ desktop/dist-electron/
 desktop/.vite/
 desktop/test-results/
 desktop/playwright-report/
+
+# TypeScript build info
+*.tsbuildinfo
+desktop/vite.config.js
+desktop/vite.config.d.ts
