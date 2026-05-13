@@ -54,3 +54,11 @@ uv.lock
 
 # Brainstorming session artifacts (visual-companion mockups)
 .superpowers/
+
+# Electron desktop UI build outputs
+desktop/node_modules/
+desktop/dist/
+desktop/dist-electron/
+desktop/.vite/
+desktop/test-results/
+desktop/playwright-report/
