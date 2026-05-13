@@ -9,6 +9,8 @@ import {
   type CreateSessionResponse,
   type TargetsResponse,
   type KBResponse,
+  type TargetSummary,
+  type ConversationResponse,
 } from "./client";
 import { useConnection } from "@/state/connection";
 
@@ -128,5 +130,32 @@ export function useTargetKB(target: string | null) {
     queryFn: () => api.get<KBResponse>(`/api/targets/${encodeURIComponent(target!)}/kb`),
     enabled: ready && !!target,
     refetchInterval: 8_000,
+  });
+}
+
+export function useTargetSummary(target: string | null) {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["target-summary", target],
+    queryFn: () =>
+      api.get<TargetSummary>(`/api/targets/${encodeURIComponent(target!)}/summary`),
+    enabled: ready && !!target,
+    staleTime: 30_000,
+  });
+}
+
+export function useConversation(sessionId: string | null, target: string | null) {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["conversation", sessionId, target],
+    queryFn: () =>
+      api.get<ConversationResponse>(
+        `/api/sessions/conversation/${encodeURIComponent(sessionId!)}` +
+        `?target=${encodeURIComponent(target!)}`,
+      ),
+    enabled: ready && !!sessionId && !!target,
+    // Snapshot history doesn't change after a session is stopped/completed,
+    // so cache it generously. Hook only mounts for non-active sessions.
+    staleTime: 5 * 60_000,
   });
 }

@@ -118,3 +118,49 @@ export type KBResponse = {
   artifacts: unknown[];
   notes: unknown[];
 };
+
+// ---- Phase 2: Target summary ----
+
+export type TargetSummary = {
+  target: string;
+  sessions: {
+    total: number;
+    by_state: {
+      active: number;
+      stopped: number;
+      completed: number;
+      abandoned: number;
+    };
+  };
+  spend: { total_usd: number };
+  profiles_used: string[];
+  first_activity: string | null;
+  last_activity: string | null;
+  kb_counts: {
+    hosts: number;
+    services: number;
+    credentials: number;
+    findings: number;
+    hypotheses: number;
+    artifacts: number;
+    notes: number;
+  };
+};
+
+// ---- Phase 2: Conversation replay ----
+
+export type ConversationEntry = {
+  user: string;
+  agent: string;
+  turn: number;
+  timestamp: string;
+  cost: number;
+};
+
+export type ConversationResponse = {
+  id: string;
+  target: string;
+  profile: string;
+  state: "active" | "stopped" | "completed" | "abandoned";
+  conversation: ConversationEntry[];
+};
