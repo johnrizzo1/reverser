@@ -315,6 +315,7 @@ class OpenAICompatBackend(Backend):
 
                         result_text, is_error = await execute_tool(
                             self._handlers, name, args,
+                            allowed_set=tool_names if allowed_tools else None,
                         )
 
                         yield AgentEvent(
@@ -382,6 +383,7 @@ class OpenAICompatBackend(Backend):
 
                 result_text, is_error = await execute_tool(
                     self._handlers, fn.name, fn.arguments,
+                    allowed_set=tool_names if allowed_tools else None,
                 )
 
                 yield AgentEvent(
