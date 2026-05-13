@@ -168,7 +168,7 @@ from rich.markup import escape as markup_escape
 from ..profiles import Profile, Skill, get_profile, list_profiles
 from ..backends import AgentEvent
 from ..tools._common import is_url
-from .session import AgentSession, _WEB_PROFILES
+from ..agent_session import AgentSession, _WEB_PROFILES
 
 
 # ── Modal screens ───────────────────────────────────────────────────
