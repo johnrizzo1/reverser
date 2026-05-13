@@ -71,6 +71,21 @@ class SessionLog:
             "turns": turns,
         })
 
+    def log_dispatch_event(self, specialty: str, kind: str, content: str):
+        """Persist a dispatch_specialist sub-agent event so read-only
+        session replay can render it.
+
+        Specialty: 'ad', 'webpentest', etc.
+        Kind: 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'tool_error' | 'start' | 'result' | 'error'.
+        Content: truncated to 4096 chars.
+        """
+        self._write({
+            "type": "dispatch",
+            "specialty": specialty,
+            "kind": kind,
+            "content": (content or "")[:4096],
+        })
+
     def close(self):
         self._f.close()
 

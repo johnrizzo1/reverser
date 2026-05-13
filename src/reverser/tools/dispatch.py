@@ -319,6 +319,12 @@ async def dispatch_specialist(args: dict) -> dict:
     def _emit(kind: str, content: str) -> None:
         if sess is None:
             return
+        # Persist for read-only replay (Phase 3a). Best-effort; the in-process
+        # callback below drives the live UI either way.
+        try:
+            sess._slog.log_dispatch_event(specialty, kind, content)
+        except Exception:
+            pass
         try:
             sess.emit_dispatch_event(specialty, kind, content)
         except Exception:
