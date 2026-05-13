@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useSessionStream } from "@/hooks/useSessionStream";
@@ -10,17 +10,36 @@ import { FindingsPane } from "@/panes/FindingsPane";
 import { HypothesesPane } from "@/panes/HypothesesPane";
 import { Footer } from "./Footer";
 import { Button } from "@/components/ui/button";
-import { useSessions, useStopSession, useMarkDone } from "@/api/queries";
+import { useSessions } from "@/api/queries";
+import { SkillPickerModal } from "@/modals/SkillPickerModal";
+import { SudoModal } from "@/modals/SudoModal";
+import { StopModal } from "@/modals/StopModal";
+import { DoneModal } from "@/modals/DoneModal";
 
 export function SessionLayout() {
   const { id } = useParams<{ id: string }>();
   useSessionStream(id ?? null);
   const [rightTab, setRightTab] = useState<"hypotheses" | "findings" | "kb">("hypotheses");
-  const stop = useStopSession();
-  const done = useMarkDone();
+  const [skillOpen, setSkillOpen] = useState(false);
+  const [sudoOpen, setSudoOpen] = useState(false);
+  const [stopOpen, setStopOpen] = useState(false);
+  const [doneOpen, setDoneOpen] = useState(false);
   const sessions = useSessions();
   const row = sessions.data?.sessions.find((s) => s.id === id);
   const target = row?.target ?? null;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "F1") { e.preventDefault(); setSkillOpen(true); }
+      if (e.key === "F4") { e.preventDefault(); setSudoOpen(true); }
+      if (e.key === "F6") { e.preventDefault(); setStopOpen(true); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault(); setDoneOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   if (!id) return null;
 
@@ -60,10 +79,16 @@ export function SessionLayout() {
         </PanelGroup>
       </div>
       <div className="h-9 border-t border-neutral-800 bg-neutral-950/80 px-3 flex items-center gap-2">
-        <Button size="sm" variant="ghost" onClick={() => stop.mutate(id)}>Stop (F6)</Button>
-        <Button size="sm" variant="ghost" onClick={() => done.mutate(id)}>Mark done</Button>
+        <Button size="sm" variant="ghost" onClick={() => setSkillOpen(true)}>Skills (F1)</Button>
+        <Button size="sm" variant="ghost" onClick={() => setSudoOpen(true)}>Sudo (F4)</Button>
+        <Button size="sm" variant="ghost" onClick={() => setStopOpen(true)}>Stop (F6)</Button>
+        <Button size="sm" variant="ghost" onClick={() => setDoneOpen(true)}>Mark done</Button>
         <div className="ml-auto"><Footer /></div>
       </div>
+      <SkillPickerModal sessionId={id!} open={skillOpen} onOpenChange={setSkillOpen} />
+      <SudoModal sessionId={id!} open={sudoOpen} onOpenChange={setSudoOpen} />
+      <StopModal sessionId={id!} open={stopOpen} onOpenChange={setStopOpen} />
+      <DoneModal sessionId={id!} open={doneOpen} onOpenChange={setDoneOpen} />
     </div>
   );
 }
