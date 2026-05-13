@@ -52,3 +52,11 @@ async def test_health_accepts_valid_bearer(client, config):
         headers={"Authorization": f"Bearer {config.token}"},
     )
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_health_401_includes_www_authenticate_header(client):
+    """RFC 6750: 401 responses must include WWW-Authenticate: Bearer."""
+    resp = await client.get("/api/health")
+    assert resp.status_code == 401
+    assert resp.headers.get("WWW-Authenticate") == "Bearer"

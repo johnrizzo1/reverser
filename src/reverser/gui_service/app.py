@@ -12,6 +12,7 @@ def _require_token_dep(config: ServiceConfig):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="missing or invalid bearer token",
+                headers={"WWW-Authenticate": "Bearer"},
             )
     return _check
 
