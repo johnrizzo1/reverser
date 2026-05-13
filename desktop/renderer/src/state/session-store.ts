@@ -46,6 +46,7 @@ type Actions = {
   ingest: (frame: WSFrame) => void;
   appendUserMessage: (text: string) => void;
   reset: () => void;
+  seedConversation: (entries: { user: string; agent: string; turn: number }[]) => void;
 };
 
 const _initialState = (): SessionState => ({
@@ -66,6 +67,15 @@ export const makeSessionStore = () =>
     appendUserMessage: (text) =>
       set((s) => ({ messages: [...s.messages, { role: "user", text }] })),
     reset: () => set(_initialState()),
+    seedConversation: (entries) =>
+      set(() => {
+        const messages: ChatMessage[] = [];
+        for (const e of entries) {
+          if (e.user) messages.push({ role: "user", text: e.user, turn: e.turn });
+          if (e.agent) messages.push({ role: "assistant", text: e.agent, turn: e.turn });
+        }
+        return { messages };
+      }),
     ingest: (frame) =>
       set((s) => {
         switch (frame.type) {
