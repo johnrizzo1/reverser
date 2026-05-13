@@ -159,7 +159,11 @@ from claude_agent_sdk import (  # noqa: E402  # imports here to keep helpers imp
     query,
     ClaudeAgentOptions,
     AssistantMessage,
+    UserMessage,
     TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
+    ToolResultBlock,
     ResultMessage,
 )
 
@@ -309,12 +313,71 @@ async def dispatch_specialist(args: dict) -> dict:
     status = "completed"
     error_msg = None
 
+    # Helper to push a sub-agent event up to the TUI (no-op when no session
+    # or no callback is registered). Truncate tool_result bodies to keep the
+    # chat log readable; the full body is still in the session log.
+    def _emit(kind: str, content: str) -> None:
+        if sess is None:
+            return
+        try:
+            sess.emit_dispatch_event(specialty, kind, content)
+        except Exception:
+            pass
+
+    def _summarize_tool_input(tool_input: object) -> str:
+        try:
+            import json as _json
+            s = _json.dumps(tool_input, default=str, ensure_ascii=False)
+        except Exception:
+            s = str(tool_input)
+        return s if len(s) <= 200 else s[:200] + "…"
+
+    def _summarize_tool_result(content: object) -> str:
+        # content may be str, list of dicts, or a list of content blocks
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    parts.append(str(item.get("text") or item.get("content") or item))
+                else:
+                    parts.append(str(item))
+            text = "\n".join(parts)
+        else:
+            text = str(content)
+        text = text.strip()
+        return text if len(text) <= 400 else text[:400] + "…"
+
     try:
         async for message in query(prompt=sub_goal, options=options):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
                         report_text = block.text  # last text block wins
+                        if block.text.strip():
+                            _emit("text", block.text)
+                    elif isinstance(block, ThinkingBlock):
+                        thinking_text = getattr(block, "thinking", "") or ""
+                        if thinking_text.strip():
+                            _emit("thinking", thinking_text)
+                    elif isinstance(block, ToolUseBlock):
+                        tool_name = getattr(block, "name", "?")
+                        tool_input = getattr(block, "input", {})
+                        _emit(
+                            "tool_call",
+                            f"{tool_name} {_summarize_tool_input(tool_input)}",
+                        )
+            elif isinstance(message, UserMessage):
+                # Sub-agent's tool results come back as UserMessage with
+                # ToolResultBlock content. Surface them so the user sees
+                # what the specialist learned.
+                content = getattr(message, "content", None)
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, ToolResultBlock):
+                            kind = "tool_error" if getattr(block, "is_error", False) else "tool_result"
+                            _emit(kind, _summarize_tool_result(getattr(block, "content", "")))
             elif isinstance(message, ResultMessage):
                 cost_usd = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
                 turns_consumed = int(getattr(message, "num_turns", 0) or 0)

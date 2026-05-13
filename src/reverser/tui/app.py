@@ -780,6 +780,12 @@ class ReverserApp(App):
         input_widget.placeholder = "Agent is working..."
         input_widget.disabled = True
 
+        # Register the dispatch-event callback so sub-agent activity is
+        # surfaced in the chat log with a [specialty] prefix. Cleared in
+        # `finally` so a dangling reference can't fire after the turn ends.
+        self.session.on_dispatch_event = lambda specialty, kind, content: \
+            self._render_dispatch_event(specialty, kind, content, log)
+
         try:
             async for event in self.session.send(message):
                 self._handle_event(event, log)
@@ -790,10 +796,35 @@ class ReverserApp(App):
         except Exception as e:
             log.write(f"\n[red bold]Error:[/red bold] {markup_escape(str(e))}")
         finally:
+            self.session.on_dispatch_event = None
             input_widget.disabled = False
             input_widget.placeholder = "Message the agent... (or /help)"
             input_widget.focus()
             self._update_status()
+
+    def _render_dispatch_event(
+        self, specialty: str, kind: str, content: str, log: RichLog
+    ) -> None:
+        """Render a dispatch_specialist sub-agent event in the chat log.
+
+        Magenta `[specialty]` prefix distinguishes it from the manager's own
+        events. Truncation already happened on the dispatch side; we just
+        format and escape here.
+        """
+        prefix = f"[magenta][{markup_escape(specialty)}][/magenta]"
+        body = markup_escape(content)
+        if kind == "text":
+            log.write(f"{prefix} {body}", shrink=False)
+        elif kind == "thinking":
+            log.write(f"{prefix} [dim italic]thinking: {body}[/dim italic]")
+        elif kind == "tool_call":
+            log.write(f"{prefix} [cyan]> {body}[/cyan]")
+        elif kind == "tool_result":
+            log.write(f"{prefix} [green dim]{body}[/green dim]")
+        elif kind == "tool_error":
+            log.write(f"{prefix} [red dim]{body}[/red dim]")
+        else:
+            log.write(f"{prefix} {body}")
 
     def _handle_event(self, event: AgentEvent, log: RichLog) -> None:
         if event.kind == "text":
