@@ -4,6 +4,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from .auth import is_authorized
 from .config import ServiceConfig
 from .routes import health as health_routes
+from .routes import profiles as profiles_routes
 
 
 def _require_token_dep(config: ServiceConfig):
@@ -29,5 +30,6 @@ def create_app(config: ServiceConfig) -> FastAPI:
     require_token = Depends(_require_token_dep(config))
 
     app.include_router(health_routes.router, dependencies=[require_token])
+    app.include_router(profiles_routes.router, dependencies=[require_token])
 
     return app
