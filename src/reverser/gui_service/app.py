@@ -12,6 +12,7 @@ from .routes import (
     sessions as sessions_routes,
     targets as targets_routes,
 )
+from .ws import sessions as ws_sessions
 
 
 def _require_token_dep(config: ServiceConfig):
@@ -37,4 +38,5 @@ def create_app(config: ServiceConfig) -> FastAPI:
     app.include_router(backends_routes.router, dependencies=[require_token])
     app.include_router(sessions_routes.router, dependencies=[require_token])
     app.include_router(targets_routes.router, dependencies=[require_token])
+    app.include_router(ws_sessions.router)
     return app
