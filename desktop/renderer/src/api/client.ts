@@ -66,3 +66,55 @@ export type Backend = {
 };
 
 export type BackendsResponse = { backends: Backend[] };
+
+// ---- Sessions ----
+
+export type SessionRow = {
+  id: string;
+  target: string;
+  profile: string;
+  state: "active" | "stopped" | "completed" | "abandoned";
+  turns: number;
+  total_cost: number;
+  stopped_at: string | null;
+  budget?: number;
+  max_turns?: number;
+};
+
+export type SessionsResponse = { sessions: SessionRow[] };
+
+export type CreateSessionRequest = {
+  target: string;
+  profile: string;
+  backend: string;
+  model: string | null;
+  api_base: string | null;
+  budget: number;
+  max_turns: number;
+};
+
+export type CreateSessionResponse = {
+  id: string;
+  state: "active";
+  target: string;
+  profile: string;
+  turns: number;
+  total_cost: number;
+  budget: number;
+  max_turns: number;
+};
+
+// ---- Targets / KB ----
+
+export type TargetRow = { name: string; has_kb: boolean; has_scope: boolean };
+export type TargetsResponse = { targets: TargetRow[] };
+
+export type KBResponse = {
+  hosts: unknown[];
+  services: unknown[];
+  credentials: unknown[];
+  findings: unknown[];
+  hypotheses: unknown[];
+  artifacts: unknown[];
+  notes: unknown[];
+};
