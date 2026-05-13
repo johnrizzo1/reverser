@@ -1,0 +1,132 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  api,
+  type HealthResponse,
+  type ProfilesResponse,
+  type BackendsResponse,
+  type SessionsResponse,
+  type CreateSessionRequest,
+  type CreateSessionResponse,
+  type TargetsResponse,
+  type KBResponse,
+} from "./client";
+import { useConnection } from "@/state/connection";
+
+function useReady() {
+  return useConnection((s) => s.status === "ready");
+}
+
+export function useHealth() {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["health"],
+    queryFn: () => api.get<HealthResponse>("/api/health"),
+    enabled: ready,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useProfiles() {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["profiles"],
+    queryFn: () => api.get<ProfilesResponse>("/api/profiles"),
+    enabled: ready,
+    staleTime: 60_000,
+  });
+}
+
+export function useBackends() {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["backends"],
+    queryFn: () => api.get<BackendsResponse>("/api/backends"),
+    enabled: ready,
+    staleTime: 60_000,
+  });
+}
+
+export function useSessions() {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["sessions"],
+    queryFn: () => api.get<SessionsResponse>("/api/sessions"),
+    enabled: ready,
+    refetchInterval: 5_000,
+  });
+}
+
+export function useCreateSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateSessionRequest) =>
+      api.post<CreateSessionResponse>("/api/sessions", body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+}
+
+export function useSendMessage(sessionId: string) {
+  return useMutation({
+    mutationFn: (text: string) =>
+      api.post<void>(`/api/sessions/${sessionId}/messages`, { text }),
+  });
+}
+
+export function useTriggerSkill(sessionId: string) {
+  return useMutation({
+    mutationFn: (skillKey: string) =>
+      api.post<void>(`/api/sessions/${sessionId}/skills/${skillKey}`),
+  });
+}
+
+export function useStopSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => api.post<void>(`/api/sessions/${sessionId}/stop`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+}
+
+export function useMarkDone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => api.post<void>(`/api/sessions/${sessionId}/done`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+}
+
+export function useResumeSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      api.post<CreateSessionResponse>(`/api/sessions/${sessionId}/resume`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+}
+
+export function useSetSudo(sessionId: string) {
+  return useMutation({
+    mutationFn: (password: string) =>
+      api.post<void>(`/api/sessions/${sessionId}/sudo`, { password }),
+  });
+}
+
+export function useTargets() {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["targets"],
+    queryFn: () => api.get<TargetsResponse>("/api/targets"),
+    enabled: ready,
+    staleTime: 30_000,
+  });
+}
+
+export function useTargetKB(target: string | null) {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["kb", target],
+    queryFn: () => api.get<KBResponse>(`/api/targets/${encodeURIComponent(target!)}/kb`),
+    enabled: ready && !!target,
+    refetchInterval: 8_000,
+  });
+}

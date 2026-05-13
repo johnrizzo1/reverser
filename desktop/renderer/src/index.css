@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  body {
+    -webkit-font-smoothing: antialiased;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      sans-serif;
+  }
+}

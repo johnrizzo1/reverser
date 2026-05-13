@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-electron/
+.vite/
+test-results/
+playwright-report/
+*.log
