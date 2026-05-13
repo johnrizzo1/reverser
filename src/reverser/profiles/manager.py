@@ -40,7 +40,12 @@ SKILL_KICKOFF = Skill(
         "propose 3–5 root hypotheses about likely attack paths. For each, "
         "create a hypothesis with kb_add_hypothesis (include rationale and "
         "an initial confidence). Then pick the one with the highest expected "
-        "value and dispatch the appropriate specialist to test it."
+        "value and dispatch the appropriate specialist to test it. "
+        "When you dispatch the first specialist after kickoff, remember the "
+        "two-failure pivot rule: track dispatch_count per hypothesis, and "
+        "after 2 failed dispatches against the same hypothesis_id, mark it "
+        "refuted and propose three orthogonal alternatives BEFORE dispatching "
+        "again."
     ),
 )
 
@@ -81,7 +86,11 @@ SKILL_PIVOT = Skill(
         "what we've learned? Mark abandoned ones with reason. Then propose "
         "any new hypotheses based on findings discovered since the last "
         "kickoff/pivot — child hypotheses linked to confirmed parents, or "
-        "new roots if a fresh angle emerged."
+        "new roots if a fresh angle emerged. "
+        "A natural trigger for this skill: when you see dispatch_count >= 2 "
+        "on any hypothesis with status still in 'testing', that's a "
+        "Two-failure pivot signal. Don't wait for the user to invoke /pivot — "
+        "fold this into your per-turn checklist."
     ),
 )
 

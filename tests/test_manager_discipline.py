@@ -204,3 +204,20 @@ def test_manager_addendum_says_breaker_resets_on_user_input():
     p = get_profile("manager")
     addendum = p.system_addendum
     assert "user input" in addendum.lower() or "user sends" in addendum.lower()
+
+
+def test_skill_kickoff_mentions_dispatch_count():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    skills_by_key = {s.key: s for s in p.skills}
+    assert "k" in skills_by_key
+    assert "dispatch_count" in skills_by_key["k"].prompt or \
+           "two-failure" in skills_by_key["k"].prompt.lower()
+
+
+def test_skill_pivot_mentions_dispatch_count_2():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    skills_by_key = {s.key: s for s in p.skills}
+    assert "p" in skills_by_key
+    assert "dispatch_count" in skills_by_key["p"].prompt
