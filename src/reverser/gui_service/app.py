@@ -1,5 +1,6 @@
 """FastAPI app factory for the GUI service."""
 from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import is_authorized
 from .config import ServiceConfig
@@ -31,6 +32,17 @@ def create_app(config: ServiceConfig) -> FastAPI:
     app.state.config = config
     app.state.event_bus = EventBus()
     app.state.session_manager = SessionManager(bus=app.state.event_bus)
+
+    # Renderer runs from http://localhost:5173 (Vite dev) or file:// (prod);
+    # service binds to 127.0.0.1:<port>. Different origins → CORS preflight.
+    # Loopback-only + token-gated, so a wildcard is safe.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=False,
+    )
 
     require_token = Depends(_require_token_dep(config))
     app.include_router(health_routes.router, dependencies=[require_token])
