@@ -11,6 +11,7 @@ import {
   type KBResponse,
   type TargetSummary,
   type ConversationResponse,
+  type SessionLogResponse,
 } from "./client";
 import { useConnection } from "@/state/connection";
 
@@ -156,6 +157,23 @@ export function useConversation(sessionId: string | null, target: string | null)
     enabled: ready && !!sessionId && !!target,
     // Snapshot history doesn't change after a session is stopped/completed,
     // so cache it generously. Hook only mounts for non-active sessions.
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useSessionLogReplay(
+  sessionId: string | null,
+  target: string | null,
+) {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["session-log", sessionId, target],
+    queryFn: () =>
+      api.get<SessionLogResponse>(
+        `/api/sessions/log/${encodeURIComponent(sessionId!)}` +
+        `?target=${encodeURIComponent(target!)}`,
+      ),
+    enabled: ready && !!sessionId && !!target,
     staleTime: 5 * 60_000,
   });
 }

@@ -164,3 +164,18 @@ export type ConversationResponse = {
   state: "active" | "stopped" | "completed" | "abandoned";
   conversation: ConversationEntry[];
 };
+
+// ---- Phase 3a: Session log replay ----
+
+export type LogEvent =
+  | { kind: "thinking";    content: string; ts: string | null }
+  | { kind: "tool_call";   name: string; input: string; ts: string | null }
+  | { kind: "tool_result"; ok: boolean; preview: string; ts: string | null }
+  | { kind: "dispatch";    specialty: string; phase: string;
+                           content: string; ts: string | null };
+
+export type SessionLogResponse = {
+  id: string;
+  events: LogEvent[];
+  truncated: boolean;
+};
