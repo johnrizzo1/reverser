@@ -36,14 +36,35 @@ def _check_binary_on_path(binary_name: str, label: str) -> dict:
 
 
 def _check_playwright_chromium() -> dict:
-    """Playwright keeps its Chromium download under ~/.cache/ms-playwright/.
-    We just check that the marker directory exists; a deeper liveness check
-    happens when web_browser_start runs."""
-    cache = os.path.expanduser("~/.cache/ms-playwright")
-    return {
-        "ok": os.path.isdir(cache),
-        "detail": cache if os.path.isdir(cache) else "Chromium not installed",
-    }
+    """Probe Playwright's browser cache. Default location is per-OS:
+       - macOS:   ~/Library/Caches/ms-playwright
+       - Linux:   ~/.cache/ms-playwright
+       - Windows: %USERPROFILE%\\AppData\\Local\\ms-playwright
+    Honors PLAYWRIGHT_BROWSERS_PATH if set. We only check that *some*
+    chromium-* subdirectory exists; a deeper liveness check happens when
+    web_browser_start runs."""
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    candidates: list[str] = []
+    if override:
+        candidates.append(override)
+    candidates.extend([
+        os.path.expanduser("~/Library/Caches/ms-playwright"),
+        os.path.expanduser("~/.cache/ms-playwright"),
+        os.path.expanduser("~/AppData/Local/ms-playwright"),
+    ])
+    for path in candidates:
+        if not os.path.isdir(path):
+            continue
+        # Chromium dirs are named like chromium-1223 / chromium_headless_shell-1223.
+        try:
+            has_chromium = any(
+                entry.startswith("chromium") for entry in os.listdir(path)
+            )
+        except OSError:
+            continue
+        if has_chromium:
+            return {"ok": True, "detail": path}
+    return {"ok": False, "detail": "Chromium not installed (run `npx playwright install chromium`)"}
 
 
 def _build_checks() -> dict:
