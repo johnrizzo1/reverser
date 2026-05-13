@@ -10,7 +10,7 @@ import { FindingsPane } from "@/panes/FindingsPane";
 import { HypothesesPane } from "@/panes/HypothesesPane";
 import { Footer } from "./Footer";
 import { Button } from "@/components/ui/button";
-import { useSessions, useConversation, useResumeSession } from "@/api/queries";
+import { useSessions, useConversation, useResumeSession, useSessionLogReplay } from "@/api/queries";
 import { SkillPickerModal } from "@/modals/SkillPickerModal";
 import { SudoModal } from "@/modals/SudoModal";
 import { StopModal } from "@/modals/StopModal";
@@ -35,6 +35,12 @@ export function SessionLayout() {
     if (!id || isActive || !conversation.data) return;
     getSessionStore(id).getState().seedConversation(conversation.data.conversation);
   }, [id, isActive, conversation.data]);
+
+  const sessionLog = useSessionLogReplay(!isActive ? id ?? null : null, target);
+  useEffect(() => {
+    if (!id || isActive || !sessionLog.data) return;
+    getSessionStore(id).getState().seedFromSessionLog(sessionLog.data.events);
+  }, [id, isActive, sessionLog.data]);
 
   const [rightTab, setRightTab] = useState<"hypotheses" | "findings" | "kb">("hypotheses");
   const [skillOpen, setSkillOpen] = useState(false);
