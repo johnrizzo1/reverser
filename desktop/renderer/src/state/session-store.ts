@@ -10,7 +10,7 @@ export type WSFrame =
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; ok: boolean; preview: string }
   | { type: "kb_update"; kind: string; row: unknown }
-  | { type: "hypothesis"; action: string; row: unknown }
+  | { type: "hypothesis"; action: string; row: HypothesisRow }
   | { type: "finding"; row: unknown }
   | { type: "dispatch"; specialist: string; child_session_id: string; phase: string }
   | { type: "budget"; spent: number; remaining: number; turn: number }
@@ -30,16 +30,61 @@ export type ToolCall = {
   startedAt: number;
 };
 
+export type ThinkingEntry = {
+  text: string;
+  turn?: number;
+  ts?: string | null;
+};
+
+export type DispatchEntry = {
+  specialty: string;
+  phase: string;
+  content: string;
+  turn?: number;
+  ts?: string | null;
+};
+
+// HypothesisRow mirrors HypothesisFact from src/reverser/kb/store.py
+export type HypothesisRow = {
+  id: number;
+  parent_id: number | null;
+  statement: string;
+  rationale?: string | null;
+  status: "proposed" | "testing" | "confirmed" | "refuted" | "abandoned" | string;
+  confidence?: number | null;
+  dispatched_to?: string | null;
+  dispatch_count?: number;
+  evidence_refs?: unknown[] | null;
+  tags?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+// Log event shape from /api/sessions/log/{id}.
+type LogEventInput =
+  | { kind: "thinking"; content: string; ts: string | null }
+  | { kind: "tool_call"; name: string; input: string; ts: string | null }
+  | { kind: "tool_result"; ok: boolean; preview: string; ts: string | null }
+  | { kind: "dispatch"; specialty: string; phase: string; content: string; ts: string | null };
+
 export type SessionState = {
   status: "idle" | "running" | "awaiting_input" | "stopped" | "completed" | "error";
   messages: ChatMessage[];
   pendingAssistantText: string;
   toolCalls: ToolCall[];
-  hypotheses: unknown[];
+  thinkingEntries: ThinkingEntry[];
+  dispatchEntries: DispatchEntry[];
+  /** Hypotheses keyed by id. The HypothesesPane builds the tree from
+   *  parent_id on render. Live WS updates overwrite-by-id; the initial
+   *  KB seed populates this map on mount. */
+  hypotheses: Map<number, HypothesisRow>;
   findings: unknown[];
   budget: { spent: number; remaining: number; turn: number } | null;
   connBreakerTripped: boolean;
   log: { level: string; msg: string; ts: number }[];
+  /** True once a session-log replay has populated the historical event
+   *  slots. The tool timeline pane uses this to switch empty-state copy. */
+  replayed: boolean;
 };
 
 type Actions = {
@@ -47,6 +92,8 @@ type Actions = {
   appendUserMessage: (text: string) => void;
   reset: () => void;
   seedConversation: (entries: { user: string; agent: string; turn: number }[]) => void;
+  seedFromSessionLog: (events: LogEventInput[]) => void;
+  seedHypotheses: (rows: HypothesisRow[]) => void;
 };
 
 const _initialState = (): SessionState => ({
@@ -54,19 +101,25 @@ const _initialState = (): SessionState => ({
   messages: [],
   pendingAssistantText: "",
   toolCalls: [],
-  hypotheses: [],
+  thinkingEntries: [],
+  dispatchEntries: [],
+  hypotheses: new Map(),
   findings: [],
   budget: null,
   connBreakerTripped: false,
   log: [],
+  replayed: false,
 });
 
 export const makeSessionStore = () =>
   create<SessionState & Actions>((set) => ({
     ..._initialState(),
+
     appendUserMessage: (text) =>
       set((s) => ({ messages: [...s.messages, { role: "user", text }] })),
+
     reset: () => set(_initialState()),
+
     seedConversation: (entries) =>
       set(() => {
         const messages: ChatMessage[] = [];
@@ -76,6 +129,53 @@ export const makeSessionStore = () =>
         }
         return { messages };
       }),
+
+    seedFromSessionLog: (events) =>
+      set(() => {
+        const toolCalls: ToolCall[] = [];
+        const thinkingEntries: ThinkingEntry[] = [];
+        const dispatchEntries: DispatchEntry[] = [];
+
+        for (const e of events) {
+          if (e.kind === "tool_call") {
+            toolCalls.push({
+              id: `${e.name}-${e.ts ?? ""}-${toolCalls.length}`,
+              name: e.name,
+              args: e.input,
+              startedAt: 0,
+            });
+          } else if (e.kind === "tool_result") {
+            for (let i = toolCalls.length - 1; i >= 0; i--) {
+              if (!toolCalls[i].result) {
+                toolCalls[i] = {
+                  ...toolCalls[i],
+                  result: { ok: e.ok, preview: e.preview },
+                };
+                break;
+              }
+            }
+          } else if (e.kind === "thinking") {
+            thinkingEntries.push({ text: e.content, ts: e.ts });
+          } else if (e.kind === "dispatch") {
+            dispatchEntries.push({
+              specialty: e.specialty,
+              phase: e.phase,
+              content: e.content,
+              ts: e.ts,
+            });
+          }
+        }
+
+        return { toolCalls, thinkingEntries, dispatchEntries, replayed: true };
+      }),
+
+    seedHypotheses: (rows) =>
+      set(() => {
+        const m = new Map<number, HypothesisRow>();
+        for (const r of rows) m.set(r.id, r);
+        return { hypotheses: m };
+      }),
+
     ingest: (frame) =>
       set((s) => {
         switch (frame.type) {
@@ -85,8 +185,10 @@ export const makeSessionStore = () =>
             return {
               toolCalls: [
                 ...s.toolCalls,
-                { id: `${frame.name}-${Date.now()}-${s.toolCalls.length}`,
-                  name: frame.name, args: frame.args, startedAt: Date.now() },
+                {
+                  id: `${frame.name}-${Date.now()}-${s.toolCalls.length}`,
+                  name: frame.name, args: frame.args, startedAt: Date.now(),
+                },
               ],
             };
           case "tool_result": {
@@ -99,10 +201,31 @@ export const makeSessionStore = () =>
             }
             return { toolCalls: tc };
           }
+          case "thinking":
+            return {
+              thinkingEntries: [
+                ...s.thinkingEntries,
+                { text: frame.delta },
+              ],
+            };
+          case "dispatch":
+            return {
+              dispatchEntries: [
+                ...s.dispatchEntries,
+                {
+                  specialty: frame.specialist,
+                  phase: frame.phase,
+                  content: frame.child_session_id,
+                },
+              ],
+            };
           case "finding":
             return { findings: [...s.findings, frame.row] };
-          case "hypothesis":
-            return { hypotheses: [...s.hypotheses, frame.row] };
+          case "hypothesis": {
+            const m = new Map(s.hypotheses);
+            m.set(frame.row.id, frame.row);
+            return { hypotheses: m };
+          }
           case "budget":
             return { budget: { spent: frame.spent, remaining: frame.remaining, turn: frame.turn } };
           case "conn_breaker":
@@ -122,8 +245,6 @@ export const makeSessionStore = () =>
             return next;
           }
           case "kb_update":
-          case "dispatch":
-          case "thinking":
             return {};
         }
       }),
