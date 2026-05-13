@@ -2,6 +2,9 @@
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
+from ...sessions import SessionNotFoundError
+from ...sessions import load as load_snapshot
+
 router = APIRouter()
 
 
@@ -139,3 +142,33 @@ async def set_sudo(request: Request, session_id: str, body: SudoBody) -> Respons
         raise HTTPException(404)
     gs.set_sudo(body.password)
     return Response(status_code=204)
+
+
+@router.get("/api/sessions/conversation/{session_id}")
+def get_conversation(session_id: str, target: str) -> dict:
+    """Return a snapshot's conversation history for read-only replay.
+
+    `target` is required because reverser.sessions.load takes both args
+    (sessions are scoped per target). The frontend knows the target from
+    the SessionsPanel row it clicked.
+    """
+    try:
+        snap = load_snapshot(target, session_id)
+    except SessionNotFoundError:
+        raise HTTPException(404, detail=f"unknown session: {session_id!r}")
+    return {
+        "id": snap.session_id,
+        "target": snap.target,
+        "profile": snap.config.profile,
+        "state": snap.state,
+        "conversation": [
+            {
+                "user": e.user,
+                "agent": e.agent,
+                "turn": e.turn,
+                "timestamp": e.timestamp,
+                "cost": e.cost,
+            }
+            for e in snap.conversation
+        ],
+    }
