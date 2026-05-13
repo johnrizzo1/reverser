@@ -93,6 +93,35 @@ _OUTCOME_KEYWORDS = {
 }
 
 
+# ── Status: partial heuristic (per spec D4) ──────────────────────────
+
+
+_PARTIAL_HEURISTIC_PATTERN = re.compile(
+    r"###\s+(Findings|Suggested follow-up|Hypothesis outcome)\s*\n((?:(?!###).)*)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _has_actionable_findings(report: str) -> bool:
+    """Return True if the report body contains at least one return-contract
+    section with non-trivial content (>=20 chars).
+
+    Used by dispatch_specialist to promote Status: error → Status: partial
+    when a subprocess errored but the specialist still produced useful intel.
+    Heuristic matches against the section headers from `_RETURN_CONTRACT`:
+    Findings, Suggested follow-up, Hypothesis outcome.
+
+    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §7.
+    """
+    if not report:
+        return False
+    for match in _PARTIAL_HEURISTIC_PATTERN.finditer(report):
+        body = match.group(2).strip()
+        if len(body) >= 20:
+            return True
+    return False
+
+
 def parse_hypothesis_outcome(report: str) -> str | None:
     """Extract the outcome word from the '### Hypothesis outcome' section.
 
@@ -318,6 +347,13 @@ async def dispatch_specialist(args: dict) -> dict:
 
     outcome = parse_hypothesis_outcome(report_text)
 
+    # ── Status: partial promotion (per spec D4) ──────────────────────
+    # If subprocess errored but the report body has return-contract sections
+    # with actionable content, promote status so the manager doesn't dismiss
+    # the report based on the Status header alone.
+    if status == "error" and _has_actionable_findings(report_text):
+        status = "partial"
+
     summary_lines = [
         f"# Dispatch result — {specialty}",
         f"**Status:** {status}",
@@ -325,6 +361,11 @@ async def dispatch_specialist(args: dict) -> dict:
         f"**Turns:** {turns_consumed}",
         f"**Outcome:** {outcome or 'unknown'}",
     ]
+    if status == "partial":
+        summary_lines.append(
+            "**Note:** Subprocess exited non-zero but the specialist produced "
+            "findings. READ THE REPORT BODY BELOW before deciding next action."
+        )
     if error_msg:
         summary_lines.append(f"**Error:** {error_msg}")
     summary_lines.append("")
