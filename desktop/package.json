@@ -5,6 +5,7 @@
   "description": "Electron desktop UI for reverser",
   "main": "dist-electron/main.js",
   "scripts": {
+    "predev": "tsc -p tsconfig.electron.json",
     "dev": "vite",
     "build": "tsc -p tsconfig.electron.json && tsc -b && vite build",
     "preview": "vite preview",
