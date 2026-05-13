@@ -104,6 +104,16 @@ def main():
     writeup_parser.add_argument("log_file", help="Path to the .jsonl session log")
     writeup_parser.add_argument("-o", "--output", metavar="PATH", help="Output markdown file (default: stdout)")
 
+    # GUI command — Electron desktop UI
+    gui_parser = subparsers.add_parser(
+        "gui", aliases=["g"],
+        help="Launch the Electron desktop UI (dev mode)",
+    )
+    gui_parser.add_argument(
+        "--skip-install", action="store_true",
+        help="Skip the npm install check (faster startup, fails if deps missing)",
+    )
+
     args = parser.parse_args()
 
     # Top-level --list-sessions short-circuit (no subcommand required)
@@ -124,6 +134,8 @@ def main():
         _run_writeup(args)
     elif args.command in ("interactive", "i"):
         _run_interactive(args)
+    elif args.command in ("gui", "g"):
+        _run_gui(args)
     else:
         _run_agent(args)
 
@@ -429,3 +441,46 @@ def _run_writeup(args):
         print(f"Writeup saved to: {args.output}", file=sys.stderr)
     else:
         print(md)
+
+
+def _run_gui(args):
+    """Launch the Electron desktop UI in dev mode.
+
+    Resolves desktop/ relative to this package (../.. from cli.py), installs
+    npm deps if node_modules/ is missing, then execs `npm run dev`. The
+    Python service is supervised by Electron's main process, not by us.
+    """
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    desktop = Path(__file__).resolve().parent.parent.parent / "desktop"
+    if not desktop.is_dir():
+        print(f"Error: desktop/ not found at {desktop}", file=sys.stderr)
+        print("The Electron UI lives at <repo-root>/desktop. Make sure you're "
+              "running from a checkout that includes it.", file=sys.stderr)
+        sys.exit(1)
+
+    npm = shutil.which("npm")
+    if npm is None:
+        print("Error: `npm` not found on PATH.", file=sys.stderr)
+        print("Install Node.js 18+ (e.g. via your devenv shell, brew, or nvm) "
+              "and try again.", file=sys.stderr)
+        sys.exit(1)
+
+    node_modules = desktop / "node_modules"
+    if not node_modules.is_dir() and not args.skip_install:
+        print(f"First run: installing npm deps in {desktop} (this can take "
+              "a minute — Electron downloads ~80 MB)...", file=sys.stderr)
+        rc = subprocess.run([npm, "install"], cwd=desktop).returncode
+        if rc != 0:
+            print(f"npm install failed (exit {rc}).", file=sys.stderr)
+            sys.exit(rc)
+
+    # Hand off to npm. Use subprocess.run so Ctrl-C in our terminal cleanly
+    # terminates the child (npm forwards SIGINT to vite + electron).
+    try:
+        rc = subprocess.run([npm, "run", "dev"], cwd=desktop).returncode
+    except KeyboardInterrupt:
+        rc = 130
+    sys.exit(rc)
