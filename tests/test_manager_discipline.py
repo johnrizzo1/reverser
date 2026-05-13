@@ -181,3 +181,26 @@ def test_manager_addendum_mentions_orthogonal_hypotheses():
     addendum = p.system_addendum
     assert "orthogonal" in addendum.lower()
     assert "three" in addendum.lower() or "3" in addendum
+
+
+def test_manager_addendum_mentions_post_dispatch_checklist():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+    assert "Post-dispatch checklist" in addendum
+    assert "kb_update_hypothesis" in addendum
+
+
+def test_manager_addendum_mentions_connection_failure_breaker():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+    assert "circuit breaker" in addendum.lower()
+    assert "ECONNREFUSED" in addendum or "Connection refused" in addendum or "connection error" in addendum.lower()
+
+
+def test_manager_addendum_says_breaker_resets_on_user_input():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+    assert "user input" in addendum.lower() or "user sends" in addendum.lower()
