@@ -51,3 +51,6 @@ targets/
 # Python test artifacts
 .pytest_cache/
 uv.lock
+
+# Brainstorming session artifacts (visual-companion mockups)
+.superpowers/
