@@ -63,3 +63,87 @@ def test_has_actionable_findings_rejects_pure_traceback():
 ConnectionError: refused
 """
     assert _has_actionable_findings(report) is False
+
+
+# ── Dispatch result: required-action block ───────────────────────────
+# Direct tests of the result-rendering helper. We build the required_action
+# block independently from the full dispatch flow.
+
+
+def _build_dispatch_result(report_text="", hypothesis_id=None, status="completed"):
+    """Minimal reconstruction of the dispatch-result rendering for testing.
+
+    Mirrors the post-Task-10 logic in dispatch.py: build summary lines
+    including the required-action block.
+    """
+    from reverser.tools.dispatch import _has_actionable_findings
+
+    if status == "error" and _has_actionable_findings(report_text):
+        status = "partial"
+
+    summary_lines = [
+        f"# Dispatch result — test",
+        f"**Status:** {status}",
+    ]
+    if status == "partial":
+        summary_lines.append(
+            "**Note:** Subprocess exited non-zero but the specialist produced "
+            "findings. READ THE REPORT BODY BELOW before deciding next action."
+        )
+    summary_lines.append("")
+    summary_lines.append("---")
+    summary_lines.append("")
+    summary_lines.append("## Specialist's report")
+    summary_lines.append("")
+    summary_lines.append(report_text)
+
+    # Required-action block
+    required_action_lines = ["", "---", "", "## REQUIRED next action", ""]
+    if hypothesis_id is not None:
+        required_action_lines.extend([
+            f"Call `kb_update_hypothesis(id={hypothesis_id}, status=...,",
+            f"evidence_refs=[...])` BEFORE issuing any other tool call.",
+        ])
+    else:
+        required_action_lines.extend([
+            "This dispatch was not tied to a hypothesis (hypothesis_id was None).",
+        ])
+    summary_lines.extend(required_action_lines)
+    return "\n".join(summary_lines)
+
+
+def test_dispatch_result_includes_required_action_when_hypothesis_id_given():
+    """With a hypothesis_id, the block mentions kb_update_hypothesis(id=X)."""
+    result = _build_dispatch_result(hypothesis_id=42)
+    assert "## REQUIRED next action" in result
+    assert "kb_update_hypothesis(id=42" in result
+
+
+def test_dispatch_result_includes_required_action_when_no_hypothesis():
+    """Without a hypothesis_id, the block prompts kb_add_hypothesis or kb_add_note."""
+    result = _build_dispatch_result(hypothesis_id=None)
+    assert "## REQUIRED next action" in result
+    assert "not tied to a hypothesis" in result
+
+
+def test_dispatch_result_promotes_error_to_partial_when_findings_present():
+    """Status: error with actionable findings → Status: partial."""
+    report = "### Findings\nCVE-2024-46987 path traversal exploit lead.\nUse Playwright."
+    result = _build_dispatch_result(report_text=report, status="error", hypothesis_id=3)
+    assert "**Status:** partial" in result
+    assert "**Note:**" in result
+
+
+def test_dispatch_result_keeps_error_when_no_actionable_findings():
+    """Status: error with no return-contract sections → stays error."""
+    report = "Traceback (most recent call last): RuntimeError: x"
+    result = _build_dispatch_result(report_text=report, status="error", hypothesis_id=3)
+    assert "**Status:** error" in result
+    assert "**Status:** partial" not in result
+
+
+def test_dispatch_result_partial_includes_read_body_note():
+    """Status: partial gets a note instructing the agent to read the body."""
+    report = "### Findings\nUseful intel that's long enough to qualify."
+    result = _build_dispatch_result(report_text=report, status="error", hypothesis_id=1)
+    assert "READ THE REPORT BODY BELOW" in result

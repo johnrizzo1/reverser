@@ -374,6 +374,43 @@ async def dispatch_specialist(args: dict) -> dict:
     summary_lines.append("## Specialist's report")
     summary_lines.append("")
     summary_lines.append(report_text)
+
+    # ── Mandatory next-action reminder (per spec D3) ─────────────────
+    # The hypothesis tree is the engagement plan. Update it now, not later.
+    # This block lands at the bottom of the tool result so it's the freshest
+    # context for the manager's next decision.
+    required_action_lines = [
+        "",
+        "---",
+        "",
+        "## REQUIRED next action",
+        "",
+    ]
+    if hypothesis_id is not None:
+        required_action_lines.extend([
+            f"Call `kb_update_hypothesis(id={hypothesis_id}, status=...,",
+            f"evidence_refs=[...])` BEFORE issuing any other tool call.",
+            f"Choose status based on the specialist's report above:",
+            f"  - `confirmed`: outcome explicitly says 'CONFIRMED'",
+            f"  - `refuted`: outcome explicitly says 'REFUTED'",
+            f"  - `inconclusive`: outcome 'INCONCLUSIVE' or Status was 'partial'",
+            f"  - `abandoned`: you've decided not to pursue this hypothesis further",
+            "",
+            f"Then count: how many dispatches have you made against hypothesis "
+            f"#{hypothesis_id}? If 2 or more, apply the Two-failure pivot rule "
+            f"(propose 3 orthogonal hypotheses before dispatching again).",
+        ])
+    else:
+        required_action_lines.extend([
+            "This dispatch was not tied to a hypothesis (hypothesis_id was None).",
+            "Either:",
+            "  - Call `kb_add_hypothesis(...)` NOW to record what you learned",
+            "    from the dispatch, OR",
+            "  - Call `kb_add_note(target=..., body='[dispatch] ...')` to",
+            "    document the exploratory result without committing to a hypothesis.",
+        ])
+    summary_lines.extend(required_action_lines)
+
     return format_tool_result("\n".join(summary_lines))
 
 
