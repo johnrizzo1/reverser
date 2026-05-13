@@ -49,17 +49,41 @@ def mcp_tools_to_openai(tools: list) -> tuple[list[dict], dict]:
     return openai_tools, handlers
 
 
-async def execute_tool(handlers: dict, name: str, arguments: str) -> tuple[str, bool]:
+async def execute_tool(
+    handlers: dict,
+    name: str,
+    arguments: str,
+    allowed_set: set[str] | None = None,
+) -> tuple[str, bool]:
     """Execute an MCP tool and return (result_text, is_error).
 
     Args:
         handlers: Map of tool name -> async handler.
         name: Tool name to execute.
         arguments: JSON string of arguments from the model.
+        allowed_set: If provided, tool names outside the set are rejected
+                     with a clear error message. This enforces profile-level
+                     tool allowlists that the model would otherwise bypass
+                     via invented tool names or text-format tool calls.
+                     Default None = no enforcement (open access).
 
     Returns:
         Tuple of (result_text, is_error).
+
+    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §10.
     """
+    # Enforce allowlist BEFORE handler lookup
+    if allowed_set is not None and name not in allowed_set:
+        allowed_list = ", ".join(sorted(allowed_set)[:20])
+        more = "" if len(allowed_set) <= 20 else f" (and {len(allowed_set) - 20} others)"
+        return (
+            f"Tool {name!r} is not in this profile's allowlist. "
+            f"Use one of: {allowed_list}{more}. "
+            f"If the desired operation isn't available directly, dispatch to a "
+            f"specialist via dispatch_specialist.",
+            True,
+        )
+
     handler = handlers.get(name)
     if handler is None:
         return f"Unknown tool: {name}", True
