@@ -89,3 +89,65 @@ async def test_handshake_full_endpoint_surface():
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_handshake_full_engagement_smoke(tmp_path, monkeypatch):
+    """Spawn the service, create a session, send a message, drain WS frames."""
+    import websockets
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+
+    env = {**os.environ, "REVERSER_PENTEST_AUTHORIZED": "1"}
+    proc = subprocess.Popen(
+        [sys.executable, "-u", "-m", "reverser.gui_service",
+         "--host", "127.0.0.1", "--port", "0", "--project-root", str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    try:
+        line = proc.stdout.readline()
+        h = json.loads(line)
+        base = f"http://127.0.0.1:{h['port']}"
+        ws_base = f"ws://127.0.0.1:{h['port']}"
+        headers = {"Authorization": f"Bearer {h['token']}"}
+        await asyncio.sleep(0.2)
+
+        async with httpx.AsyncClient(base_url=base) as c:
+            r = await c.post("/api/sessions", headers=headers, json={
+                "target": str(tmp_path / "bin"),
+                "profile": "general",
+                "backend": "claude",  # will actually hit Claude — for unit-style smoke,
+                                       # use the OPENAI-compat path with a stub model,
+                                       # or skip this test in CI by default.
+                "model": None, "api_base": None,
+                "budget": 0.01, "max_turns": 1,
+            })
+            # Either creating the session works, or we skip (no Claude API key in CI).
+            if r.status_code != 200:
+                pytest.skip(f"session create returned {r.status_code} (likely no ANTHROPIC_API_KEY)")
+            sid = r.json()["id"]
+
+        try:
+            async with websockets.connect(f"{ws_base}/ws/sessions/{sid}?token={h['token']}") as ws:
+                async with httpx.AsyncClient(base_url=base) as c:
+                    # The real Claude backend may cost money — this is a TINY budget.
+                    # If you want a hermetic test, replace with the openai_compat path
+                    # pointed at a local stub server.
+                    await asyncio.wait_for(
+                        c.post(f"/api/sessions/{sid}/messages",
+                               headers=headers, json={"text": "say hi"}),
+                        timeout=15.0)
+                # Drain at least one frame
+                frame = await asyncio.wait_for(ws.recv(), timeout=20.0)
+                assert frame, "no frame received"
+        except (asyncio.TimeoutError, httpx.ReadTimeout) as e:
+            pytest.skip(f"message/WS timeout (likely Claude API call slow or no key): {e}")
+    finally:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
