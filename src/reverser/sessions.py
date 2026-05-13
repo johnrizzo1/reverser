@@ -277,7 +277,7 @@ def _from_dict(d: dict) -> SessionSnapshot:
         log_path=d["log_path"],
         state=d["state"],
         started_at=d["started_at"],
-        last_active_at=d["last_active_at"],
+        last_active_at=d.get("last_active_at", d["started_at"]),
         stopped_at=d.get("stopped_at"),
         config=SessionConfig(**config_data) if config_data else SessionConfig(profile="general"),
         stats=SessionStats(**stats_data) if stats_data else SessionStats(),
