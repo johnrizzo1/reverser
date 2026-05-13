@@ -27,6 +27,12 @@ def main():
         action="store_true",
         help="List all resumable sessions across targets and exit.",
     )
+    parser.add_argument(
+        "--check-targets",
+        action="store_true",
+        help="Scan targets/ for non-canonical (bogus) target directories "
+             "and print a cleanup recommendation, then exit.",
+    )
     # subcommand is required UNLESS --list-sessions is given (handled below)
     subparsers = parser.add_subparsers(dest="command", required=False)
 
@@ -105,6 +111,11 @@ def main():
         _run_list_sessions()
         return
 
+    # Top-level --check-targets short-circuit
+    if args.check_targets:
+        _run_check_targets()
+        return
+
     if args.command is None:
         parser.print_help(sys.stderr)
         sys.exit(2)
@@ -137,6 +148,41 @@ def _run_list_sessions():
     print()
     print("Resume the latest session for a target with: reverser i <target> --resume")
     print("Resume a specific session with:              reverser i --resume <ID>")
+
+
+def _run_check_targets():
+    """Scan targets/ for non-canonical directories. Advisory-only — no auto-cleanup."""
+    from .sessions import _is_canonical_target_name, _targets_root
+    root = _targets_root()
+    if not root.is_dir():
+        print(f"No targets/ directory at {root}.")
+        return
+    bogus = []
+    canonical_count = 0
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        if _is_canonical_target_name(entry.name):
+            canonical_count += 1
+        else:
+            bogus.append(entry)
+    if not bogus:
+        print(f"✓ All {canonical_count} target directories have canonical names.")
+        return
+    print(f"⚠ {len(bogus)} non-canonical (bogus) target directories detected:")
+    print()
+    for b in bogus:
+        print(f"  {b}")
+    print()
+    print("These were created by past CLI parsing bugs (URL schemes, free-text "
+          "targets, CIDR slashes, etc.). The new input validation (shipped "
+          "2026-05-12) prevents new bogus dirs. To clean up:")
+    print()
+    for b in bogus:
+        print(f"  rm -rf {b!s}")
+    print()
+    print("If any of these contain real KB data you want to preserve, move the "
+          "relevant files to the canonical target dir before deleting.")
 
 
 def _run_agent(args):

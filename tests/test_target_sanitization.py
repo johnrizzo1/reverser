@@ -142,3 +142,37 @@ def test_validate_target_arg_rejects_sentence_paste():
     bogus = "As is common in real life pentests, you will start the Garfield box"
     ok, err = _validate_target_arg(bogus)
     assert ok is False
+
+
+# ── list_all filter behavior ─────────────────────────────────────────
+
+
+def test_list_all_filters_non_canonical_dirs(tmp_targets_dir):
+    """Bogus dirs (URL schemes, sentences, etc.) should be skipped."""
+    from reverser.sessions import list_all
+    # Create one canonical target dir with a session
+    canonical = tmp_targets_dir / "10.10.10.5" / "sessions"
+    canonical.mkdir(parents=True)
+    (canonical / "2026-05-12T10-00-00.json").write_text(
+        '{"session_id": "2026-05-12T10-00-00", "target": "10.10.10.5", '
+        '"log_path": "logs/x.jsonl", "state": "active", '
+        '"started_at": "2026-05-12T10:00:00", '
+        '"last_active_at": "2026-05-12T10:00:00", '
+        '"schema_version": 1}'
+    )
+
+    # Create a bogus dir with a session — should be filtered
+    bogus = tmp_targets_dir / "http:" / "sessions"
+    bogus.mkdir(parents=True)
+    (bogus / "2026-05-12T11-00-00.json").write_text(
+        '{"session_id": "2026-05-12T11-00-00", "target": "http:", '
+        '"log_path": "logs/y.jsonl", "state": "active", '
+        '"started_at": "2026-05-12T11:00:00", '
+        '"last_active_at": "2026-05-12T11:00:00", '
+        '"schema_version": 1}'
+    )
+
+    snaps = list_all()
+    targets = {s.target for s in snaps}
+    assert "10.10.10.5" in targets
+    assert "http:" not in targets

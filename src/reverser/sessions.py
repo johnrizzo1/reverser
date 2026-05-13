@@ -358,7 +358,12 @@ def list_for_target(
 
 
 def list_all(*, exclude_completed: bool = False) -> list[SessionSnapshot]:
-    """Walk targets/*/sessions/, return all parsed snapshots, sorted desc."""
+    """Walk targets/*/sessions/, return all parsed snapshots, sorted desc.
+
+    Skips directories that don't match the canonical target-name regex —
+    these are bogus dirs from prior CLI parsing bugs (URLs as paths, free-
+    text targets, etc.). See _is_canonical_target_name.
+    """
     root = _targets_root()
     if not root.is_dir():
         return []
@@ -366,6 +371,9 @@ def list_all(*, exclude_completed: bool = False) -> list[SessionSnapshot]:
     all_snaps: list[SessionSnapshot] = []
     for target_dir in root.iterdir():
         if not target_dir.is_dir():
+            continue
+        # Skip bogus dirs from prior CLI parsing bugs
+        if not _is_canonical_target_name(target_dir.name):
             continue
         all_snaps.extend(
             list_for_target(target_dir.name, exclude_completed=exclude_completed)
