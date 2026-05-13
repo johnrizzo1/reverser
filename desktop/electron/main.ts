@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from "electron";
 import path from "path";
+import fs from "fs/promises";
 import { IPC } from "./ipc";
 import { PythonSupervisor, defaultProjectRoot } from "./python";
 
@@ -80,6 +81,12 @@ ipcMain.handle(IPC.OPEN_FILE_DIALOG, async () => {
   if (!mainWindow) return null;
   const r = await dialog.showOpenDialog(mainWindow, { properties: ["openFile"] });
   return r.canceled ? null : r.filePaths[0] ?? null;
+});
+ipcMain.handle(IPC.WRITE_AUTH_MARKER, async () => {
+  const root = defaultProjectRoot();
+  const marker = path.join(root, ".reverser-authorized");
+  await fs.writeFile(marker, "", { flag: "w" });
+  return marker;
 });
 
 app.whenReady().then(async () => {

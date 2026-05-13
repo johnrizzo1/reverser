@@ -7,6 +7,7 @@ const IPC = {
   OPEN_FILE_DIALOG: "dialog:open-file",
   CONNECTION_STATUS_CHANGED: "connection:status-changed",
   PYTHON_LOG_LINE: "python:log-line",
+  WRITE_AUTH_MARKER: "authz:write-marker",
 } as const;
 
 export type ConnectionInfo = {
@@ -33,6 +34,8 @@ contextBridge.exposeInMainWorld("desktop", {
     ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
   openFileDialog: (): Promise<string | null> =>
     ipcRenderer.invoke(IPC.OPEN_FILE_DIALOG),
+  writeAuthMarker: (): Promise<string> =>
+    ipcRenderer.invoke(IPC.WRITE_AUTH_MARKER),
 });
 
 declare global {
@@ -43,6 +46,7 @@ declare global {
       onPythonLogLine: (cb: (line: string) => void) => () => void;
       openExternal: (url: string) => Promise<void>;
       openFileDialog: () => Promise<string | null>;
+      writeAuthMarker: () => Promise<string>;
     };
   }
 }

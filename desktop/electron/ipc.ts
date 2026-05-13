@@ -7,6 +7,7 @@ export const IPC = {
   GET_CONNECTION_INFO: "connection:get-info",
   OPEN_EXTERNAL: "shell:open-external",
   OPEN_FILE_DIALOG: "dialog:open-file",
+  WRITE_AUTH_MARKER: "authz:write-marker",
 
   // Main → Renderer (send)
   CONNECTION_STATUS_CHANGED: "connection:status-changed",
