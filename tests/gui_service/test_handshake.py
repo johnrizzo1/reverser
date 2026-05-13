@@ -55,3 +55,37 @@ async def test_handshake_then_health():
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_handshake_full_endpoint_surface():
+    """Spawn the service and verify /api/profiles + /api/backends round-trip."""
+    env = {**os.environ}
+    proc = subprocess.Popen(
+        [sys.executable, "-u", "-m", "reverser.gui_service",
+         "--host", "127.0.0.1", "--port", "0", "--project-root", "."],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    try:
+        line = proc.stdout.readline()
+        handshake = json.loads(line)
+        base = f"http://127.0.0.1:{handshake['port']}"
+        headers = {"Authorization": f"Bearer {handshake['token']}"}
+        await asyncio.sleep(0.1)
+        async with httpx.AsyncClient(base_url=base) as c:
+            profiles = await c.get("/api/profiles", headers=headers)
+            assert profiles.status_code == 200
+            assert len(profiles.json()["profiles"]) >= 15
+            backends = await c.get("/api/backends", headers=headers)
+            assert backends.status_code == 200
+            assert {b["key"] for b in backends.json()["backends"]} >= {"claude", "ollama", "lmstudio", "local"}
+    finally:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
