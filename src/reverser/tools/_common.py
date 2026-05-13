@@ -106,11 +106,40 @@ def run_cmd(
     max_output: int = DEFAULT_MAX_OUTPUT,
     cwd: str | None = None,
     stdin_data: str | None = None,
+    target: str | None = None,
 ) -> dict:
     """Run a subprocess and return captured output, truncating if needed.
 
     Returns dict with keys: stdout, stderr, returncode, truncated.
+
+    If `target` is provided, integrates with the connection-failure circuit
+    breaker (`_conn_breaker.py`): bails early if the breaker is tripped for
+    that target, and records a failure if the subprocess output looks like
+    a connection error. Tool handlers that know their target should pass it.
+
+    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §8.
     """
+    # Lazy import to avoid module-load-time cycles
+    from . import _conn_breaker
+
+    # Bail early if breaker tripped
+    if target and _conn_breaker.is_tripped(target):
+        summary = _conn_breaker.failure_summary(target)
+        latest = summary["timestamps"][-1] if summary["timestamps"] else "?"
+        return {
+            "stdout": "",
+            "stderr": (
+                f"Connection circuit breaker tripped for target={target!r}: "
+                f"{summary['count']} consecutive conn failures "
+                f"(latest: {latest}). "
+                f"STOP probing this target. Yield to the user and ask them "
+                f"to confirm it's reachable. The breaker resets on user input."
+            ),
+            "returncode": -1,
+            "truncated": False,
+            "is_error": True,
+        }
+
     try:
         result = subprocess.run(
             cmd,
@@ -121,12 +150,16 @@ def run_cmd(
             input=stdin_data,
         )
     except subprocess.TimeoutExpired:
-        return {
+        out = {
             "stdout": "",
             "stderr": f"Command timed out after {timeout}s: {' '.join(cmd)}",
             "returncode": -1,
             "truncated": False,
         }
+        # Timeouts often indicate the target is unreachable
+        if target and _conn_breaker.looks_like_conn_error(out["stderr"]):
+            _conn_breaker.record_failure(target)
+        return out
     except FileNotFoundError:
         return {
             "stdout": "",
@@ -142,12 +175,20 @@ def run_cmd(
         stdout += "\n\n[OUTPUT TRUNCATED — use offset/limit parameters for pagination]"
         truncated = True
 
-    return {
+    out = {
         "stdout": stdout,
         "stderr": result.stderr,
         "returncode": result.returncode,
         "truncated": truncated,
     }
+
+    # Record on conn-error output (non-zero returncode AND output looks like a conn error)
+    if target and result.returncode != 0:
+        combined = (out.get("stdout") or "") + "\n" + (out.get("stderr") or "")
+        if _conn_breaker.looks_like_conn_error(combined):
+            _conn_breaker.record_failure(target)
+
+    return out
 
 
 async def arun_cmd(
@@ -156,8 +197,12 @@ async def arun_cmd(
     max_output: int = DEFAULT_MAX_OUTPUT,
     cwd: str | None = None,
     stdin_data: str | None = None,
+    target: str | None = None,
 ) -> dict:
     """Async wrapper around run_cmd. Use this inside async @tool handlers.
+
+    `target` is forwarded to run_cmd for circuit-breaker integration.
+    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §8.
 
     The synchronous run_cmd() blocks the event loop for the duration of the
     subprocess. When called from an async handler running in Textual's
@@ -170,7 +215,7 @@ async def arun_cmd(
     """
     return await asyncio.to_thread(
         run_cmd, cmd, timeout=timeout, max_output=max_output,
-        cwd=cwd, stdin_data=stdin_data,
+        cwd=cwd, stdin_data=stdin_data, target=target,
     )
 
 

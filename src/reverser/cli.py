@@ -27,6 +27,12 @@ def main():
         action="store_true",
         help="List all resumable sessions across targets and exit.",
     )
+    parser.add_argument(
+        "--check-targets",
+        action="store_true",
+        help="Scan targets/ for non-canonical (bogus) target directories "
+             "and print a cleanup recommendation, then exit.",
+    )
     # subcommand is required UNLESS --list-sessions is given (handled below)
     subparsers = parser.add_subparsers(dest="command", required=False)
 
@@ -105,6 +111,11 @@ def main():
         _run_list_sessions()
         return
 
+    # Top-level --check-targets short-circuit
+    if args.check_targets:
+        _run_check_targets()
+        return
+
     if args.command is None:
         parser.print_help(sys.stderr)
         sys.exit(2)
@@ -137,6 +148,41 @@ def _run_list_sessions():
     print()
     print("Resume the latest session for a target with: reverser i <target> --resume")
     print("Resume a specific session with:              reverser i --resume <ID>")
+
+
+def _run_check_targets():
+    """Scan targets/ for non-canonical directories. Advisory-only — no auto-cleanup."""
+    from .sessions import _is_canonical_target_name, _targets_root
+    root = _targets_root()
+    if not root.is_dir():
+        print(f"No targets/ directory at {root}.")
+        return
+    bogus = []
+    canonical_count = 0
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        if _is_canonical_target_name(entry.name):
+            canonical_count += 1
+        else:
+            bogus.append(entry)
+    if not bogus:
+        print(f"✓ All {canonical_count} target directories have canonical names.")
+        return
+    print(f"⚠ {len(bogus)} non-canonical (bogus) target directories detected:")
+    print()
+    for b in bogus:
+        print(f"  {b}")
+    print()
+    print("These were created by past CLI parsing bugs (URL schemes, free-text "
+          "targets, CIDR slashes, etc.). The new input validation (shipped "
+          "2026-05-12) prevents new bogus dirs. To clean up:")
+    print()
+    for b in bogus:
+        print(f"  rm -rf {b!s}")
+    print()
+    print("If any of these contain real KB data you want to preserve, move the "
+          "relevant files to the canonical target dir before deleting.")
 
 
 def _run_agent(args):
@@ -175,6 +221,45 @@ def _run_agent(args):
     ))
 
 
+def _validate_target_arg(target: str) -> tuple[bool, str | None]:
+    """Quick validation gate. Returns (is_valid, error_message).
+
+    Designed to reject the kinds of inputs we've seen go wrong: pasted
+    multi-line text, target identifiers > 120 chars, things that look like
+    sentences rather than network identifiers. Defense-in-depth — target_key
+    in sessions.py would still scrub these, but a CLI-level error is better UX.
+
+    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §9.3.
+    """
+    if not target:
+        return True, None  # empty is fine — TUI prompts for it
+
+    target = target.strip()
+
+    if len(target) > 120:
+        return False, (
+            f"Target argument is {len(target)} chars (max 120). "
+            "Did you accidentally paste a description or scenario text? "
+            "Pass just the IP, hostname, or URL."
+        )
+
+    # Multi-line input
+    if "\n" in target or "\r" in target:
+        return False, (
+            "Target argument contains newlines. "
+            "Pass a single-line IP, hostname, or URL."
+        )
+
+    # Whitespace inside (after strip) — looks like a sentence
+    if " " in target or "\t" in target:
+        return False, (
+            f"Target argument contains whitespace: {target!r}. "
+            "Pass a single token (IP, hostname, or URL — no spaces)."
+        )
+
+    return True, None
+
+
 def _run_interactive(args):
     if getattr(args, "list_profiles", False):
         from .profiles import list_profiles
@@ -184,6 +269,13 @@ def _run_interactive(args):
             print(f"             Skills: {', '.join(s.name for s in p.skills)}")
             print()
         return
+
+    # Validate target argument BEFORE doing any work (per spec §9.3)
+    target_arg = getattr(args, "target", "") or ""
+    ok, err = _validate_target_arg(target_arg)
+    if not ok:
+        print(f"Error: {err}", file=sys.stderr)
+        sys.exit(2)
 
     target = getattr(args, "target", "") or ""
     profile_key = args.profile

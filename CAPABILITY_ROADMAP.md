@@ -16,7 +16,9 @@ is referenced as a real-world failure case that motivates several items.
 + Ollama + LM Studio backends, per-target SQLite KB, session stop/resume,
 manager profile (sub-agent coordination), exploit profile + msfrpc bridge,
 hypothesis-driven discipline in pentest/webpentest, Playwright browser
-integration for webpentest/webapi/webrecon, 580 passing tests.
+integration for webpentest/webapi/webrecon, manager-reliability bundle
+(Two-failure pivot + conn-breaker + allowlist enforcement + target sanitization),
+643 passing tests.
 
 ---
 
@@ -25,6 +27,25 @@ integration for webpentest/webapi/webrecon, 580 passing tests.
 Major capabilities added after the initial roadmap was written. Each links to
 its spec / plan under `docs/superpowers/`.
 
+- **Manager profile reliability bundle** (2026-05-12) — six-item follow-up
+  derived from a post-mortem of the 10.129.60.148 engagement (83 turns,
+  no foothold). Makes manager discipline enforceable at the code level
+  rather than relying on the system prompt alone. (1) `Two-failure pivot
+  rule (NON-NEGOTIABLE)` in manager system_addendum with K=2 (tighter
+  than pentest/webpentest K=3/K=5 because dispatches are heavier).
+  (2) Mandatory `kb_update_hypothesis` reminder appended to every
+  `dispatch_specialist` tool result. (3) `Status: partial` promotion
+  when subprocess errors but report body has return-contract sections —
+  closes the bug where useful CVE recommendations got dismissed as
+  "error". (4) Per-target across-all-tools connection-failure circuit
+  breaker (3 conn errors → block further probes, reset only on user
+  input). (5) Target-name sanitization in `sessions.target_key()` —
+  URL→netloc, CIDR→network, scrub special chars, lowercase, clamp 64
+  chars — plus CLI validation rejecting whitespace/newlines/long
+  inputs and `--check-targets` advisory flag. (6) Allowlist enforcement
+  at `execute_tool` — closes the bug where OpenAICompat backend let
+  through 43 out-of-allowlist tool calls. Spec/plan:
+  `2026-05-12-manager-reliability-{design,plan}.md`.
 - **Exploit profile + Metasploit bridge** (2026-05-11 / -12) — closes Top 5 #1.
   8 new MCP tools wrapping `searchsploit`, `msfvenom`, and the `msfrpcd`
   RPC daemon: `searchsploit_search`, `msfvenom_generate`, and

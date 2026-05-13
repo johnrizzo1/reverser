@@ -93,6 +93,35 @@ _OUTCOME_KEYWORDS = {
 }
 
 
+# ── Status: partial heuristic (per spec D4) ──────────────────────────
+
+
+_PARTIAL_HEURISTIC_PATTERN = re.compile(
+    r"###\s+(Findings|Suggested follow-up|Hypothesis outcome)\s*\n((?:(?!###).)*)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _has_actionable_findings(report: str) -> bool:
+    """Return True if the report body contains at least one return-contract
+    section with non-trivial content (>=20 chars).
+
+    Used by dispatch_specialist to promote Status: error → Status: partial
+    when a subprocess errored but the specialist still produced useful intel.
+    Heuristic matches against the section headers from `_RETURN_CONTRACT`:
+    Findings, Suggested follow-up, Hypothesis outcome.
+
+    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §7.
+    """
+    if not report:
+        return False
+    for match in _PARTIAL_HEURISTIC_PATTERN.finditer(report):
+        body = match.group(2).strip()
+        if len(body) >= 20:
+            return True
+    return False
+
+
 def parse_hypothesis_outcome(report: str) -> str | None:
     """Extract the outcome word from the '### Hypothesis outcome' section.
 
@@ -318,6 +347,13 @@ async def dispatch_specialist(args: dict) -> dict:
 
     outcome = parse_hypothesis_outcome(report_text)
 
+    # ── Status: partial promotion (per spec D4) ──────────────────────
+    # If subprocess errored but the report body has return-contract sections
+    # with actionable content, promote status so the manager doesn't dismiss
+    # the report based on the Status header alone.
+    if status == "error" and _has_actionable_findings(report_text):
+        status = "partial"
+
     summary_lines = [
         f"# Dispatch result — {specialty}",
         f"**Status:** {status}",
@@ -325,6 +361,11 @@ async def dispatch_specialist(args: dict) -> dict:
         f"**Turns:** {turns_consumed}",
         f"**Outcome:** {outcome or 'unknown'}",
     ]
+    if status == "partial":
+        summary_lines.append(
+            "**Note:** Subprocess exited non-zero but the specialist produced "
+            "findings. READ THE REPORT BODY BELOW before deciding next action."
+        )
     if error_msg:
         summary_lines.append(f"**Error:** {error_msg}")
     summary_lines.append("")
@@ -333,6 +374,43 @@ async def dispatch_specialist(args: dict) -> dict:
     summary_lines.append("## Specialist's report")
     summary_lines.append("")
     summary_lines.append(report_text)
+
+    # ── Mandatory next-action reminder (per spec D3) ─────────────────
+    # The hypothesis tree is the engagement plan. Update it now, not later.
+    # This block lands at the bottom of the tool result so it's the freshest
+    # context for the manager's next decision.
+    required_action_lines = [
+        "",
+        "---",
+        "",
+        "## REQUIRED next action",
+        "",
+    ]
+    if hypothesis_id is not None:
+        required_action_lines.extend([
+            f"Call `kb_update_hypothesis(id={hypothesis_id}, status=...,",
+            f"evidence_refs=[...])` BEFORE issuing any other tool call.",
+            f"Choose status based on the specialist's report above:",
+            f"  - `confirmed`: outcome explicitly says 'CONFIRMED'",
+            f"  - `refuted`: outcome explicitly says 'REFUTED'",
+            f"  - `inconclusive`: outcome 'INCONCLUSIVE' or Status was 'partial'",
+            f"  - `abandoned`: you've decided not to pursue this hypothesis further",
+            "",
+            f"Then count: how many dispatches have you made against hypothesis "
+            f"#{hypothesis_id}? If 2 or more, apply the Two-failure pivot rule "
+            f"(propose 3 orthogonal hypotheses before dispatching again).",
+        ])
+    else:
+        required_action_lines.extend([
+            "This dispatch was not tied to a hypothesis (hypothesis_id was None).",
+            "Either:",
+            "  - Call `kb_add_hypothesis(...)` NOW to record what you learned",
+            "    from the dispatch, OR",
+            "  - Call `kb_add_note(target=..., body='[dispatch] ...')` to",
+            "    document the exploratory result without committing to a hypothesis.",
+        ])
+    summary_lines.extend(required_action_lines)
+
     return format_tool_result("\n".join(summary_lines))
 
 
