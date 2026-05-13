@@ -1,7 +1,11 @@
 """POST/GET /api/sessions and its sub-resources."""
+import json
+import os
+
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
+from ...session_log import load_session_log
 from ...sessions import SessionNotFoundError
 from ...sessions import load as load_snapshot
 
@@ -172,3 +176,67 @@ def get_conversation(session_id: str, target: str) -> dict:
             for e in snap.conversation
         ],
     }
+
+
+@router.get("/api/sessions/log/{session_id}")
+def get_session_log(session_id: str, target: str) -> dict:
+    """Return filtered session-log events for read-only chat/timeline replay.
+
+    Filters to {thinking, tool_call, tool_result, dispatch}. Caps at 5000
+    events (oldest dropped).
+    """
+    try:
+        snap = load_snapshot(target, session_id)
+    except SessionNotFoundError:
+        raise HTTPException(404, detail=f"unknown session: {session_id!r}")
+
+    log_path = snap.log_path
+    if not log_path or not os.path.isfile(log_path):
+        raise HTTPException(404, detail=f"session log file not found: {log_path!r}")
+
+    raw = load_session_log(log_path)
+    _ALLOWED = {"thinking", "tool_call", "tool_result", "dispatch"}
+
+    out: list[dict] = []
+    for entry in raw:
+        kind = entry.get("type")
+        if kind not in _ALLOWED:
+            continue
+        ts = entry.get("ts")
+        if kind == "thinking":
+            out.append({"kind": "thinking", "content": entry.get("text", ""), "ts": ts})
+        elif kind == "tool_call":
+            input_val = entry.get("input")
+            if input_val is None:
+                input_str = ""
+            elif isinstance(input_val, str):
+                input_str = input_val
+            else:
+                input_str = json.dumps(input_val)
+            out.append({
+                "kind": "tool_call",
+                "name": entry.get("name", ""),
+                "input": input_str,
+                "ts": ts,
+            })
+        elif kind == "tool_result":
+            out.append({
+                "kind": "tool_result",
+                "ok": not entry.get("is_error", False),
+                "preview": (entry.get("content") or "")[:4096],
+                "ts": ts,
+            })
+        elif kind == "dispatch":
+            out.append({
+                "kind": "dispatch",
+                "specialty": entry.get("specialty", ""),
+                "phase": entry.get("kind", ""),
+                "content": entry.get("content", ""),
+                "ts": ts,
+            })
+
+    truncated = len(out) > 5000
+    if truncated:
+        out = out[-5000:]
+
+    return {"id": session_id, "events": out, "truncated": truncated}
