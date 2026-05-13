@@ -16,7 +16,7 @@ export default defineConfig({
     react(),
     electron([
       {
-        entry: "electron/main.ts",
+        entry: resolve(__dirname, "electron/main.ts"),
         vite: {
           build: {
             outDir: "dist-electron",
@@ -27,7 +27,7 @@ export default defineConfig({
         },
       },
       {
-        entry: "electron/preload.ts",
+        entry: resolve(__dirname, "electron/preload.ts"),
         onstart(args) {
           args.reload();
         },
