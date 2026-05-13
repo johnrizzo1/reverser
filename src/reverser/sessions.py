@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional, TYPE_CHECKING
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from reverser.tui.session import Session
@@ -170,16 +172,90 @@ def new_snapshot(
     )
 
 
+# Allowed chars: letters, digits, dot, dash, underscore, colon (for IPv6/ports)
+_CANONICAL_TARGET_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
+
+# Replacement for non-canonical chars in fallback mode
+_SCRUB_RE = re.compile(r"[^A-Za-z0-9._:-]+")
+
+# Max length for a target key (filesystem-friendly; well under typical 255 limit)
+_MAX_TARGET_KEY_LEN = 64
+
+
 def target_key(target: str) -> str:
     """Derive a filesystem-safe directory name from a target identifier.
 
-    Absolute paths are reduced to their basename so that session data lives
-    under ``targets/<basename>/sessions/`` instead of leaking into the
-    binary's own parent directory (which breaks ``mkdir``).
+    Handling, in priority order:
+      1. Absolute filesystem path → take basename (e.g. /tmp/binary → binary)
+      2. URL with scheme (http://, https://, ftp://) → take netloc (host[:port])
+      3. CIDR notation (x.y.z.w/N) → take the network portion before `/`
+      4. Otherwise → scrub non-allowed chars to `_`, clamp length
+
+    All results are lowercased; clamped to _MAX_TARGET_KEY_LEN; stripped of
+    leading/trailing _.- chars. Raises ValueError on empty input or if
+    sanitization reduces to empty.
+
+    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §9.
     """
+    if not target or not target.strip():
+        raise ValueError("target identifier must be non-empty")
+
+    target = target.strip()
+
+    # 1. Absolute path → basename (existing behavior)
     if os.path.isabs(target):
-        return os.path.basename(target)
+        target = os.path.basename(target)
+
+    # 2. URL with scheme → netloc only
+    elif target.startswith(("http://", "https://", "ftp://")):
+        parsed = urlparse(target)
+        if parsed.netloc:
+            target = parsed.netloc
+        # else: malformed URL, fall through to scrub
+
+    # 3. CIDR → network portion
+    elif "/" in target:
+        # Heuristic: looks like IP/N CIDR? Take left of slash.
+        left, _, _ = target.partition("/")
+        if left and re.match(r"^\d+\.\d+\.\d+\.\d+$", left):
+            target = left
+        else:
+            # Path-like input that isn't an absolute path and isn't a CIDR.
+            # Scrub the whole thing.
+            target = _SCRUB_RE.sub("_", target)
+
+    # 4. Final scrub for anything still containing disallowed chars
+    if not _CANONICAL_TARGET_RE.fullmatch(target):
+        target = _SCRUB_RE.sub("_", target)
+
+    # Clamp length (preserve right side — usually more distinguishing)
+    if len(target) > _MAX_TARGET_KEY_LEN:
+        target = target[-_MAX_TARGET_KEY_LEN:]
+
+    # Lowercase to match normalize_target convention
+    target = target.lower().strip("_.-")
+
+    if not target:
+        raise ValueError("target identifier reduced to empty string after sanitization")
+
     return target
+
+
+def _is_canonical_target_name(name: str) -> bool:
+    """Return True if a directory name matches the canonical target-key regex.
+
+    Used by list_all() to filter bogus dirs from prior CLI parsing bugs
+    (e.g. 'http:', '10.129.244.0' with '/24' subdir, free-text directories).
+
+    Additional constraint beyond _CANONICAL_TARGET_RE: names must not end with
+    a colon (e.g. 'http:' is a scheme artifact, not a valid host).
+    """
+    if not _CANONICAL_TARGET_RE.fullmatch(name):
+        return False
+    # Reject URL-scheme artifacts like 'http:' or 'ftp:'
+    if name.endswith(":"):
+        return False
+    return True
 
 
 def snapshot_path(target: str, session_id: str) -> Path:
