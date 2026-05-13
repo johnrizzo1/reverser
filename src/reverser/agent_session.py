@@ -67,6 +67,12 @@ class AgentSession:
         api_base: str | None = None,
         resume_from: "SessionSnapshot | None" = None,
     ):
+        # Per-turn callback set by the TUI to render dispatch_specialist
+        # sub-agent events (thinking / tool_call / tool_result / text) with
+        # a [specialty] prefix. Signature: (specialty, kind, content) -> None.
+        # None means "do not render" — useful for CLI-only contexts.
+        self.on_dispatch_event = None
+
         if resume_from is not None:
             self._init_resumed(resume_from, profile, backend_name, model, api_base)
         else:
@@ -83,6 +89,23 @@ class AgentSession:
         # Make this session reachable to session-aware tools (e.g. dispatch_specialist)
         from .sessions import current_session
         current_session.set(self)
+
+    def emit_dispatch_event(self, specialty: str, kind: str, content: str) -> None:
+        """Surface a dispatch_specialist sub-agent event to the TUI.
+
+        Called by `tools/dispatch.py` for each sub-agent message (thinking,
+        tool_call, tool_result, text) while a specialist is running. The TUI
+        sets `on_dispatch_event` per-turn to write to the chat log with a
+        `[specialty]` prefix. Exceptions in the callback are swallowed so a
+        rendering bug cannot crash the dispatch tool.
+        """
+        cb = self.on_dispatch_event
+        if cb is None:
+            return
+        try:
+            cb(specialty, kind, content)
+        except Exception:
+            pass
 
     def _init_new(
         self, *, binary_path, profile, budget, max_turns,
