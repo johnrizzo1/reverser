@@ -95,3 +95,50 @@ def test_is_canonical_target_name_rejects_url_with_colon_slash():
 def test_is_canonical_target_name_rejects_sentence():
     from reverser.sessions import _is_canonical_target_name
     assert _is_canonical_target_name("As is common in real life pentests") is False
+
+
+# ── CLI _validate_target_arg behavior ────────────────────────────────
+
+
+def test_validate_target_arg_accepts_plain_ip():
+    from reverser.cli import _validate_target_arg
+    ok, err = _validate_target_arg("10.10.10.5")
+    assert ok is True
+    assert err is None
+
+
+def test_validate_target_arg_accepts_empty():
+    """Empty target is OK — the TUI will prompt for it."""
+    from reverser.cli import _validate_target_arg
+    ok, err = _validate_target_arg("")
+    assert ok is True
+
+
+def test_validate_target_arg_rejects_long_inputs():
+    from reverser.cli import _validate_target_arg
+    long_str = "a" * 200
+    ok, err = _validate_target_arg(long_str)
+    assert ok is False
+    assert "max 120" in err or "120 chars" in err
+
+
+def test_validate_target_arg_rejects_whitespace():
+    from reverser.cli import _validate_target_arg
+    ok, err = _validate_target_arg("foo bar baz")
+    assert ok is False
+    assert "whitespace" in err.lower()
+
+
+def test_validate_target_arg_rejects_newlines():
+    from reverser.cli import _validate_target_arg
+    ok, err = _validate_target_arg("foo\nbar")
+    assert ok is False
+    assert "newline" in err.lower()
+
+
+def test_validate_target_arg_rejects_sentence_paste():
+    """The exact bogus input that caused 'As is common in real life pentests...'/ dir."""
+    from reverser.cli import _validate_target_arg
+    bogus = "As is common in real life pentests, you will start the Garfield box"
+    ok, err = _validate_target_arg(bogus)
+    assert ok is False

@@ -175,6 +175,45 @@ def _run_agent(args):
     ))
 
 
+def _validate_target_arg(target: str) -> tuple[bool, str | None]:
+    """Quick validation gate. Returns (is_valid, error_message).
+
+    Designed to reject the kinds of inputs we've seen go wrong: pasted
+    multi-line text, target identifiers > 120 chars, things that look like
+    sentences rather than network identifiers. Defense-in-depth — target_key
+    in sessions.py would still scrub these, but a CLI-level error is better UX.
+
+    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §9.3.
+    """
+    if not target:
+        return True, None  # empty is fine — TUI prompts for it
+
+    target = target.strip()
+
+    if len(target) > 120:
+        return False, (
+            f"Target argument is {len(target)} chars (max 120). "
+            "Did you accidentally paste a description or scenario text? "
+            "Pass just the IP, hostname, or URL."
+        )
+
+    # Multi-line input
+    if "\n" in target or "\r" in target:
+        return False, (
+            "Target argument contains newlines. "
+            "Pass a single-line IP, hostname, or URL."
+        )
+
+    # Whitespace inside (after strip) — looks like a sentence
+    if " " in target or "\t" in target:
+        return False, (
+            f"Target argument contains whitespace: {target!r}. "
+            "Pass a single token (IP, hostname, or URL — no spaces)."
+        )
+
+    return True, None
+
+
 def _run_interactive(args):
     if getattr(args, "list_profiles", False):
         from .profiles import list_profiles
@@ -184,6 +223,13 @@ def _run_interactive(args):
             print(f"             Skills: {', '.join(s.name for s in p.skills)}")
             print()
         return
+
+    # Validate target argument BEFORE doing any work (per spec §9.3)
+    target_arg = getattr(args, "target", "") or ""
+    ok, err = _validate_target_arg(target_arg)
+    if not ok:
+        print(f"Error: {err}", file=sys.stderr)
+        sys.exit(2)
 
     target = getattr(args, "target", "") or ""
     profile_key = args.profile
