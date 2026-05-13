@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC } from "./ipc";
+
+// Inline channel names so the sandboxed preload needs no require('./ipc').
+const IPC = {
+  GET_CONNECTION_INFO: "connection:get-info",
+  OPEN_EXTERNAL: "shell:open-external",
+  OPEN_FILE_DIALOG: "dialog:open-file",
+  CONNECTION_STATUS_CHANGED: "connection:status-changed",
+  PYTHON_LOG_LINE: "python:log-line",
+} as const;
 
 export type ConnectionInfo = {
   status: "starting" | "ready" | "error" | "exited";
