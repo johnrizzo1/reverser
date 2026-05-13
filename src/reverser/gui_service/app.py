@@ -10,6 +10,7 @@ from .routes import (
     health as health_routes,
     profiles as profiles_routes,
     sessions as sessions_routes,
+    targets as targets_routes,
 )
 
 
@@ -35,4 +36,5 @@ def create_app(config: ServiceConfig) -> FastAPI:
     app.include_router(profiles_routes.router, dependencies=[require_token])
     app.include_router(backends_routes.router, dependencies=[require_token])
     app.include_router(sessions_routes.router, dependencies=[require_token])
+    app.include_router(targets_routes.router, dependencies=[require_token])
     return app
