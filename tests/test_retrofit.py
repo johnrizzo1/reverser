@@ -224,6 +224,47 @@ def test_whatweb_scan_in_network_writes_service(tmp_targets_dir, monkeypatch):
     assert any(s.service == "http" for s in services)
 
 
+def test_whatweb_scan_falls_back_on_ruby_loaderror(tmp_targets_dir, monkeypatch):
+    """When whatweb fails with the Ruby getoptlong LoadError (nixpkgs whatweb
+    on Ruby 3.3+), whatweb_scan should delegate to whatweb_fingerprint's
+    curl-based fallback instead of returning a confusing error."""
+    from reverser.tools import network as net
+    from reverser.tools import web as webmod
+    from unittest.mock import AsyncMock
+
+    # Make whatweb itself fail with the exact Ruby error
+    error_output = (
+        "whatweb:37:in '<main>': cannot load such file -- getoptlong (LoadError)"
+    )
+    monkeypatch.setattr(
+        net, "arun_cmd",
+        AsyncMock(return_value={
+            "stdout": "", "stderr": error_output,
+            "returncode": 1, "truncated": False,
+        }),
+    )
+
+    # Mock the fallback handler so we can verify it gets called
+    sentinel_response = {
+        "content": [{"type": "text", "text": "FALLBACK_CURL_FINGERPRINT_RESULT"}]
+    }
+    fallback_calls = []
+    async def fake_fingerprint_handler(args):
+        fallback_calls.append(args)
+        return sentinel_response
+
+    # Patch the whatweb_fingerprint tool's handler attribute
+    monkeypatch.setattr(
+        webmod.whatweb_fingerprint, "handler", fake_fingerprint_handler,
+        raising=False,
+    )
+
+    result = _call(net.whatweb_scan, {"target": "http://10.10.10.7"})
+    assert len(fallback_calls) == 1
+    assert fallback_calls[0] == {"target": "http://10.10.10.7", "aggression": 1}
+    assert "FALLBACK_CURL_FINGERPRINT_RESULT" in result["content"][0]["text"]
+
+
 def test_testssl_analyze_writes_findings(tmp_targets_dir, monkeypatch):
     from reverser.tools import web as webmod
     text = (FIXTURES / "ssl" / "sslscan_full.txt").read_text()

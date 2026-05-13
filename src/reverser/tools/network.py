@@ -547,6 +547,19 @@ async def whatweb_scan(args: dict) -> dict:
 
     cmd = ["whatweb", "--color=never", f"-a{aggression}", target]
     result = await arun_cmd(cmd, timeout=60, max_output=16000)
+
+    # Detect Ruby env breakage (getoptlong removed from stdlib in Ruby 3.3+;
+    # nixpkgs whatweb's wrapper doesn't load the gem). Delegate to
+    # whatweb_fingerprint which has a curl-based fallback so the agent gets
+    # useful output instead of a Ruby LoadError.
+    combined_output = (result.get("stderr") or "") + (result.get("stdout") or "")
+    if result["returncode"] != 0 and (
+        "LoadError" in combined_output or "getoptlong" in combined_output
+    ):
+        from .web import whatweb_fingerprint
+        handler = getattr(whatweb_fingerprint, "handler", None) or whatweb_fingerprint
+        return await handler({"target": target, "aggression": aggression})
+
     # ── KB write (new) ─────────────────────────────────────────────────
     try:
         from urllib.parse import urlparse
