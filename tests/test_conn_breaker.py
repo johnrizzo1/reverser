@@ -106,3 +106,70 @@ def test_looks_like_conn_error_empty_string():
     from reverser.tools._conn_breaker import looks_like_conn_error
     assert looks_like_conn_error("") is False
     assert looks_like_conn_error(None) is False
+
+
+# ── run_cmd integration ──────────────────────────────────────────────
+
+
+def test_run_cmd_bails_when_tripped(monkeypatch):
+    """If the breaker is tripped, run_cmd returns an error without running."""
+    from reverser.tools import _conn_breaker
+    from reverser.tools._common import run_cmd
+
+    _conn_breaker.reset_all()
+    for _ in range(3):
+        _conn_breaker.record_failure("10.10.10.5")
+    assert _conn_breaker.is_tripped("10.10.10.5") is True
+
+    called = []
+    def fake_subprocess_run(*a, **kw):
+        called.append(True)
+        raise AssertionError("subprocess should not have been called")
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+
+    result = run_cmd(["echo", "test"], target="10.10.10.5")
+    assert result.get("is_error") is True
+    assert "circuit breaker" in result["stderr"].lower()
+    assert called == []  # subprocess.run was NOT called
+
+    _conn_breaker.reset_all()
+
+
+def test_run_cmd_records_failure_on_conn_error_output(monkeypatch):
+    """When a subprocess fails with conn-error output, the counter increments."""
+    from reverser.tools import _conn_breaker
+    from reverser.tools._common import run_cmd
+
+    _conn_breaker.reset_all()
+
+    class FakeProc:
+        stdout = ""
+        stderr = "curl: (7) Failed to connect to 10.10.10.5: Connection refused"
+        returncode = 7
+
+    monkeypatch.setattr("subprocess.run", lambda *a, **kw: FakeProc())
+
+    result = run_cmd(["curl", "http://10.10.10.5"], target="10.10.10.5")
+    assert "Connection refused" in result["stderr"]
+    assert _conn_breaker.failure_summary("10.10.10.5")["count"] == 1
+
+    _conn_breaker.reset_all()
+
+
+def test_run_cmd_no_target_no_breaker_interaction(monkeypatch):
+    """If target=None (default), the breaker is never touched."""
+    from reverser.tools import _conn_breaker
+    from reverser.tools._common import run_cmd
+
+    _conn_breaker.reset_all()
+
+    class FakeProc:
+        stdout = ""
+        stderr = "Connection refused"
+        returncode = 7
+
+    monkeypatch.setattr("subprocess.run", lambda *a, **kw: FakeProc())
+
+    # No target= passed → breaker counter stays at 0 even with conn-error output
+    run_cmd(["curl", "http://anywhere"])
+    assert _conn_breaker.failure_summary("anywhere")["count"] == 0
