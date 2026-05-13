@@ -5,6 +5,8 @@ import { Dashboard } from "@/pages/Dashboard";
 import { Health } from "@/pages/Health";
 import { Settings } from "@/pages/Settings";
 import { CrashScreen } from "@/pages/CrashScreen";
+import { NewEngagement } from "@/pages/NewEngagement";
+import { SessionLayout } from "@/layout/SessionLayout";
 import { useConnection } from "@/state/connection";
 
 export default function App() {
@@ -29,10 +31,12 @@ export default function App() {
     <Routes>
       <Route element={<Shell />}>
         <Route index element={<Dashboard />} />
+        <Route path="/new" element={<NewEngagement />} />
         <Route path="/health" element={<Health />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
+      <Route path="/session/:id" element={<SessionLayout />} />
     </Routes>
   );
 }
