@@ -40,7 +40,7 @@ function TargetRow({
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className="relative group">
+    <div className={cn("relative group", menuOpen && "z-20")}>
       <Link
         to={`/target/${encodeURIComponent(r.name)}`}
         className={cn(
