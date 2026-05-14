@@ -1,9 +1,12 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSessions, useTargetSummary } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SessionRow } from "@/components/SessionRow";
 import { KBTabbedView } from "@/components/KBTabbedView";
+import { ScopeEditorModal } from "@/modals/ScopeEditorModal";
+import { ScreenshotLightboxModal } from "@/modals/ScreenshotLightboxModal";
 
 export function TargetOverview() {
   const { name: rawName } = useParams<{ name: string }>();
@@ -13,6 +16,8 @@ export function TargetOverview() {
   const targetSessions = (sessions.data?.sessions ?? []).filter(
     (s) => s.target === name,
   );
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<{ findingId: string; startIndex: number } | null>(null);
 
   if (!name) return null;
 
@@ -20,6 +25,9 @@ export function TargetOverview() {
     <div className="p-6 h-full overflow-auto">
       <div className="flex items-center mb-4 gap-3">
         <h2 className="text-base font-medium text-neutral-100">{name}</h2>
+        <Button size="sm" variant="outline" onClick={() => setScopeOpen(true)}>
+          Edit scope
+        </Button>
         <Link to={`/new?target=${encodeURIComponent(name)}`} className="ml-auto">
           <Button size="sm">New engagement</Button>
         </Link>
@@ -100,10 +108,26 @@ export function TargetOverview() {
         <Card>
           <CardHeader><CardTitle>Knowledge base</CardTitle></CardHeader>
           <CardContent className="p-0 h-[480px]">
-            <KBTabbedView target={name} />
+            <KBTabbedView
+              target={name}
+              onClickEvidence={(findingId, startIndex) =>
+                setLightbox({ findingId, startIndex })
+              }
+            />
           </CardContent>
         </Card>
       </div>
+
+      <ScopeEditorModal target={name} open={scopeOpen} onOpenChange={setScopeOpen} />
+      {lightbox && (
+        <ScreenshotLightboxModal
+          target={name}
+          findingId={lightbox.findingId}
+          startIndex={lightbox.startIndex}
+          open={true}
+          onOpenChange={(open) => { if (!open) setLightbox(null); }}
+        />
+      )}
     </div>
   );
 }
