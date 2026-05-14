@@ -9,10 +9,13 @@ Note: KB method names differ from the plan spec — actual names are:
   get_artifacts, get_notes, list_hypotheses
 """
 import ipaddress
+import logging
 import os
+import re
+import shutil
 from collections import Counter
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response
@@ -21,6 +24,7 @@ from pydantic import BaseModel
 
 from ...kb import for_target
 from ...sessions import list_all as list_all_snapshots
+from ...sessions import target_key
 from ...tools.kb import _render_report
 
 router = APIRouter()
@@ -48,8 +52,63 @@ def _targets_root() -> Path:
     return Path(os.environ.get("REVERSER_TARGETS_DIR", "targets"))
 
 
+_TRASH_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-(.+)$")
+_TRASH_RETENTION = timedelta(days=30)
+
+
+def _trash_dir() -> Path:
+    return _targets_root() / ".trash"
+
+
+def _prune_trash(now: datetime | None = None) -> None:
+    """Remove entries older than _TRASH_RETENTION. Silently ignores entries
+    whose names don't start with an ISO timestamp."""
+    trash = _trash_dir()
+    if not trash.is_dir():
+        return
+    cutoff = (now or datetime.now(timezone.utc)) - _TRASH_RETENTION
+    log = logging.getLogger(__name__)
+    for entry in trash.iterdir():
+        m = _TRASH_RE.match(entry.name)
+        if not m:
+            continue
+        try:
+            ts = datetime.strptime(m.group(1), "%Y-%m-%dT%H-%M-%S").replace(
+                tzinfo=timezone.utc
+            )
+        except ValueError:
+            continue
+        if ts < cutoff:
+            try:
+                shutil.rmtree(entry)
+            except OSError as e:
+                log.warning("failed to prune trash entry %s: %s", entry, e)
+
+
+def _has_active_session(target: str) -> bool:
+    """True iff any snapshot for this target has state == 'active'.
+
+    Normalizes both the query target and stored target via target_key() so
+    that absolute paths (as stored by AgentSession) match canonical names.
+    """
+    try:
+        query_key = target_key(target)
+    except ValueError:
+        return False
+    for s in list_all_snapshots():
+        if s.state != "active":
+            continue
+        try:
+            if target_key(s.target) == query_key:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 @router.get("/api/targets")
 def list_targets() -> dict:
+    _prune_trash()
     root = _targets_root()
     if not root.is_dir():
         return {"targets": []}
@@ -64,6 +123,7 @@ def list_targets() -> dict:
             "name": child.name,
             "has_kb": (child / "state.db").is_file(),
             "has_scope": (child / "scope.toml").is_file(),
+            "archived": (child / ".archived").is_file(),
         })
     return {"targets": targets}
 
@@ -335,3 +395,53 @@ def get_screenshot(target: str, finding_id: str, n: str):
     if not path.is_file():
         raise HTTPException(404, detail=f"screenshot {idx} not found")
     return FileResponse(path, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Archive / unarchive / soft-delete endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/api/targets/{target}/archive", status_code=204)
+def archive_target(target: str) -> Response:
+    target_dir = _targets_root() / target
+    if not target_dir.is_dir():
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+    if _has_active_session(target):
+        raise HTTPException(409, detail="target has an active session; stop it first")
+    marker = target_dir / ".archived"
+    marker.write_text(
+        datetime.now(timezone.utc).isoformat(timespec="seconds")
+    )
+    return Response(status_code=204)
+
+
+@router.delete("/api/targets/{target}/archive", status_code=204)
+def unarchive_target(target: str) -> Response:
+    target_dir = _targets_root() / target
+    if not target_dir.is_dir():
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+    marker = target_dir / ".archived"
+    if marker.exists():
+        marker.unlink()
+    return Response(status_code=204)
+
+
+@router.delete("/api/targets/{target}", status_code=204)
+def delete_target(target: str) -> Response:
+    target_dir = _targets_root() / target
+    if not target_dir.is_dir():
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+    if _has_active_session(target):
+        raise HTTPException(409, detail="target has an active session; stop it first")
+
+    trash = _trash_dir()
+    trash.mkdir(parents=True, exist_ok=True, mode=0o700)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    dest = trash / f"{stamp}-{target}"
+    # Avoid collision (two deletions in the same second)
+    suffix = 0
+    while dest.exists():
+        suffix += 1
+        dest = trash / f"{stamp}-{target}.{suffix}"
+    shutil.move(str(target_dir), str(dest))
+    return Response(status_code=204)
