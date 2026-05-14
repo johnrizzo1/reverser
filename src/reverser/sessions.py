@@ -462,3 +462,48 @@ def is_session_alive(snapshot: SessionSnapshot) -> bool:
         return True
     except (OSError, ProcessLookupError):
         return False
+
+
+def set_archived(target: str, session_id: str, archived: bool) -> None:
+    """Set or clear the archived_at timestamp on an existing snapshot.
+
+    Loads, mutates, saves. Refuses if the snapshot's state is "active"
+    (callers should stop the session first). Idempotent — setting True on
+    an already-archived snapshot rewrites the timestamp; setting False on
+    an unarchived snapshot is a no-op write.
+    """
+    snap = load(target, session_id)
+    if snap.state == "active":
+        raise SessionStateError(
+            f"cannot archive an active session ({session_id}); stop it first"
+        )
+    snap.archived_at = _now_iso() if archived else None
+    save(snap)
+
+
+def delete(target: str, session_id: str) -> None:
+    """Unlink a snapshot and its log file. Refuses if state == 'active'.
+
+    The log file is best-effort: if it doesn't exist or is unreadable we
+    log a warning and continue. The snapshot delete is the primary effect.
+    """
+    import logging
+
+    snap = load(target, session_id)
+    if snap.state == "active":
+        raise SessionStateError(
+            f"cannot delete an active session ({session_id}); stop it first"
+        )
+
+    snap_path = snapshot_path(target, session_id)
+    log_path = Path(snap.log_path) if snap.log_path else None
+
+    try:
+        if log_path is not None and log_path.is_file():
+            log_path.unlink()
+    except OSError as e:
+        logging.getLogger(__name__).warning(
+            "failed to unlink session log %s: %s", log_path, e
+        )
+
+    snap_path.unlink()
