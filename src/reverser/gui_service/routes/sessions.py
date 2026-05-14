@@ -6,8 +6,10 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from ...session_log import load_session_log
-from ...sessions import SessionNotFoundError
+from ...sessions import SessionNotFoundError, SessionStateError
+from ...sessions import delete as delete_snapshot
 from ...sessions import load as load_snapshot
+from ...sessions import set_archived as set_snapshot_archived
 
 router = APIRouter()
 
@@ -240,3 +242,42 @@ def get_session_log(session_id: str, target: str) -> dict:
         out = out[-5000:]
 
     return {"id": session_id, "events": out, "truncated": truncated}
+
+
+@router.post("/api/sessions/{session_id}/archive", status_code=204)
+def archive_session(session_id: str, target: str, request: Request) -> Response:
+    # Check the in-memory active session first — the on-disk snapshot may
+    # not reflect the running state yet.
+    mgr = _manager(request)
+    if mgr.active is not None and mgr.active.session_id == session_id:
+        raise HTTPException(409, detail="session is active; stop it first")
+    try:
+        set_snapshot_archived(target, session_id, True)
+    except SessionNotFoundError:
+        raise HTTPException(404)
+    except SessionStateError as e:
+        raise HTTPException(409, detail=str(e))
+    return Response(status_code=204)
+
+
+@router.delete("/api/sessions/{session_id}/archive", status_code=204)
+def unarchive_session(session_id: str, target: str) -> Response:
+    try:
+        set_snapshot_archived(target, session_id, False)
+    except SessionNotFoundError:
+        raise HTTPException(404)
+    return Response(status_code=204)
+
+
+@router.delete("/api/sessions/{session_id}", status_code=204)
+def delete_session(session_id: str, target: str, request: Request) -> Response:
+    mgr = _manager(request)
+    if mgr.active is not None and mgr.active.session_id == session_id:
+        raise HTTPException(409, detail="session is active; stop it first")
+    try:
+        delete_snapshot(target, session_id)
+    except SessionNotFoundError:
+        raise HTTPException(404)
+    except SessionStateError as e:
+        raise HTTPException(409, detail=str(e))
+    return Response(status_code=204)
