@@ -8,9 +8,6 @@ from httpx import ASGITransport, AsyncClient
 
 from reverser.gui_service.app import create_app
 from reverser.gui_service.config import ServiceConfig
-from reverser.sessions import (
-    SessionConfig, SessionSnapshot, save,
-)
 from tests.gui_service.fakes import FakeBackend
 
 
@@ -155,3 +152,21 @@ async def test_list_targets_includes_archived_field(client):
     assert rows, "expected the seeded target"
     for t in rows:
         assert "archived" in t, f"row missing 'archived': {t}"
+
+
+@pytest.mark.asyncio
+async def test_unarchive_missing_target_returns_404(client):
+    r = await client.delete(
+        "/api/targets/does-not-exist/archive",
+        headers=HEADERS,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_target_returns_404(client):
+    r = await client.delete(
+        "/api/targets/does-not-exist",
+        headers=HEADERS,
+    )
+    assert r.status_code == 404

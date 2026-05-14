@@ -360,6 +360,31 @@ def test_list_all_walks_all_target_directories(tmp_path, monkeypatch):
     assert {s.target for s in snaps} == {"10.10.10.5", "10.10.10.7"}
 
 
+def test_list_all_skips_dot_prefixed_directories(tmp_path, monkeypatch):
+    """list_all must skip .trash/ and other hidden dirs without crashing."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import (
+        SessionConfig, SessionSnapshot, list_all, save,
+    )
+
+    # Seed a real target with one session
+    snap = SessionSnapshot(
+        session_id="real-session", target="10.10.10.5",
+        log_path="logs/x.jsonl", state="stopped",
+        started_at="2026-05-14T10:00:00", last_active_at="2026-05-14T10:00:00",
+        config=SessionConfig(profile="manager"),
+    )
+    save(snap)
+
+    # Create a .trash directory that would parse but should be skipped
+    (tmp_path / ".trash").mkdir()
+    (tmp_path / ".trash" / "sessions").mkdir()
+
+    snaps = list_all()
+    assert len(snaps) == 1
+    assert snaps[0].session_id == "real-session"
+
+
 def test_latest_for_target_picks_most_recent_resumable(tmp_path, monkeypatch):
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
     from reverser.sessions import save, latest_for_target, SessionSnapshot, SessionConfig

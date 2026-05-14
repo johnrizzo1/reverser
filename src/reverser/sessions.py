@@ -364,7 +364,8 @@ def list_all(*, exclude_completed: bool = False) -> list[SessionSnapshot]:
 
     Skips directories that don't match the canonical target-name regex —
     these are bogus dirs from prior CLI parsing bugs (URLs as paths, free-
-    text targets, etc.). See _is_canonical_target_name.
+    text targets, etc.). See _is_canonical_target_name. Also skips any
+    dot-prefixed directory (e.g. .trash/) — those are not targets.
     """
     root = _targets_root()
     if not root.is_dir():
@@ -373,6 +374,9 @@ def list_all(*, exclude_completed: bool = False) -> list[SessionSnapshot]:
     all_snaps: list[SessionSnapshot] = []
     for target_dir in root.iterdir():
         if not target_dir.is_dir():
+            continue
+        # Skip hidden directories (.trash/, etc.) — never targets
+        if target_dir.name.startswith("."):
             continue
         # Skip bogus dirs from prior CLI parsing bugs
         if not _is_canonical_target_name(target_dir.name):
