@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from ...kb import for_target
+from ...sessions import is_session_alive
 from ...sessions import list_all as list_all_snapshots
 from ...sessions import target_key
 from ...tools.kb import _render_report
@@ -86,10 +87,14 @@ def _prune_trash(now: datetime | None = None) -> None:
 
 
 def _has_active_session(target: str) -> bool:
-    """True iff any snapshot for this target has state == 'active'.
+    """True iff any snapshot for this target has state == 'active' AND
+    its recorded pid is still a live process.
 
     Normalizes both the query target and stored target via target_key() so
     that absolute paths (as stored by AgentSession) match canonical names.
+
+    The is_session_alive() filter prevents stale "active" snapshots from a
+    crashed process from blocking archive/delete forever.
     """
     try:
         query_key = target_key(target)
@@ -97,6 +102,8 @@ def _has_active_session(target: str) -> bool:
         return False
     for s in list_all_snapshots():
         if s.state != "active":
+            continue
+        if not is_session_alive(s):
             continue
         try:
             if target_key(s.target) == query_key:

@@ -156,3 +156,45 @@ def test_set_archived_raises_on_active_session(tmp_path, monkeypatch):
     save(snap)  # state == "active"
     with pytest.raises(SessionStateError):
         set_archived("10.10.10.5", snap.session_id, True)
+
+
+def test_delete_ok_when_active_state_is_stale(tmp_path, monkeypatch):
+    """A snapshot marked state='active' but whose pid is dead (or unset)
+    is treated as not-actually-running, so it can be deleted."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import (
+        SessionConfig, delete, new_snapshot, save, snapshot_path,
+    )
+
+    snap = new_snapshot(
+        target="10.10.10.5",
+        log_path="logs/x.jsonl",
+        config=SessionConfig(profile="manager"),
+    )
+    # state == "active" from new_snapshot, but null the pid to simulate a
+    # crashed session that never updated state on shutdown.
+    snap.pid = None
+    save(snap)
+
+    delete("10.10.10.5", snap.session_id)
+    assert not snapshot_path("10.10.10.5", snap.session_id).exists()
+
+
+def test_set_archived_ok_when_active_state_is_stale(tmp_path, monkeypatch):
+    """Same as the delete case: a stale 'active' snapshot can be archived."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.sessions import (
+        SessionConfig, load, new_snapshot, save, set_archived,
+    )
+
+    snap = new_snapshot(
+        target="10.10.10.5",
+        log_path="logs/x.jsonl",
+        config=SessionConfig(profile="manager"),
+    )
+    snap.pid = None
+    save(snap)
+
+    set_archived("10.10.10.5", snap.session_id, True)
+    reloaded = load("10.10.10.5", snap.session_id)
+    assert reloaded.archived_at is not None

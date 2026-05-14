@@ -471,13 +471,12 @@ def is_session_alive(snapshot: SessionSnapshot) -> bool:
 def set_archived(target: str, session_id: str, archived: bool) -> None:
     """Set or clear the archived_at timestamp on an existing snapshot.
 
-    Loads, mutates, saves. Refuses if the snapshot's state is "active"
-    (callers should stop the session first). Idempotent — setting True on
-    an already-archived snapshot rewrites the timestamp; setting False on
-    an unarchived snapshot is a no-op write.
+    Loads, mutates, saves. Refuses if the snapshot is actively running
+    (state == 'active' AND pid is alive); a stale 'active' from a crashed
+    process is treated as inactive so it can still be archived.
     """
     snap = load(target, session_id)
-    if snap.state == "active":
+    if snap.state == "active" and is_session_alive(snap):
         raise SessionStateError(
             f"cannot archive an active session ({session_id}); stop it first"
         )
@@ -486,7 +485,10 @@ def set_archived(target: str, session_id: str, archived: bool) -> None:
 
 
 def delete(target: str, session_id: str) -> None:
-    """Unlink a snapshot and its log file. Refuses if state == 'active'.
+    """Unlink a snapshot and its log file. Refuses if the session is
+    actively running (state == 'active' AND pid is alive); a stale
+    'active' from a crashed process is treated as inactive so it can
+    still be deleted.
 
     The log file is best-effort: if it doesn't exist or is unreadable we
     log a warning and continue. The snapshot delete is the primary effect.
@@ -494,7 +496,7 @@ def delete(target: str, session_id: str) -> None:
     import logging
 
     snap = load(target, session_id)
-    if snap.state == "active":
+    if snap.state == "active" and is_session_alive(snap):
         raise SessionStateError(
             f"cannot delete an active session ({session_id}); stop it first"
         )
