@@ -159,3 +159,13 @@ async def test_unarchive_missing_session_returns_404(client):
         headers=HEADERS,
     )
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_includes_archived_at_field(client, tmp_path):
+    """Every session row must include archived_at (null by default)."""
+    _persist_stopped_snapshot(tmp_path)
+    rows = (await client.get("/api/sessions", headers=HEADERS)).json()["sessions"]
+    assert rows, "expected at least one row"
+    for row in rows:
+        assert "archived_at" in row, f"row missing archived_at: {row}"

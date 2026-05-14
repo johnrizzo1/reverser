@@ -171,6 +171,7 @@ class SessionManager:
                 "turns": s.stats.turns,
                 "total_cost": s.stats.total_cost,
                 "stopped_at": s.stopped_at,
+                "archived_at": s.archived_at,
             })
         # The active session overrides whatever state-on-disk has
         if self.active is not None:
@@ -201,4 +202,5 @@ class SessionManager:
             "total_cost": s["total_cost"],
             "budget": s["budget"],
             "max_turns": s["max_turns"],
+            "archived_at": None,
         }
