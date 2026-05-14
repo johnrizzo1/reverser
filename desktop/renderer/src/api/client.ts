@@ -77,6 +77,7 @@ export type SessionRow = {
   turns: number;
   total_cost: number;
   stopped_at: string | null;
+  archived_at: string | null;
   budget?: number;
   max_turns?: number;
 };
@@ -106,7 +107,12 @@ export type CreateSessionResponse = {
 
 // ---- Targets / KB ----
 
-export type TargetRow = { name: string; has_kb: boolean; has_scope: boolean };
+export type TargetRow = {
+  name: string;
+  has_kb: boolean;
+  has_scope: boolean;
+  archived: boolean;
+};
 export type TargetsResponse = { targets: TargetRow[] };
 
 export type KBResponse = {

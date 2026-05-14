@@ -235,3 +235,71 @@ export function useScreenshots(target: string | null, findingId: string | null) 
     staleTime: 60_000,
   });
 }
+
+// ---- Phase 4 (delete & archive): session-level mutations ----
+
+export function useArchiveSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, target }: { sessionId: string; target: string }) =>
+      api.post<void>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/archive` +
+        `?target=${encodeURIComponent(target)}`,
+      ),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+}
+
+export function useUnarchiveSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, target }: { sessionId: string; target: string }) =>
+      api.del<void>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/archive` +
+        `?target=${encodeURIComponent(target)}`,
+      ),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+}
+
+export function useDeleteSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, target }: { sessionId: string; target: string }) =>
+      api.del<void>(
+        `/api/sessions/${encodeURIComponent(sessionId)}` +
+        `?target=${encodeURIComponent(target)}`,
+      ),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+}
+
+export function useArchiveTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      api.post<void>(`/api/targets/${encodeURIComponent(name)}/archive`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["targets"] }); },
+  });
+}
+
+export function useUnarchiveTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      api.del<void>(`/api/targets/${encodeURIComponent(name)}/archive`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["targets"] }); },
+  });
+}
+
+export function useDeleteTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      api.del<void>(`/api/targets/${encodeURIComponent(name)}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["targets"] });
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
