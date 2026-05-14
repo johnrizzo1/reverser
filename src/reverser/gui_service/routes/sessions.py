@@ -9,6 +9,7 @@ from ...session_log import load_session_log
 from ...sessions import SessionNotFoundError, SessionStateError
 from ...sessions import delete as delete_snapshot
 from ...sessions import load as load_snapshot
+from ...sessions import save as save_snapshot
 from ...sessions import set_archived as set_snapshot_archived
 
 router = APIRouter()
@@ -102,11 +103,27 @@ async def stop_session(request: Request, session_id: str) -> Response:
 
 @router.post("/api/sessions/{session_id}/done", status_code=204)
 async def mark_done(request: Request, session_id: str) -> Response:
+    mgr = _manager(request)
     try:
-        gs = _manager(request).get_active(session_id)
+        gs = mgr.get_active(session_id)
+        gs.mark_completed()
+        return Response(status_code=204)
     except KeyError:
+        pass
+
+    # Fall back to a disk-only snapshot mutation. This covers historical
+    # sessions and stale-'active' snapshots whose original process is gone.
+    row = next((r for r in mgr.list_sessions() if r["id"] == session_id), None)
+    if row is None:
         raise HTTPException(404)
-    gs.mark_completed()
+    try:
+        snap = load_snapshot(row["target"], session_id)
+    except SessionNotFoundError:
+        raise HTTPException(404)
+    snap.state = "completed"
+    snap.stopped_at = snap.stopped_at or snap.last_active_at
+    snap.pid = None
+    save_snapshot(snap)
     return Response(status_code=204)
 
 

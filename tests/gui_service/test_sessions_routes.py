@@ -135,3 +135,37 @@ async def test_sudo_in_memory_only(client, tmp_path):
 async def test_unknown_session_returns_404(client):
     r = await client.post("/api/sessions/missing/messages", headers=HEADERS, json={"text": "x"})
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_mark_done_on_historical_snapshot_updates_state(client, tmp_path):
+    """A historical session (no in-memory GUISession) can still be marked
+    completed — the route falls back to a disk-only snapshot mutation."""
+    from reverser.sessions import (
+        SessionConfig, SessionSnapshot, load, save,
+    )
+
+    snap = SessionSnapshot(
+        session_id="2026-05-10T17-52-25",
+        target="10.10.10.5",
+        log_path="logs/x.jsonl",
+        state="stopped",
+        started_at="2026-05-10T17:52:25",
+        last_active_at="2026-05-10T17:52:25",
+        config=SessionConfig(profile="manager"),
+    )
+    save(snap)
+
+    r = await client.post(
+        f"/api/sessions/{snap.session_id}/done", headers=HEADERS,
+    )
+    assert r.status_code == 204, r.text
+
+    reloaded = load("10.10.10.5", snap.session_id)
+    assert reloaded.state == "completed"
+
+
+@pytest.mark.asyncio
+async def test_mark_done_unknown_session_returns_404(client):
+    r = await client.post("/api/sessions/does-not-exist/done", headers=HEADERS)
+    assert r.status_code == 404
