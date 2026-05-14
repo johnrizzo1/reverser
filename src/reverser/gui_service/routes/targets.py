@@ -8,17 +8,30 @@ Note: KB method names differ from the plan spec — actual names are:
   get_hosts, get_services, get_credentials, get_findings,
   get_artifacts, get_notes, list_hypotheses
 """
+import ipaddress
 import os
 from collections import Counter
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from ...kb import for_target
 from ...sessions import list_all as list_all_snapshots
+from ...tools.kb import _render_report
 
 router = APIRouter()
+
+
+class ScopeBody(BaseModel):
+    in_scope_cidrs: list[str]
+    out_of_scope_ips: list[str]
+    allowed_hours: str | None
+    no_dos: bool
+    no_account_lockout: bool
 
 
 def _as_jsonable(row):
@@ -159,3 +172,166 @@ def read_summary(target: str) -> dict:
     if not (_targets_root() / target).is_dir():
         raise HTTPException(404, detail=f"unknown target: {target!r}")
     return _summarize_target(target)
+
+
+# ---------------------------------------------------------------------------
+# Scope endpoints
+# ---------------------------------------------------------------------------
+
+def _scope_path(target: str):
+    return _targets_root() / target / "scope.toml"
+
+
+def _serialize_scope_toml(body: ScopeBody) -> str:
+    """Render the [scope] section of scope.toml. Manual assembly — fields
+    are fixed and small."""
+    def _emit_list(name: str, vals: list[str]) -> str:
+        if not vals:
+            return f"{name} = []\n"
+        joined = ", ".join(f'"{v}"' for v in vals)
+        return f"{name} = [{joined}]\n"
+    hours = "" if body.allowed_hours is None else f'allowed_hours = "{body.allowed_hours}"\n'
+    return (
+        "[scope]\n"
+        + _emit_list("in_scope_cidrs", body.in_scope_cidrs)
+        + _emit_list("out_of_scope_ips", body.out_of_scope_ips)
+        + hours
+        + f"no_dos = {'true' if body.no_dos else 'false'}\n"
+        + f"no_account_lockout = {'true' if body.no_account_lockout else 'false'}\n"
+    )
+
+
+def _validate_scope(body: ScopeBody) -> dict[str, str]:
+    """Return a per-field error map; empty dict means valid."""
+    errors: dict[str, str] = {}
+    for i, cidr in enumerate(body.in_scope_cidrs):
+        try:
+            ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            errors[f"in_scope_cidrs[{i}]"] = f"invalid CIDR: {cidr!r}"
+    for i, ip in enumerate(body.out_of_scope_ips):
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            errors[f"out_of_scope_ips[{i}]"] = f"invalid IP: {ip!r}"
+    return errors
+
+
+@router.get("/api/targets/{target}/scope")
+def get_scope(target: str) -> dict:
+    if not (_targets_root() / target).is_dir():
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+    path = _scope_path(target)
+    if not path.is_file():
+        return {
+            "exists": False,
+            "in_scope_cidrs": [],
+            "out_of_scope_ips": [],
+            "allowed_hours": None,
+            "no_dos": False,
+            "no_account_lockout": False,
+        }
+    import tomllib
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise HTTPException(500, detail=f"scope.toml unreadable: {e}")
+    section = data.get("scope", {})
+    return {
+        "exists": True,
+        "in_scope_cidrs": list(section.get("in_scope_cidrs", [])),
+        "out_of_scope_ips": list(section.get("out_of_scope_ips", [])),
+        "allowed_hours": section.get("allowed_hours"),
+        "no_dos": bool(section.get("no_dos", False)),
+        "no_account_lockout": bool(section.get("no_account_lockout", False)),
+    }
+
+
+@router.put("/api/targets/{target}/scope", status_code=204)
+def put_scope(target: str, body: ScopeBody):
+    if not (_targets_root() / target).is_dir():
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+    errors = _validate_scope(body)
+    if errors:
+        return JSONResponse(status_code=400, content={"errors": errors})
+    path = _scope_path(target)
+    path.write_text(_serialize_scope_toml(body))
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Report endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/api/targets/{target}/report")
+def get_report(target: str) -> dict:
+    if not (_targets_root() / target).is_dir():
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+    kb = for_target(target)
+    markdown = _render_report(kb)
+    return {
+        "target": target,
+        "markdown": markdown,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "bytes": len(markdown.encode()),
+    }
+
+
+@router.post("/api/targets/{target}/report")
+def export_report(target: str) -> dict:
+    if not (_targets_root() / target).is_dir():
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+    kb = for_target(target)
+    markdown = _render_report(kb)
+    out_path = _targets_root() / target / "report.md"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(markdown)
+    return {
+        "target": target,
+        "path": str(out_path.resolve()),
+        "bytes": len(markdown.encode()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Screenshot endpoints
+# ---------------------------------------------------------------------------
+
+def _findings_dir(target: str, finding_id: str):
+    return _targets_root() / target / "findings" / finding_id
+
+
+@router.get("/api/targets/{target}/findings/{finding_id}/screenshots")
+def list_screenshots(target: str, finding_id: str) -> dict:
+    d = _findings_dir(target, finding_id)
+    if not d.is_dir():
+        raise HTTPException(404, detail=f"unknown finding: {finding_id!r}")
+    entries = []
+    for f in sorted(d.glob("screenshot-*.png")):
+        stem = f.stem  # e.g. "screenshot-1"
+        try:
+            idx = int(stem.removeprefix("screenshot-"))
+        except ValueError:
+            continue
+        stat = f.stat()
+        entries.append({
+            "index": idx,
+            "size_bytes": stat.st_size,
+            "captured_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                .isoformat(timespec="seconds").replace("+00:00", "Z"),
+        })
+    entries.sort(key=lambda e: e["index"])
+    return {"finding_id": finding_id, "screenshots": entries}
+
+
+@router.get("/api/targets/{target}/findings/{finding_id}/screenshots/{n}")
+def get_screenshot(target: str, finding_id: str, n: str):
+    if not n.isdigit():
+        raise HTTPException(404, detail="invalid screenshot index")
+    idx = int(n)
+    d = _findings_dir(target, finding_id)
+    path = d / f"screenshot-{idx}.png"
+    if not path.is_file():
+        raise HTTPException(404, detail=f"screenshot {idx} not found")
+    return FileResponse(path, media_type="image/png")
