@@ -12,6 +12,11 @@ import {
   type TargetSummary,
   type ConversationResponse,
   type SessionLogResponse,
+  type ScopeBody,
+  type ScopeResponse,
+  type ReportResponse,
+  type ExportReportResponse,
+  type ScreenshotsResponse,
 } from "./client";
 import { useConnection } from "@/state/connection";
 
@@ -175,5 +180,58 @@ export function useSessionLogReplay(
       ),
     enabled: ready && !!sessionId && !!target,
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useScope(target: string | null) {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["scope", target],
+    queryFn: () =>
+      api.get<ScopeResponse>(`/api/targets/${encodeURIComponent(target!)}/scope`),
+    enabled: ready && !!target,
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateScope(target: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ScopeBody) =>
+      api.put<void>(`/api/targets/${encodeURIComponent(target)}/scope`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["scope", target] });
+    },
+  });
+}
+
+export function useReport(target: string | null) {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["report", target],
+    queryFn: () =>
+      api.get<ReportResponse>(`/api/targets/${encodeURIComponent(target!)}/report`),
+    enabled: ready && !!target,
+    staleTime: 30_000,
+  });
+}
+
+export function useExportReport(target: string) {
+  return useMutation({
+    mutationFn: () =>
+      api.post<ExportReportResponse>(`/api/targets/${encodeURIComponent(target)}/report`),
+  });
+}
+
+export function useScreenshots(target: string | null, findingId: string | null) {
+  const ready = useReady();
+  return useQuery({
+    queryKey: ["screenshots", target, findingId],
+    queryFn: () =>
+      api.get<ScreenshotsResponse>(
+        `/api/targets/${encodeURIComponent(target!)}/findings/${encodeURIComponent(findingId!)}/screenshots`,
+      ),
+    enabled: ready && !!target && !!findingId,
+    staleTime: 60_000,
   });
 }

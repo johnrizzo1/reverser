@@ -179,3 +179,45 @@ export type SessionLogResponse = {
   events: LogEvent[];
   truncated: boolean;
 };
+
+// ---- Phase 3b: Scope ----
+
+export type ScopeBody = {
+  in_scope_cidrs: string[];
+  out_of_scope_ips: string[];
+  allowed_hours: string | null;
+  no_dos: boolean;
+  no_account_lockout: boolean;
+};
+
+export type ScopeResponse = ScopeBody & { exists: boolean };
+
+export type ScopeUpdateError = { errors: Record<string, string> };
+
+// ---- Phase 3b: Report ----
+
+export type ReportResponse = {
+  target: string;
+  markdown: string;
+  generated_at: string;
+  bytes: number;
+};
+
+export type ExportReportResponse = {
+  target: string;
+  path: string;
+  bytes: number;
+};
+
+// ---- Phase 3b: Screenshots ----
+
+export type ScreenshotEntry = {
+  index: number;
+  size_bytes: number;
+  captured_at: string;
+};
+
+export type ScreenshotsResponse = {
+  finding_id: string;
+  screenshots: ScreenshotEntry[];
+};
