@@ -5,9 +5,17 @@ import { SessionRow } from "@/components/SessionRow";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-type Filter = "all" | "active" | "stopped" | "completed" | "abandoned";
+type Filter =
+  | "all"
+  | "active"
+  | "stopped"
+  | "completed"
+  | "abandoned"
+  | "archived";
 
-const FILTERS: Filter[] = ["all", "active", "stopped", "completed", "abandoned"];
+const FILTERS: Filter[] = [
+  "all", "active", "stopped", "completed", "abandoned", "archived",
+];
 
 export function SessionsPanel() {
   const { id: routeId } = useParams<{ id: string }>();
@@ -17,16 +25,34 @@ export function SessionsPanel() {
 
   const all = sessions.data?.sessions ?? [];
 
+  // "all" excludes archived by default — archived has its own tab.
+  const visible = useMemo(
+    () => all.filter((s) => s.archived_at === null),
+    [all],
+  );
+
   const counts = useMemo(() => {
     const c: Record<Filter, number> = {
-      all: all.length, active: 0, stopped: 0, completed: 0, abandoned: 0,
+      all: visible.length,
+      active: 0, stopped: 0, completed: 0, abandoned: 0,
+      archived: 0,
     };
-    for (const s of all) c[s.state] += 1;
+    for (const s of all) {
+      if (s.archived_at !== null) c.archived += 1;
+      else c[s.state] += 1;
+    }
     return c;
-  }, [all]);
+  }, [all, visible.length]);
 
   const filtered = useMemo(() => {
-    let rows = filter === "all" ? all : all.filter((s) => s.state === filter);
+    let rows: typeof all;
+    if (filter === "archived") {
+      rows = all.filter((s) => s.archived_at !== null);
+    } else if (filter === "all") {
+      rows = visible;
+    } else {
+      rows = visible.filter((s) => s.state === filter);
+    }
     const q = query.trim().toLowerCase();
     if (q) {
       rows = rows.filter((s) =>
@@ -40,7 +66,7 @@ export function SessionsPanel() {
       if (b.state === "active" && a.state !== "active") return 1;
       return (b.stopped_at ?? "").localeCompare(a.stopped_at ?? "");
     });
-  }, [all, filter, query]);
+  }, [all, visible, filter, query]);
 
   return (
     <div className="h-full flex flex-col bg-neutral-950 border-r border-neutral-800">
