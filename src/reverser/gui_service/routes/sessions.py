@@ -245,7 +245,7 @@ def get_session_log(session_id: str, target: str) -> dict:
 
 
 @router.post("/api/sessions/{session_id}/archive", status_code=204)
-def archive_session(session_id: str, target: str, request: Request) -> Response:
+def archive_session(request: Request, session_id: str, target: str) -> Response:
     # Check the in-memory active session first — the on-disk snapshot may
     # not reflect the running state yet.
     mgr = _manager(request)
@@ -270,7 +270,7 @@ def unarchive_session(session_id: str, target: str) -> Response:
 
 
 @router.delete("/api/sessions/{session_id}", status_code=204)
-def delete_session(session_id: str, target: str, request: Request) -> Response:
+def delete_session(request: Request, session_id: str, target: str) -> Response:
     mgr = _manager(request)
     if mgr.active is not None and mgr.active.session_id == session_id:
         raise HTTPException(409, detail="session is active; stop it first")

@@ -150,3 +150,12 @@ async def test_delete_missing_session_returns_404(client):
         headers=HEADERS,
     )
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_unarchive_missing_session_returns_404(client):
+    r = await client.delete(
+        "/api/sessions/nope/archive?target=10.10.10.5",
+        headers=HEADERS,
+    )
+    assert r.status_code == 404
