@@ -42,7 +42,7 @@ export function SessionsPanel() {
       else c[s.state] += 1;
     }
     return c;
-  }, [all, visible.length]);
+  }, [all, visible]);
 
   const filtered = useMemo(() => {
     let rows: typeof all;
