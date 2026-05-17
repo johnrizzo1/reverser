@@ -1,0 +1,21 @@
+diff --git a/node_modules/app-builder-lib/out/util/appFileCopier.js b/node_modules/app-builder-lib/out/util/appFileCopier.js
+index fc53905..3b2e35f 100644
+--- a/node_modules/app-builder-lib/out/util/appFileCopier.js
++++ b/node_modules/app-builder-lib/out/util/appFileCopier.js
+@@ -68,7 +68,15 @@ async function copyAppFiles(fileSet, packager, transformer) {
+         await taskManager.awaitTasks();
+     }
+     if (links.length > 0) {
+-        await bluebird_lst_1.default.map(links, it => (0, fs_extra_1.ensureSymlink)(it.link, it.file), builder_util_1.CONCURRENCY);
++        // Sort by path depth so parent symlinks (e.g. Versions/Current) are created
++        // before children (e.g. Versions/Current/Resources). Process serially.
++        links.sort((a, b) => a.file.split(path.sep).length - b.file.split(path.sep).length);
++        for (const it of links) {
++            await (0, promises_1.mkdir)(path.dirname(it.file), { recursive: true });
++            // Remove existing symlink if present before recreating
++            try { await (0, promises_1.unlink)(it.file); } catch (_) {}
++            await (0, promises_1.symlink)(it.link, it.file);
++        }
+     }
+ }
+ // used only for ASAR, if no asar, file transformed on the fly
