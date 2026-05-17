@@ -74,6 +74,13 @@ def _build_checks() -> dict:
         "playwright_chromium": _check_playwright_chromium(),
         "msf_rpcd": _check_binary_on_path("msfrpcd", "Metasploit RPC daemon"),
         "neo4j": _check_binary_on_path("neo4j", "Neo4j"),
+        # Tier-1 bundled tools — these probe PATH, so they hit the bundled
+        # binary when no system one exists (packaged app) and the system
+        # binary otherwise.
+        "nmap": _check_binary_on_path("nmap", "Nmap"),
+        "ffuf": _check_binary_on_path("ffuf", "ffuf"),
+        "gobuster": _check_binary_on_path("gobuster", "gobuster"),
+        "nuclei": _check_binary_on_path("nuclei", "nuclei"),
     }
 
 
