@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (must already exist)"
+        required: true
+
+jobs:
+  build:
+    # Reuse the matrix build by uploading artifacts on tag pushes too.
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    name: Publish GitHub Release + mirror to gitea
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Flatten artifact directories
+        run: |
+          mkdir -p release/
+          find artifacts/ -type f \( -name "*.dmg" -o -name "*.AppImage" -o -name "latest-*.yml" \) \
+            -exec cp -v {} release/ \;
+          ls -la release/
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: release/*
+          generate_release_notes: true
+
+      - name: Mirror to gitea
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_URL: https://gitea.warthog-trout.ts.net
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if [ -z "$GITEA_TOKEN" ]; then
+            echo "::warning::GITEA_TOKEN not set; skipping gitea mirror"
+            exit 0
+          fi
+          set -euo pipefail
+
+          # Create the release on gitea (it tolerates 409 if already exists)
+          RELEASE_JSON=$(curl -fsSL -X POST \
+            "$GITEA_URL/api/v1/repos/johnrizzo1/reverser/releases" \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":false,\"prerelease\":false}" \
+            || curl -fsSL "$GITEA_URL/api/v1/repos/johnrizzo1/reverser/releases/tags/$TAG" \
+              -H "Authorization: token $GITEA_TOKEN")
+
+          RELEASE_ID=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          echo "gitea release id: $RELEASE_ID"
+
+          # Upload each artifact as a release asset
+          for f in release/*; do
+            echo "uploading $(basename "$f")..."
+            curl -fsSL -X POST \
+              "$GITEA_URL/api/v1/repos/johnrizzo1/reverser/releases/$RELEASE_ID/assets?name=$(basename "$f")" \
+              -H "Authorization: token $GITEA_TOKEN" \
+              -F "attachment=@$f"
+            echo
+          done
+          echo "mirror complete"
