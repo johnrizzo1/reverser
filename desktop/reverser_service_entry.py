@@ -5,6 +5,7 @@ This thin wrapper imports the package properly so relative imports work, then
 delegates to the same main() function that `python -m reverser.gui_service`
 calls.
 """
+# Not importable outside the PyInstaller bundle — sys.path must include src/.
 import sys
 from reverser.gui_service.__main__ import main
 

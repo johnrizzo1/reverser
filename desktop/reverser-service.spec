@@ -12,8 +12,6 @@
 
 from pathlib import Path
 
-block_cipher = None
-
 # Entry point: a thin wrapper that imports reverser.gui_service as a package,
 # then calls its main() function. We cannot point PyInstaller directly at
 # __main__.py because that file uses relative imports (from .app import …)
@@ -57,11 +55,10 @@ a = Analysis(
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,

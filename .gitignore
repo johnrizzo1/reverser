@@ -70,5 +70,4 @@ desktop/vite.config.d.ts
 
 # Electron packaging build outputs
 desktop/python-dist/
-desktop/build/
 desktop/resources/tools/
