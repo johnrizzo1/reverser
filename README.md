@@ -51,6 +51,47 @@ An AI-powered agent for reverse engineering and penetration testing. Give it a b
 - Wine (optional, for analyzing Windows PE binaries on Linux/macOS)
 - First-time devenv shell entry will install Chromium for Playwright (~150MB, one-time) to `~/.cache/ms-playwright/`
 
+## Installing
+
+### Pre-built installers
+
+Download the latest installer for your platform from
+[GitHub Releases](https://github.com/johnrizzo1/reverser/releases) or the
+[gitea mirror](https://gitea.warthog-trout.ts.net/johnrizzo1/reverser/releases):
+
+- **macOS (Apple Silicon):** `reverser-<version>-arm64.dmg`. After
+  installing, run once to clear the quarantine flag (unsigned builds
+  trigger Gatekeeper):
+  ```bash
+  xattr -d com.apple.quarantine /Applications/reverser.app
+  ```
+- **Linux x86_64:** `reverser-<version>.AppImage`. Make it executable
+  and run:
+  ```bash
+  chmod +x reverser-*.AppImage
+  ./reverser-*.AppImage
+  ```
+
+The installer bundles:
+- The Python backend (FastAPI + pentest agent), packaged with PyInstaller.
+- `nmap`, `ffuf`, `gobuster`, `nuclei`, and Playwright Chromium for
+  out-of-the-box pentest profile coverage.
+
+Bundled tools are used as a fallback. If you already have these on your
+`PATH` (e.g. NixOS, Homebrew), your version is preferred.
+
+### Building from source
+
+Requires [devenv](https://devenv.sh):
+
+```bash
+devenv shell
+package-installer    # produces desktop/dist/reverser-<version>-<arch>.{dmg,AppImage}
+```
+
+`package` (without the `-installer` suffix) produces an unpacked bundle
+under `desktop/dist/{mac-arm64,linux-unpacked}/` for fast iteration.
+
 ## Setup
 
 ```sh
