@@ -32,7 +32,10 @@ async def test_health_shape(client):
     assert "checks" in body
     # Expected checks (each is {ok: bool, detail: str | null})
     checks = body["checks"]
-    for key in ("python", "devenv_shell", "playwright_chromium", "msf_rpcd", "neo4j"):
+    for key in (
+        "python", "devenv_shell", "playwright_chromium", "msf_rpcd", "neo4j",
+        "nmap", "ffuf", "gobuster", "nuclei",
+    ):
         assert key in checks
         assert "ok" in checks[key]
         assert "detail" in checks[key]

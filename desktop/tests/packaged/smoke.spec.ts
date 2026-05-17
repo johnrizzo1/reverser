@@ -19,9 +19,7 @@ function packagedBinary(): string {
 
 test("packaged app launches and dashboard renders", async () => {
   const exe = packagedBinary();
-  if (!fs.existsSync(exe)) {
-    test.fail(true, `packaged binary not found at ${exe} — run ./scripts/build-desktop.sh first`);
-  }
+  test.skip(!fs.existsSync(exe), `packaged binary not found at ${exe} — run ./scripts/build-desktop.sh first`);
   const app = await electron.launch({ executablePath: exe, args: [] });
   try {
     const w = await app.firstWindow();
@@ -38,9 +36,7 @@ test("packaged app launches and dashboard renders", async () => {
 
 test("packaged app finds bundled nmap on PATH", async () => {
   const exe = packagedBinary();
-  if (!fs.existsSync(exe)) {
-    test.fail(true, `packaged binary not found at ${exe} — run ./scripts/build-desktop.sh first`);
-  }
+  test.skip(!fs.existsSync(exe), `packaged binary not found at ${exe} — run ./scripts/build-desktop.sh first`);
   const app = await electron.launch({ executablePath: exe, args: [] });
   try {
     const w = await app.firstWindow();
