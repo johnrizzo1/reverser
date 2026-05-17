@@ -1,0 +1,31 @@
+# Pinned versions of bundled pentest tools.
+# Updating: bump version + url, then run `./scripts/fetch-tools.sh --capture-shas <platform>`
+# to write the new SHA-256 values back into this file.
+
+[nmap]
+version = "7.95"
+license = "Nmap Public Source License"
+Darwin-arm64 = { url = "https://nmap.org/dist/nmap-7.95.dmg", sha256 = "fc069b88f6b64cbb56b02a644075d78df603d9417d3947ff32acc0566439de3c" }
+Linux-x86_64 = { url = "https://nmap.org/dist/nmap-7.95-1.x86_64.rpm", sha256 = "" }
+
+[ffuf]
+version = "2.1.0"
+license = "MIT"
+Darwin-arm64 = { url = "https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_macOS_arm64.tar.gz", sha256 = "df1fdfbdc7ab6abb54cdf212452d585121bf291512649cf36c43a18d849f960e" }
+Linux-x86_64 = { url = "https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz", sha256 = "" }
+
+[gobuster]
+version = "3.6.0"
+license = "Apache-2.0"
+Darwin-arm64 = { url = "https://github.com/OJ/gobuster/releases/download/v3.6.0/gobuster_Darwin_arm64.tar.gz", sha256 = "fcb9c8b3e0a32992ebe057556bd0a07ebdae6565697332b34a3255a1c1c5ea99" }
+Linux-x86_64 = { url = "https://github.com/OJ/gobuster/releases/download/v3.6.0/gobuster_Linux_x86_64.tar.gz", sha256 = "" }
+
+[nuclei]
+version = "3.3.5"
+license = "MIT"
+Darwin-arm64 = { url = "https://github.com/projectdiscovery/nuclei/releases/download/v3.3.5/nuclei_3.3.5_macOS_arm64.zip", sha256 = "a0fbc03a8179e1022bda4ba70ec242f16d6d80784444d08f6e6bc8c1324f47fc" }
+Linux-x86_64 = { url = "https://github.com/projectdiscovery/nuclei/releases/download/v3.3.5/nuclei_3.3.5_linux_amd64.zip", sha256 = "" }
+
+[playwright_chromium]
+managed_by = "playwright"
+license = "BSD-3-Clause"
