@@ -10,6 +10,8 @@ jobs:
   build:
     name: Build (${{ matrix.os }} / ${{ matrix.platform_tag }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -62,8 +64,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # electron-builder reads GH_TOKEN to upload to GitHub Releases.
-          # We use --publish never here (PR/main builds shouldn't publish).
+          # electron-builder reads GH_TOKEN if it decides to publish.
+          # PR/main builds don't push a tag, so electron-builder's onTag
+          # default skips publishing here. The release workflow (Task 8)
+          # is what actually uploads to GitHub Releases.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/build-desktop.sh --installer
 
