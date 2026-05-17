@@ -26,6 +26,16 @@ echo "[build-desktop] building renderer + main process"
 npm run build
 
 echo "[build-desktop] running electron-builder (mode='$MODE')"
+
+# Disable macOS code-signing unless an explicit certificate is supplied via the
+# CI env vars (CSC_LINK / CSC_KEY_PASSWORD).  Auto-discovery picks up any
+# developer identity found in the local keychain, but those identities typically
+# cannot sign the hardened-runtime entitlements we request, causing codesign to
+# fail repeatedly.  Production signing is handled in CI where CSC_LINK is set.
+if [ -z "${CSC_LINK:-}" ]; then
+  export CSC_IDENTITY_AUTO_DISCOVERY=false
+fi
+
 if [ "$MODE" = "--dir" ]; then
   npx electron-builder --dir
 else

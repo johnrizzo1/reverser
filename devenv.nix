@@ -238,6 +238,23 @@
     python -m reverser.harness process "$@"
   '';
 
+  # ── Desktop packaging scripts ──────────────────────────────────────
+  scripts.package.exec = ''
+    set -euo pipefail
+    cd "${config.devenv.root}"
+    ./scripts/fetch-tools.sh "$(uname -s)-$(uname -m)"
+    ./scripts/build-python.sh
+    ./scripts/build-desktop.sh
+  '';
+
+  scripts.package-installer.exec = ''
+    set -euo pipefail
+    cd "${config.devenv.root}"
+    ./scripts/fetch-tools.sh "$(uname -s)-$(uname -m)"
+    ./scripts/build-python.sh
+    ./scripts/build-desktop.sh --installer
+  '';
+
   scripts.re-info.exec = ''
     echo "🔍 Reverser Agent Development Environment"
     echo ""
