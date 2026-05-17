@@ -1,0 +1,73 @@
+# electron-builder config. Reads desktop/package.json's "version" field
+# (synced from pyproject.toml by scripts/sync-version.mjs).
+appId: dev.warthog-trout.reverser
+productName: reverser
+copyright: Copyright © 2026 John Rizzo
+
+# We don't use asar — Python service is outside the Electron app entrypoint
+# anyway, and unpacked code is simpler to debug at install sites.
+asar: false
+
+# Where electron-builder finds the renderer output and the main.js bundle.
+files:
+  - "dist/**/*"
+  - "dist-electron/**/*"
+  - "package.json"
+
+# Bundle the PyInstaller output (same path on every platform, since CI
+# matrix runs one platform per job).
+extraResources:
+  - from: "python-dist/reverser-service"
+    to: "python-dist/reverser-service"
+    filter: ["**/*"]
+
+# Output dir for installers.
+directories:
+  output: "dist"
+
+# macOS-specific
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.developer-tools
+  # Signing/notarization are skipped automatically when these env vars are unset.
+  # When set in CI, electron-builder picks them up:
+  #   CSC_LINK, CSC_KEY_PASSWORD              (signing identity)
+  #   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID  (notarization)
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extraResources:
+    - from: "resources/tools/Darwin-arm64"
+      to: "tools/Darwin-arm64"
+      filter: ["**/*"]
+
+dmg:
+  sign: false
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# Linux-specific
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Development
+  extraResources:
+    - from: "resources/tools/Linux-x86_64"
+      to: "tools/Linux-x86_64"
+      filter: ["**/*"]
+
+# Auto-update metadata. electron-builder generates latest-mac.yml / latest-linux.yml
+# alongside the installer when `publish` is configured.
+publish:
+  - provider: github
+    owner: johnrizzo1
+    repo: reverser
+    releaseType: release
