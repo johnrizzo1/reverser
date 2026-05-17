@@ -56,8 +56,12 @@ uv.lock
 .superpowers/
 
 # Electron desktop UI build outputs
-# Allow desktop/build/ (electron-builder config assets like entitlements.mac.plist)
+# desktop/build/ holds BOTH PyInstaller intermediate state (gitignored)
+# AND committed electron-builder assets (entitlements.mac.plist). Unignore
+# the dir, then re-ignore everything in it except the assets we track.
 !desktop/build/
+desktop/build/*
+!desktop/build/entitlements.mac.plist
 desktop/node_modules/
 desktop/dist/
 desktop/dist-electron/
