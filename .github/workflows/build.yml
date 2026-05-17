@@ -1,0 +1,81 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }} / ${{ matrix.platform_tag }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform_tag: Darwin-arm64
+            artifact_glob: "desktop/dist/*.dmg"
+          - os: ubuntu-latest
+            platform_tag: Linux-x86_64
+            artifact_glob: "desktop/dist/*.AppImage"
+          # Future: { os: windows-latest, platform_tag: Windows-x86_64, artifact_glob: "desktop/dist/*.exe" }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pyinstaller
+
+      - name: Fetch bundled tools
+        run: ./scripts/fetch-tools.sh ${{ matrix.platform_tag }}
+
+      - name: Cache PyInstaller intermediate build
+        uses: actions/cache@v4
+        with:
+          path: desktop/build
+          key: pyinstaller-${{ runner.os }}-${{ hashFiles('desktop/reverser-service.spec', 'pyproject.toml') }}
+
+      - name: Build Python service (PyInstaller)
+        run: ./scripts/build-python.sh
+
+      - name: Build desktop (electron-builder installer)
+        env:
+          # Signing env vars are intentionally unset in v1 — electron-builder
+          # skips signing automatically. Set these as repo secrets to enable.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # electron-builder reads GH_TOKEN to upload to GitHub Releases.
+          # We use --publish never here (PR/main builds shouldn't publish).
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/build-desktop.sh --installer
+
+      - name: Run packaged smoke test
+        run: cd desktop && npx playwright install --with-deps chromium && npx playwright test tests/packaged/smoke.spec.ts
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverser-${{ matrix.platform_tag }}
+          path: |
+            ${{ matrix.artifact_glob }}
+            desktop/dist/latest-*.yml
+          if-no-files-found: error
+          retention-days: 14
