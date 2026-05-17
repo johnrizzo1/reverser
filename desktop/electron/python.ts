@@ -50,6 +50,9 @@ function buildPythonEnv(projectRoot: string): NodeJS.ProcessEnv {
     const newPath = existingPath ? `${existingPath}${sep}${toolsDir}` : toolsDir;
     return {
       ...process.env,
+      // Drop any inherited PYTHONPATH — PyInstaller embeds the package
+      // and a stale value can confuse the embedded interpreter.
+      PYTHONPATH: undefined,
       PATH: newPath,
       PLAYWRIGHT_BROWSERS_PATH: path.join(toolsDir, "playwright"),
     };
