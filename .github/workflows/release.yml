@@ -12,7 +12,11 @@ on:
 jobs:
   build:
     # Reuse the matrix build by uploading artifacts on tag pushes too.
+    # `secrets: inherit` forwards the signing secrets (CSC_LINK, APPLE_ID,
+    # etc.) to the called workflow so release builds can be signed when
+    # those secrets are configured. GITHUB_TOKEN is always available.
     uses: ./.github/workflows/build.yml
+    secrets: inherit
 
   publish:
     name: Publish GitHub Release + mirror to gitea
