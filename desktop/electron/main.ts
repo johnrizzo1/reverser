@@ -52,6 +52,10 @@ async function createWindow() {
   }
 }
 
+async function ensureProjectRootExists(root: string): Promise<void> {
+  await fs.mkdir(path.join(root, "targets"), { recursive: true });
+}
+
 function startSupervisor() {
   supervisor = new PythonSupervisor({
     projectRoot: defaultProjectRoot(),
@@ -90,6 +94,7 @@ ipcMain.handle(IPC.WRITE_AUTH_MARKER, async () => {
 });
 
 app.whenReady().then(async () => {
+  await ensureProjectRootExists(defaultProjectRoot());
   startSupervisor();
   await createWindow();
   app.on("activate", () => {
