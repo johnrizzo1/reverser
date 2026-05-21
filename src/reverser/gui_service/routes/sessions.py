@@ -38,6 +38,18 @@ class SudoBody(BaseModel):
     password: str
 
 
+_VALID_BACKENDS = {"claude", "ollama", "lmstudio", "local"}
+
+
+class UpdateConfigBody(BaseModel):
+    backend: str | None = None
+    model: str | None = None
+    api_base: str | None = None
+    profile: str | None = None
+    budget: float | None = None
+    max_turns: int | None = None
+
+
 def _manager(request: Request):
     mgr = getattr(request.app.state, "session_manager", None)
     if mgr is None:
@@ -259,6 +271,99 @@ def get_session_log(session_id: str, target: str) -> dict:
         out = out[-5000:]
 
     return {"id": session_id, "events": out, "truncated": truncated}
+
+
+@router.patch("/api/sessions/{session_id}/config", status_code=204)
+def update_session_config(
+    request: Request, session_id: str, target: str, body: UpdateConfigBody,
+) -> Response:
+    """Edit a stopped engagement's config. Saves to the snapshot so the next
+    Resume picks up the new values. Refuses when the engagement is running
+    or terminal."""
+    from ...profiles import get_profile as _get_profile
+
+    try:
+        snap = load_snapshot(target, session_id)
+    except SessionNotFoundError:
+        raise HTTPException(404)
+
+    if snap.state == "active":
+        raise HTTPException(409, detail="engagement is running; stop it first")
+    if snap.state in ("completed", "abandoned"):
+        raise HTTPException(
+            409, detail=f"engagement is {snap.state}; config cannot be changed",
+        )
+
+    # `exclude_unset=True` keeps only fields the client actually sent — so
+    # `{"model": null}` (clear back to default) is distinguishable from
+    # `{}` (don't touch model). Optional fields (model, api_base) accept
+    # null; required ones (backend, profile, budget, max_turns) do not.
+    fields = body.model_dump(exclude_unset=True)
+
+    if "profile" in fields:
+        if fields["profile"] is None:
+            raise HTTPException(400, detail="profile cannot be null")
+        try:
+            _get_profile(fields["profile"])
+        except KeyError as e:
+            raise HTTPException(400, detail=str(e))
+    if "backend" in fields:
+        if fields["backend"] is None:
+            raise HTTPException(400, detail="backend cannot be null")
+        if fields["backend"] not in _VALID_BACKENDS:
+            raise HTTPException(
+                400,
+                detail=f"unknown backend: {fields['backend']!r}. "
+                       f"Known: {sorted(_VALID_BACKENDS)}",
+            )
+    if "budget" in fields:
+        if fields["budget"] is None or fields["budget"] <= 0:
+            raise HTTPException(400, detail="budget must be > 0")
+    if "max_turns" in fields:
+        if fields["max_turns"] is None or fields["max_turns"] < 1:
+            raise HTTPException(400, detail="max_turns must be >= 1")
+
+    # Apply only sent fields. `model` and `api_base` may legitimately be None.
+    if "backend" in fields:
+        snap.config.backend = fields["backend"]
+    if "model" in fields:
+        snap.config.model = fields["model"]
+    if "api_base" in fields:
+        snap.config.api_base = fields["api_base"]
+    if "profile" in fields:
+        snap.config.profile = fields["profile"]
+    if "budget" in fields:
+        snap.config.budget = fields["budget"]
+    if "max_turns" in fields:
+        snap.config.max_turns = fields["max_turns"]
+
+    save_snapshot(snap)
+
+    # If the session manager still holds a live reference to this session
+    # (e.g. it was recently stopped but .active was not cleared), also apply
+    # the changes to the in-memory state so that list_sessions returns the
+    # updated values without needing a restart.
+    mgr = _manager(request)
+    if mgr.active is not None and mgr.active.session_id == session_id:
+        gs = mgr.active
+        agent = gs._agent
+        live_cfg = agent._snapshot.config
+        if "backend" in fields:
+            live_cfg.backend = fields["backend"]
+        if "model" in fields:
+            live_cfg.model = fields["model"]
+        if "api_base" in fields:
+            live_cfg.api_base = fields["api_base"]
+        if "profile" in fields:
+            live_cfg.profile = fields["profile"]
+        if "budget" in fields:
+            # update_budget keeps self.budget, stats.budget and snapshot.config.budget in sync
+            agent.update_budget(fields["budget"])
+        if "max_turns" in fields:
+            # update_max_turns keeps self.max_turns, stats.max_turns and snapshot in sync
+            agent.update_max_turns(fields["max_turns"])
+
+    return Response(status_code=204)
 
 
 @router.post("/api/sessions/{session_id}/archive", status_code=204)
