@@ -205,6 +205,36 @@ export function useUpdateScope(target: string) {
   });
 }
 
+export type UpdateSessionConfigBody = {
+  backend?: string;
+  model?: string | null;
+  api_base?: string | null;
+  profile?: string;
+  budget?: number;
+  max_turns?: number;
+};
+
+export function useUpdateSessionConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      target,
+      body,
+    }: {
+      sessionId: string;
+      target: string;
+      body: UpdateSessionConfigBody;
+    }) =>
+      api.patch<void>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/config` +
+        `?target=${encodeURIComponent(target)}`,
+        body,
+      ),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+}
+
 export function useReport(target: string | null) {
   const ready = useReady();
   return useQuery({
