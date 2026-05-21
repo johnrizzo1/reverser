@@ -133,8 +133,10 @@ export function ChatPane({
                 {expanded ? "▾" : "▸"} thinking · turn {e.turn} [{expanded ? "hide" : `show ${e.texts.length}`}]
               </button>
               {expanded && (
-                <div className="mt-1 pl-4 space-y-1 italic text-neutral-500">
-                  {e.texts.map((t, i) => <div key={i}>{t}</div>)}
+                <div className="mt-1 pl-4 space-y-2 italic text-neutral-500">
+                  {e.texts.map((t, i) => (
+                    <div key={i} className="whitespace-pre-wrap">{t}</div>
+                  ))}
                 </div>
               )}
             </div>
