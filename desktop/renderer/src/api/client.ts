@@ -11,7 +11,7 @@ function buildHeaders(token: string, extra?: HeadersInit): HeadersInit {
 }
 
 async function request<T>(
-  method: "GET" | "POST" | "PUT" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH",
   path: string,
   body?: unknown
 ): Promise<T> {
@@ -38,6 +38,7 @@ export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
+  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
   del: <T>(path: string) => request<T>("DELETE", path),
 };
 
@@ -78,8 +79,11 @@ export type SessionRow = {
   total_cost: number;
   stopped_at: string | null;
   archived_at: string | null;
-  budget?: number;
-  max_turns?: number;
+  backend: string;
+  model: string | null;
+  api_base: string | null;
+  budget: number;
+  max_turns: number;
 };
 
 export type SessionsResponse = { sessions: SessionRow[] };
