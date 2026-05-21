@@ -210,6 +210,64 @@ async def test_patch_config_400_when_required_field_is_null(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_patch_config_400_when_switching_to_backend_requiring_model_without_one(
+    client, tmp_path,
+):
+    """Switching from claude (no model required) to ollama (model required)
+    in a single PATCH must fail with 400 if no model is provided alongside."""
+    sid, target = await _create_and_stop(client, tmp_path)
+
+    r = await client.patch(
+        f"/api/sessions/{sid}/config?target={target}",
+        headers=HEADERS,
+        json={"backend": "ollama"},
+    )
+    assert r.status_code == 400
+    assert "ollama" in r.json()["detail"]
+    assert "model" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_patch_config_400_when_clearing_model_while_backend_requires_one(
+    client, tmp_path,
+):
+    """If the existing backend requires a model, clearing the model to null
+    must fail — same reason."""
+    sid, target = await _create_and_stop(client, tmp_path)
+
+    # First switch to ollama with a model (allowed).
+    r1 = await client.patch(
+        f"/api/sessions/{sid}/config?target={target}",
+        headers=HEADERS,
+        json={"backend": "ollama", "model": "qwen3.5:35b"},
+    )
+    assert r1.status_code == 204
+
+    # Now try to clear the model — should fail because ollama requires one.
+    r2 = await client.patch(
+        f"/api/sessions/{sid}/config?target={target}",
+        headers=HEADERS,
+        json={"model": None},
+    )
+    assert r2.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_patch_config_allows_switching_to_backend_requiring_model_with_model(
+    client, tmp_path,
+):
+    """The combined switch is allowed when model is provided in the same PATCH."""
+    sid, target = await _create_and_stop(client, tmp_path)
+
+    r = await client.patch(
+        f"/api/sessions/{sid}/config?target={target}",
+        headers=HEADERS,
+        json={"backend": "ollama", "model": "qwen3.5:35b"},
+    )
+    assert r.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_patch_config_syncs_in_memory_state_for_cached_active(
     client, tmp_path,
 ):

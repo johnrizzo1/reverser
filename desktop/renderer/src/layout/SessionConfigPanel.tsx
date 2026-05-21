@@ -49,6 +49,17 @@ function _diff(form: FormState, row: SessionRow): {
   return out;
 }
 
+function _invalidFields(form: FormState): Set<keyof FormState> {
+  const out = new Set<keyof FormState>();
+  if (form.budget.trim() === "" || isNaN(parseFloat(form.budget))) {
+    out.add("budget");
+  }
+  if (form.max_turns.trim() === "" || isNaN(parseInt(form.max_turns, 10))) {
+    out.add("max_turns");
+  }
+  return out;
+}
+
 export function SessionConfigPanel({ session }: { session: SessionRow }) {
   const editable = session.state === "stopped";
   const profiles = useProfiles();
@@ -56,6 +67,7 @@ export function SessionConfigPanel({ session }: { session: SessionRow }) {
   const update = useUpdateSessionConfig();
 
   const [form, setForm] = useState<FormState>(() => _fromRow(session));
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Reset form whenever the row's underlying values change (after save or
   // when the user switches between sessions).
@@ -66,17 +78,19 @@ export function SessionConfigPanel({ session }: { session: SessionRow }) {
 
   const diff = _diff(form, session);
   const dirty = Object.keys(diff).length > 0;
+  const invalid = _invalidFields(form);
   const profileOrBackendChanged =
     diff.profile !== undefined || diff.backend !== undefined || diff.model !== undefined;
 
   async function onSave() {
     if (!dirty) return;
+    setSaveError(null);
     try {
       await update.mutateAsync({
         sessionId: session.id, target: session.target, body: diff,
       });
     } catch (e) {
-      alert((e as Error).message);
+      setSaveError((e as Error).message);
     }
   }
 
@@ -134,21 +148,31 @@ export function SessionConfigPanel({ session }: { session: SessionRow }) {
       ) : <span className="text-neutral-300 font-mono">{session.profile}</span>)}
 
       {_row("budget", editable ? (
-        <Input
-          type="number" step="0.1"
-          value={form.budget}
-          onChange={(e) => setForm({ ...form, budget: e.target.value })}
-          className="h-7 text-xs"
-        />
+        <div>
+          <Input
+            type="number" step="0.1"
+            value={form.budget}
+            onChange={(e) => setForm({ ...form, budget: e.target.value })}
+            className="h-7 text-xs"
+          />
+          {invalid.has("budget") && (
+            <p className="text-[10px] text-red-400 mt-0.5">must be a positive number</p>
+          )}
+        </div>
       ) : <span className="text-neutral-300 font-mono">${session.budget.toFixed(2)}</span>)}
 
       {_row("max turns", editable ? (
-        <Input
-          type="number"
-          value={form.max_turns}
-          onChange={(e) => setForm({ ...form, max_turns: e.target.value })}
-          className="h-7 text-xs"
-        />
+        <div>
+          <Input
+            type="number"
+            value={form.max_turns}
+            onChange={(e) => setForm({ ...form, max_turns: e.target.value })}
+            className="h-7 text-xs"
+          />
+          {invalid.has("max_turns") && (
+            <p className="text-[10px] text-red-400 mt-0.5">must be a positive number</p>
+          )}
+        </div>
       ) : <span className="text-neutral-300 font-mono">{session.max_turns}</span>)}
 
       {editable && profileOrBackendChanged && (
@@ -157,6 +181,10 @@ export function SessionConfigPanel({ session }: { session: SessionRow }) {
           history is preserved, but the system prompt and toolset shift mid-
           conversation.
         </p>
+      )}
+
+      {editable && saveError && (
+        <p className="text-[11px] text-red-400 mt-2 pl-24">{saveError}</p>
       )}
 
       {editable && (
@@ -170,7 +198,7 @@ export function SessionConfigPanel({ session }: { session: SessionRow }) {
           </Button>
           <Button
             size="sm"
-            disabled={!dirty || update.isPending}
+            disabled={!dirty || invalid.size > 0 || update.isPending}
             onClick={onSave}
           >
             {update.isPending ? "Saving…" : "Save"}

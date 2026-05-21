@@ -18,6 +18,9 @@ router = APIRouter()
 # Single source of truth for valid backend keys; matches the static metadata
 # served by GET /api/backends.
 _VALID_BACKENDS = frozenset(b["key"] for b in _BACKENDS_META)
+_BACKENDS_REQUIRING_MODEL = frozenset(
+    b["key"] for b in _BACKENDS_META if b["requires_model"]
+)
 
 
 class CreateSession(BaseModel):
@@ -336,6 +339,17 @@ def update_session_config(
     if "max_turns" in fields:
         if fields["max_turns"] is None or fields["max_turns"] < 1:
             raise HTTPException(400, detail="max_turns must be >= 1")
+
+    # Cross-field validation: if the resulting (backend, model) pairing would
+    # leave a requires_model backend without a model, reject now rather than
+    # letting resume fail with an obscure error.
+    final_backend = fields.get("backend", snap.config.backend)
+    final_model = fields.get("model", snap.config.model)
+    if final_backend in _BACKENDS_REQUIRING_MODEL and final_model is None:
+        raise HTTPException(
+            400,
+            detail=f"backend {final_backend!r} requires a non-null model",
+        )
 
     # Apply only sent fields. `model` and `api_base` may legitimately be None.
     # Note: when `cached_gs is not None`, `snap` IS `cached_gs._agent._snapshot`,
