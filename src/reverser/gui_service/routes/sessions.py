@@ -11,8 +11,13 @@ from ...sessions import delete as delete_snapshot
 from ...sessions import load as load_snapshot
 from ...sessions import save as save_snapshot
 from ...sessions import set_archived as set_snapshot_archived
+from .backends import _BACKENDS as _BACKENDS_META
 
 router = APIRouter()
+
+# Single source of truth for valid backend keys; matches the static metadata
+# served by GET /api/backends.
+_VALID_BACKENDS = frozenset(b["key"] for b in _BACKENDS_META)
 
 
 class CreateSession(BaseModel):
@@ -36,10 +41,6 @@ class BudgetBody(BaseModel):
 
 class SudoBody(BaseModel):
     password: str
-
-
-from .backends import _BACKENDS as _BACKENDS_META
-_VALID_BACKENDS = frozenset(b["key"] for b in _BACKENDS_META)
 
 
 class UpdateConfigBody(BaseModel):
@@ -337,6 +338,9 @@ def update_session_config(
             raise HTTPException(400, detail="max_turns must be >= 1")
 
     # Apply only sent fields. `model` and `api_base` may legitimately be None.
+    # Note: when `cached_gs is not None`, `snap` IS `cached_gs._agent._snapshot`,
+    # so mutating snap.config also updates what `_serialize()` in session_manager
+    # reads via `gs._agent._snapshot.config` — no extra sync needed for these four.
     if "backend" in fields:
         snap.config.backend = fields["backend"]
     if "model" in fields:
@@ -346,9 +350,11 @@ def update_session_config(
     if "profile" in fields:
         snap.config.profile = fields["profile"]
 
-    # Budget/max_turns: keep AgentSession's display state in sync when cached.
-    # Inline the relevant assignments instead of calling update_budget/update_max_turns
-    # (which would each call save_snapshot again, causing a double-write).
+    # Budget/max_turns need explicit sync to `_agent.{budget,max_turns}` and
+    # `_agent.stats.{budget,max_turns}` because `_serialize()` reads those from
+    # `gs.stats` (not from the snapshot config). Inline the relevant assignments
+    # instead of calling update_budget/update_max_turns (which would each call
+    # save_snapshot again, causing a double-write).
     if "budget" in fields:
         snap.config.budget = fields["budget"]
         if cached_gs is not None:
