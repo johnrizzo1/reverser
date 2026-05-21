@@ -69,6 +69,27 @@ async def test_list_sessions_includes_active(manager, tmp_path):
     assert any(s["id"] == info["id"] and s["state"] == "active" for s in sessions)
 
 
+@pytest.mark.asyncio
+async def test_list_sessions_does_not_duplicate_active_session(manager, tmp_path):
+    """Creating one session must surface exactly one row in list_sessions —
+    not two. Regression test: the manager used to mint its own session_id
+    while AgentSession independently minted a different one for the on-disk
+    snapshot, so the active row and the disk row never matched up and the
+    list ended up with two entries for the same engagement.
+    """
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        info = await manager.create_session(
+            target=str(tmp_path / "bin"),
+            profile_key="general",
+            backend_name="claude", model=None, api_base=None,
+            budget=5.0, max_turns=50,
+        )
+    sessions = manager.list_sessions()
+    assert len(sessions) == 1, f"expected 1 session, got {len(sessions)}: {sessions}"
+    assert sessions[0]["id"] == info["id"]
+    assert sessions[0]["state"] == "active"
+
+
 def test_pentest_authorization_required_for_network_profile(manager, tmp_path, monkeypatch):
     monkeypatch.delenv("REVERSER_PENTEST_AUTHORIZED", raising=False)
     # No .reverser-authorized either; manager scans CWD which is tmp_path

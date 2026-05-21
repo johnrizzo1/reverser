@@ -154,15 +154,19 @@ def make_session_id() -> str:
 
 
 def new_snapshot(
-    *, target: str, log_path: str, config: SessionConfig
+    *, target: str, log_path: str, config: SessionConfig,
+    session_id: str | None = None,
 ) -> SessionSnapshot:
     """Construct a fresh snapshot for a new session.
 
-    state=active, pid=os.getpid(), timestamps populated.
+    state=active, pid=os.getpid(), timestamps populated. Caller may pass
+    `session_id` to override the default ISO-timestamp id (used by the GUI
+    service so the snapshot id matches the id the manager hands back to
+    the client).
     """
     now = _now_iso()
     return SessionSnapshot(
-        session_id=make_session_id(),
+        session_id=session_id if session_id is not None else make_session_id(),
         target=target,
         log_path=log_path,
         state="active",

@@ -71,6 +71,7 @@ class GUISession:
             model=model,
             api_base=api_base,
             resume_from=resume_from,
+            session_id=session_id if resume_from is None else None,
         )
         self._send_lock = asyncio.Lock()
         self._sudo_password: str | None = None

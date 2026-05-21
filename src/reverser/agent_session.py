@@ -66,6 +66,7 @@ class AgentSession:
         model: str | None = None,
         api_base: str | None = None,
         resume_from: "SessionSnapshot | None" = None,
+        session_id: str | None = None,
     ):
         # Per-turn callback set by the TUI to render dispatch_specialist
         # sub-agent events (thinking / tool_call / tool_result / text) with
@@ -85,6 +86,7 @@ class AgentSession:
                 backend_name=backend_name,
                 model=model,
                 api_base=api_base,
+                session_id=session_id,
             )
         # Make this session reachable to session-aware tools (e.g. dispatch_specialist)
         from .sessions import current_session
@@ -109,7 +111,7 @@ class AgentSession:
 
     def _init_new(
         self, *, binary_path, profile, budget, max_turns,
-        log_path, backend_name, model, api_base,
+        log_path, backend_name, model, api_base, session_id=None,
     ):
         """Original __init__ body — fresh session."""
         from .sessions import (
@@ -170,6 +172,7 @@ class AgentSession:
             target=self.target,
             log_path=self._log_path,
             config=config,
+            session_id=session_id,
         )
         save_snapshot(self._snapshot)
 
