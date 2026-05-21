@@ -12,7 +12,7 @@ export type WSFrame =
   | { type: "kb_update"; kind: string; row: unknown }
   | { type: "hypothesis"; action: string; row: HypothesisRow }
   | { type: "finding"; row: unknown }
-  | { type: "dispatch"; specialist: string; child_session_id: string; phase: string }
+  | { type: "dispatch"; specialty: string; phase: string; content: string }
   | { type: "budget"; spent: number; remaining: number; turn: number }
   | { type: "conn_breaker"; target: string; tripped: boolean }
   | { type: "status"; phase: string; turns?: number; subtype?: string; cost?: number | null }
@@ -213,9 +213,9 @@ export const makeSessionStore = () =>
               dispatchEntries: [
                 ...s.dispatchEntries,
                 {
-                  specialty: frame.specialist,
+                  specialty: frame.specialty,
                   phase: frame.phase,
-                  content: frame.child_session_id,
+                  content: frame.content,
                 },
               ],
             };

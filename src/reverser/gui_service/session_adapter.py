@@ -76,6 +76,32 @@ class GUISession:
         self._send_lock = asyncio.Lock()
         self._sudo_password: str | None = None
 
+        # Bridge dispatch_specialist sub-agent events (thinking, tool_call,
+        # tool_result, text) to the WebSocket so the renderer can show what
+        # each dispatched specialist is doing in real time. The TUI hooks
+        # the same callback at tui/app.py for the same purpose.
+        self._agent.on_dispatch_event = self._on_dispatch_event
+
+    def _on_dispatch_event(self, specialty: str, kind: str, content: str) -> None:
+        """Publish a dispatch sub-agent event to the bus.
+
+        Called synchronously from inside the dispatch tool's async loop, so
+        we are already on the event-loop thread and can schedule the publish
+        as a task. The publish itself is fire-and-forget — the EventBus
+        drops to the oldest queued frame if a subscriber is slow.
+        """
+        frame = {
+            "type": "dispatch",
+            "specialty": specialty,
+            "phase": kind,
+            "content": content,
+        }
+        try:
+            asyncio.create_task(self._bus.publish(self.session_id, frame))
+        except RuntimeError:
+            # No running loop (shouldn't happen in normal flow) — drop.
+            pass
+
     @property
     def stats(self) -> dict[str, Any]:
         s = self._agent.stats

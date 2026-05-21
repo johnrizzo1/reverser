@@ -91,3 +91,32 @@ async def test_budget_frame_tracks_spend(bus, gui_session):
                 budget_frames.append(f)
         # The fake reports cost=0.01 in the result event
         assert any(abs(f.get("spent", 0) - 0.01) < 1e-9 for f in budget_frames)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_events_publish_to_bus(bus, gui_session):
+    """Dispatch sub-agent events (thinking, tool_call, tool_result, text)
+    must reach the WebSocket so the renderer can show what each dispatched
+    specialist is actually doing. Without this hook, only the parent's
+    `dispatch_specialist` tool_call shows up — the user sees the dispatch
+    happened but nothing about what the specialist did.
+    """
+    frames: list[dict] = []
+    async with bus.subscribe(gui_session.session_id) as q:
+        # Simulate the dispatch tool firing events via the AgentSession hook.
+        gui_session._agent.emit_dispatch_event("ad", "thinking", "scanning hosts...")
+        gui_session._agent.emit_dispatch_event("ad", "tool_call", "nmap -sV 10.0.0.0/24")
+        gui_session._agent.emit_dispatch_event("ad", "tool_result", "open ports: 22, 80")
+
+        for _ in range(3):
+            frames.append(await asyncio.wait_for(q.get(), timeout=1.0))
+
+    dispatch_frames = [f for f in frames if f.get("type") == "dispatch"]
+    assert len(dispatch_frames) == 3, f"expected 3 dispatch frames, got: {frames}"
+    assert dispatch_frames[0]["specialty"] == "ad"
+    assert dispatch_frames[0]["phase"] == "thinking"
+    assert dispatch_frames[0]["content"] == "scanning hosts..."
+    assert dispatch_frames[1]["phase"] == "tool_call"
+    assert dispatch_frames[1]["content"] == "nmap -sV 10.0.0.0/24"
+    assert dispatch_frames[2]["phase"] == "tool_result"
+    assert dispatch_frames[2]["content"] == "open ports: 22, 80"
