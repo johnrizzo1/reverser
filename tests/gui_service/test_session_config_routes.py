@@ -207,3 +207,36 @@ async def test_patch_config_400_when_required_field_is_null(client, tmp_path):
             json={field: None},
         )
         assert r.status_code == 400, f"expected 400 for null {field}, got {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_patch_config_syncs_in_memory_state_for_cached_active(
+    client, tmp_path,
+):
+    """When a stopped session is still cached in SessionManager.active,
+    list_sessions overrides budget/max_turns from in-memory state. PATCH
+    must update both the on-disk snapshot AND the cached in-memory state so
+    a subsequent GET reflects the new values without a service restart.
+    """
+    sid, target = await _create_and_stop(client, tmp_path)
+
+    # Two list_sessions calls bracket the PATCH so we can see the change.
+    before = await client.get("/api/sessions", headers=HEADERS)
+    before_row = next(
+        r for r in before.json()["sessions"] if r["id"] == sid
+    )
+    assert before_row["budget"] == 5.0
+
+    r = await client.patch(
+        f"/api/sessions/{sid}/config?target={target}",
+        headers=HEADERS,
+        json={"budget": 12.5, "max_turns": 99},
+    )
+    assert r.status_code == 204
+
+    after = await client.get("/api/sessions", headers=HEADERS)
+    after_row = next(
+        r for r in after.json()["sessions"] if r["id"] == sid
+    )
+    assert after_row["budget"] == 12.5
+    assert after_row["max_turns"] == 99

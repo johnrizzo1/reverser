@@ -38,7 +38,8 @@ class SudoBody(BaseModel):
     password: str
 
 
-_VALID_BACKENDS = {"claude", "ollama", "lmstudio", "local"}
+from .backends import _BACKENDS as _BACKENDS_META
+_VALID_BACKENDS = frozenset(b["key"] for b in _BACKENDS_META)
 
 
 class UpdateConfigBody(BaseModel):
@@ -282,10 +283,20 @@ def update_session_config(
     or terminal."""
     from ...profiles import get_profile as _get_profile
 
-    try:
-        snap = load_snapshot(target, session_id)
-    except SessionNotFoundError:
-        raise HTTPException(404)
+    mgr = _manager(request)
+    cached_gs = None
+    if mgr.active is not None and mgr.active.session_id == session_id:
+        cached_gs = mgr.active
+
+    if cached_gs is not None:
+        # Use the live in-memory snapshot so list_sessions's override-from-active
+        # path returns the new values immediately.
+        snap = cached_gs._agent._snapshot
+    else:
+        try:
+            snap = load_snapshot(target, session_id)
+        except SessionNotFoundError:
+            raise HTTPException(404)
 
     if snap.state == "active":
         raise HTTPException(409, detail="engagement is running; stop it first")
@@ -305,8 +316,10 @@ def update_session_config(
             raise HTTPException(400, detail="profile cannot be null")
         try:
             _get_profile(fields["profile"])
-        except KeyError as e:
-            raise HTTPException(400, detail=str(e))
+        except KeyError:
+            raise HTTPException(
+                400, detail=f"unknown profile: {fields['profile']!r}",
+            )
     if "backend" in fields:
         if fields["backend"] is None:
             raise HTTPException(400, detail="backend cannot be null")
@@ -332,37 +345,22 @@ def update_session_config(
         snap.config.api_base = fields["api_base"]
     if "profile" in fields:
         snap.config.profile = fields["profile"]
+
+    # Budget/max_turns: keep AgentSession's display state in sync when cached.
+    # Inline the relevant assignments instead of calling update_budget/update_max_turns
+    # (which would each call save_snapshot again, causing a double-write).
     if "budget" in fields:
         snap.config.budget = fields["budget"]
+        if cached_gs is not None:
+            cached_gs._agent.budget = float(fields["budget"])
+            cached_gs._agent.stats.budget = float(fields["budget"])
     if "max_turns" in fields:
         snap.config.max_turns = fields["max_turns"]
+        if cached_gs is not None:
+            cached_gs._agent.max_turns = int(fields["max_turns"])
+            cached_gs._agent.stats.max_turns = int(fields["max_turns"])
 
     save_snapshot(snap)
-
-    # If the session manager still holds a live reference to this session
-    # (e.g. it was recently stopped but .active was not cleared), also apply
-    # the changes to the in-memory state so that list_sessions returns the
-    # updated values without needing a restart.
-    mgr = _manager(request)
-    if mgr.active is not None and mgr.active.session_id == session_id:
-        gs = mgr.active
-        agent = gs._agent
-        live_cfg = agent._snapshot.config
-        if "backend" in fields:
-            live_cfg.backend = fields["backend"]
-        if "model" in fields:
-            live_cfg.model = fields["model"]
-        if "api_base" in fields:
-            live_cfg.api_base = fields["api_base"]
-        if "profile" in fields:
-            live_cfg.profile = fields["profile"]
-        if "budget" in fields:
-            # update_budget keeps self.budget, stats.budget and snapshot.config.budget in sync
-            agent.update_budget(fields["budget"])
-        if "max_turns" in fields:
-            # update_max_turns keeps self.max_turns, stats.max_turns and snapshot in sync
-            agent.update_max_turns(fields["max_turns"])
-
     return Response(status_code=204)
 
 
