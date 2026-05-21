@@ -90,6 +90,29 @@ async def test_list_sessions_does_not_duplicate_active_session(manager, tmp_path
     assert sessions[0]["state"] == "active"
 
 
+@pytest.mark.asyncio
+async def test_list_sessions_rows_include_full_config(manager, tmp_path):
+    """Each row in list_sessions exposes backend, model, api_base, budget,
+    max_turns — the renderer reads them to display per-engagement config."""
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        info = await manager.create_session(
+            target=str(tmp_path / "bin"),
+            profile_key="general",
+            backend_name="claude",
+            model=None,
+            api_base=None,
+            budget=5.0,
+            max_turns=50,
+        )
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["id"] == info["id"])
+    assert row["backend"] == "claude"
+    assert row["model"] is None
+    assert row["api_base"] is None
+    assert row["budget"] == 5.0
+    assert row["max_turns"] == 50
+
+
 def test_pentest_authorization_required_for_network_profile(manager, tmp_path, monkeypatch):
     monkeypatch.delenv("REVERSER_PENTEST_AUTHORIZED", raising=False)
     # No .reverser-authorized either; manager scans CWD which is tmp_path

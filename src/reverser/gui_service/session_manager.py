@@ -172,6 +172,11 @@ class SessionManager:
                 "total_cost": s.stats.total_cost,
                 "stopped_at": s.stopped_at,
                 "archived_at": s.archived_at,
+                "backend": s.config.backend,
+                "model": s.config.model,
+                "api_base": s.config.api_base,
+                "budget": s.config.budget,
+                "max_turns": s.config.max_turns,
             })
         # The active session overrides whatever state-on-disk has
         if self.active is not None:
@@ -193,6 +198,7 @@ class SessionManager:
     @staticmethod
     def _serialize(gs: GUISession) -> dict[str, Any]:
         s = gs.stats
+        cfg = gs._agent._snapshot.config
         return {
             "id": gs.session_id,
             "state": "active",
@@ -203,4 +209,7 @@ class SessionManager:
             "budget": s["budget"],
             "max_turns": s["max_turns"],
             "archived_at": None,
+            "backend": cfg.backend,
+            "model": cfg.model,
+            "api_base": cfg.api_base,
         }
