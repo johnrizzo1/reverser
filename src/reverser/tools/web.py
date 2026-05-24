@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 from claude_agent_sdk import tool
 
+from reverser.paths import cache_root
 from ._common import (
     DEFAULT_MAX_OUTPUT,
     WEB_TOOL_TIMEOUT,
@@ -21,7 +22,9 @@ from ._common import (
 
 # ── Wordlist management ───────────────────────────────────────────
 
-_WORDLIST_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "reverser", "wordlists")
+def _wordlist_cache_dir() -> str:
+    """Return the wordlist cache directory path (inside cache_root())."""
+    return str(cache_root() / "wordlists")
 
 _WORDLIST_URLS = {
     "common.txt": "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt",
@@ -39,7 +42,7 @@ async def _find_or_download_wordlist(name: str = "common.txt") -> str | None:
         candidates.append(os.path.join(seclists_base, "Discovery/Web-Content", name))
 
     candidates.extend([
-        os.path.join(_WORDLIST_CACHE_DIR, name),
+        os.path.join(_wordlist_cache_dir(), name),
         f"/usr/share/wordlists/seclists/Discovery/Web-Content/{name}",
         f"/usr/share/seclists/Discovery/Web-Content/{name}",
         f"/usr/share/wordlists/dirb/{name}",
@@ -55,8 +58,8 @@ async def _find_or_download_wordlist(name: str = "common.txt") -> str | None:
     if not url:
         return None
 
-    dest = os.path.join(_WORDLIST_CACHE_DIR, name)
-    os.makedirs(_WORDLIST_CACHE_DIR, exist_ok=True)
+    dest = os.path.join(_wordlist_cache_dir(), name)
+    os.makedirs(_wordlist_cache_dir(), exist_ok=True)
 
     result = await arun_cmd(
         ["curl", "-s", "-S", "-L", "-o", dest, "--max-time", "30", url],
