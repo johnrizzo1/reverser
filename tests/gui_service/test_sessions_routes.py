@@ -218,6 +218,32 @@ async def test_sudo_in_memory_only(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sudo_makes_password_visible_to_tools(client, tmp_path):
+    """Regression: GUISession.set_sudo must populate the module-level
+    `_sudo_password` in tools/_common.py so network tools (nmap, netexec)
+    can read it via get_sudo_password(). Before this fix, the GUI's Save
+    button set an instance var and env var but left the tool-side
+    store unchanged, so privileged scans still ran with no password.
+    """
+    from reverser.tools._common import get_sudo_password, set_sudo_password
+    # Clear any prior state so we measure this test's effect.
+    set_sudo_password(None)
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        create = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": str(tmp_path / "bin"), "profile": "general",
+            "backend": "claude", "model": None, "api_base": None,
+            "budget": 5.0, "max_turns": 50,
+        })
+        sid = create.json()["id"]
+        r = await client.post(f"/api/sessions/{sid}/sudo",
+                              headers=HEADERS, json={"password": "hunter2"})
+    assert r.status_code == 204
+    assert get_sudo_password() == "hunter2"
+    # Clean up so we don't leak the value into other tests.
+    set_sudo_password(None)
+
+
+@pytest.mark.asyncio
 async def test_unknown_session_returns_404(client):
     r = await client.post("/api/sessions/missing/messages", headers=HEADERS, json={"text": "x"})
     assert r.status_code == 404

@@ -157,10 +157,19 @@ class GUISession:
         return self._agent._snapshot.state  # active|stopped|completed|abandoned
 
     def set_sudo(self, password: str) -> None:
-        """Store the sudo password in memory only (never persisted)."""
+        """Store the sudo password in memory only (never persisted).
+
+        Mirrors what the TUI's F4 modal does (tui/app.py): writes the
+        password into the module-level `_sudo_password` in tools/_common.py
+        so the network tools can read it via `get_sudo_password()`. Also
+        keeps a copy on the GUISession instance and in the env var for any
+        subprocess that inherits it. Without the `set_sudo_password()`
+        call below, the GUI's Save button silently set the env var only,
+        and nmap/netexec privileged scans still ran without credentials.
+        """
         self._sudo_password = password
-        # Bridge to the existing tool layer that reads this from env-style
-        # state. The same mechanism the TUI's F4 modal uses.
+        from ..tools._common import set_sudo_password
+        set_sudo_password(password)
         import os
         os.environ["REVERSER_SUDO_PASSWORD"] = password
 
