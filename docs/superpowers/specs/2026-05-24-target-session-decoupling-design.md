@@ -1,4 +1,4 @@
-# Target / Session Decoupling
+# Target / Session Decoupling + XDG-Compliant Storage
 
 **Date:** 2026-05-24
 **Status:** Design — pending implementation
@@ -16,9 +16,15 @@ This couples three things that change at different rates:
 
 When the address changes, the user loses the KB and session continuity for what is conceptually the same asset, or has to manually copy state across `targets/<dir>/` directories.
 
+A second, orthogonal problem: persistent state currently lands in CWD-relative paths (`targets/`, `logs/`) regardless of where the user runs from. This is fine for engagement folders the user `cd`s into, but it scatters data across the filesystem for casual use and ignores the platform conventions (XDG on Linux, `~/Library/Application Support` on macOS, `%APPDATA%` on Windows) that other tools follow.
+
+Because the target/session refactor already breaks the on-disk layout (clean cutover, no migration), this design absorbs the storage-path cleanup at the same time: one disruption instead of two.
+
 ## Goal
 
 A session is bound to a stable **target** (a named logical asset). The IP/URL/binary value becomes one of potentially many **addresses** on that target, swappable without disrupting the session, KB, or scope.
+
+Persistent state lives in platform-appropriate directories by default (XDG on Linux, native conventions on macOS/Windows), with a project-marker file (`.reverser-authorized`) overriding to engagement-local storage. Pentesters running from an engagement folder get co-located data they can archive and hand to clients; casual users get sensible OS-native locations.
 
 Today's one-shot ergonomics are preserved: `reverser session start 10.0.0.5` still works without ceremony and creates a target named `10.0.0.5` under the hood.
 
@@ -195,9 +201,53 @@ Writes are atomic via the same `.tmp` rename pattern used by `sessions.py:save()
 
 ### Migration
 
-**No migration.** The user has confirmed no important state needs to be preserved. The cutover is clean: the new code reads `target.json`; if a `targets/<dir>/` directory lacks one, that directory is ignored by the new model. The user is expected to clear or archive old target directories before adopting the new build.
+**No migration.** The user has confirmed no important state needs to be preserved. The cutover is clean: the new code reads `target.json` from the new resolved paths (see Storage Paths below); if an old `targets/<dir>/` directory lacks one or lives at a now-unused location, it is ignored. The user is expected to clear or archive old target directories before adopting the new build.
 
 This is captured here so the implementation plan does not introduce migration code that won't be exercised.
+
+## Storage Paths
+
+### Resolution rules
+
+Every persistent path is resolved through a single new `src/reverser/paths.py` module. There are exactly three layers of precedence:
+
+1. **Explicit env var** (highest) — e.g. `REVERSER_TARGETS_DIR`, `REVERSER_LOGS_DIR`. If set, used verbatim. Supports power users, CI, and tests.
+2. **Project marker discovery** — walk from CWD up through ancestor directories looking for `.reverser-authorized`. If found, the directory containing it is the **project root**, and target/log/finding data lives under that root (`<project-root>/targets/`, `<project-root>/logs/`).
+3. **Platform-native default** (lowest) — via the `platformdirs` library:
+   - Linux: `$XDG_DATA_HOME/reverser/` (default `~/.local/share/reverser/`), `$XDG_STATE_HOME/reverser/logs/`, `$XDG_CACHE_HOME/reverser/`
+   - macOS: `~/Library/Application Support/reverser/`, `~/Library/Logs/reverser/`, `~/Library/Caches/reverser/`
+   - Windows: `%APPDATA%\reverser\`, `%LOCALAPPDATA%\reverser\logs\`, `%LOCALAPPDATA%\reverser\Cache\`
+
+The `.reverser-authorized` file is reused as the project marker because its presence already means "this directory is an authorized engagement" — semantically aligned with "this is the engagement root." This avoids introducing a second marker file. If a future use case needs the two concepts separated, a dedicated `.reverser-project` can be added without breaking the discovery logic.
+
+### Resolved roots
+
+| Logical root | Function in `paths.py` | Env override | Project-marker location | Platform-native default |
+|---|---|---|---|---|
+| Targets root (KB, sessions, scope, findings, payloads) | `targets_root()` | `REVERSER_TARGETS_DIR` | `<project-root>/targets/` | `<data_dir>/targets/` |
+| Logs root (session JSONL logs) | `logs_root()` | `REVERSER_LOGS_DIR` | `<project-root>/logs/` | `<state_dir>/logs/` |
+| Cache root (wordlists, etc.) | `cache_root()` | `REVERSER_CACHE_DIR` | n/a — caches don't follow project marker | `<cache_dir>/` |
+| Project root (when found) | `project_root()` | n/a | directory containing `.reverser-authorized` | `None` |
+
+Wordlist and Playwright caches do **not** follow the project marker — caches are inherently shared across engagements and should never be duplicated per project. The existing `~/.cache/reverser/wordlists/` path becomes `cache_root() / "wordlists/"` (still resolves to `~/.cache/reverser/wordlists/` on Linux by default; correct platform path elsewhere). `PLAYWRIGHT_BROWSERS_PATH` continues to be the override for Playwright; we do not relocate it.
+
+### Call-site consolidation
+
+The duplicated `_targets_root()` helpers in `sessions.py:147`, `kb/store.py:122`, `kb/scope.py:78`, `kb/__init__.py:63`, and `tools/web_browser.py:34` are all replaced with imports from `paths.targets_root()`. `session_log.py`'s default `os.path.join(os.getcwd(), "logs")` is replaced with `paths.logs_root()`.
+
+### Project-marker discovery edge cases
+
+- **No `.reverser-authorized` anywhere** → use platform-native defaults. Casual exploration mode.
+- **`.reverser-authorized` in CWD** → CWD is the project root.
+- **`.reverser-authorized` in an ancestor** → that ancestor is the project root. Mirrors how `git` finds `.git`.
+- **`.reverser-authorized` at filesystem root or in `$HOME`** → ignored, falls back to platform-native defaults. (Refuses to treat `/` or `$HOME` as a project root — too easy to misconfigure.)
+- **Symlinks** → resolved before discovery to avoid cycles.
+
+Discovery happens once per process at startup and is cached; the resolved roots are immutable for the process lifetime. This avoids surprising behavior if the user `cd`s mid-session (e.g., the agent shell tool changes directory).
+
+### Auth-gate file (`.reverser-authorized` content)
+
+Today the file's mere presence is the gate (per `kb/authz.py:19`). That stays true. Its dual role as project marker is purely about location discovery — its contents are still treated the same way for authorization.
 
 ## Desktop UI Changes
 
@@ -246,6 +296,8 @@ This is additive — no existing pane is removed.
 - **`session start` against an unknown name with no inferred kind** → 400, asks user to specify kind or use a valid IP/URL/path.
 - **Rename collision** (renaming to a name already in use) → 400, names the existing target.
 - **Rename with active sessions** (any session on the target in lifecycle state `"active"`) → 400, lists the active session ids and tells the user to stop them first.
+- **Conflicting path overrides** (e.g., env var points one place, project marker points another) → env var wins per the precedence rules; a one-line INFO log at startup names the resolved root and which layer chose it. No error.
+- **Unwritable resolved root** (permissions, full disk) → process exits at startup with an actionable error naming the resolved root and the layer that chose it.
 
 ## Testing
 
@@ -255,6 +307,7 @@ This is additive — no existing pane is removed.
 - `target_key` derivation when name is/isn't an address.
 - Address resolution rules in `session start` (name match, address match, on-the-fly create).
 - SHA256 hashing on binary address add and rehash.
+- `paths.py`: three-layer precedence (env var > project marker > platform default); discovery walks up from CWD; refuses `/` and `$HOME` as project roots; symlinks resolved; cached for process lifetime.
 
 ### Integration tests
 
@@ -269,6 +322,9 @@ This is additive — no existing pane is removed.
 - Walk through the desktop "new session" form in both modes (existing target / new target).
 - Create a binary target, swap its file to a different build, verify the addresses list shows both hashes.
 - Verify that resuming a session that was started before a rebind reuses the snapshot's `active_address_id` (not the current primary), so the resumed run continues against the address it was originally working on.
+- Run `reverser` from a directory with no `.reverser-authorized` anywhere up the tree; verify data lands in the platform-native location (e.g., `~/.local/share/reverser/targets/` on Linux).
+- Create `.reverser-authorized` in an engagement folder, `cd` into a subdirectory of it, run `reverser`; verify data lands in `<engagement-folder>/targets/` and `<engagement-folder>/logs/`.
+- Set `REVERSER_TARGETS_DIR=/tmp/foo` with a project marker also present; verify the env var wins and the startup INFO log says so.
 
 ## Open Questions / Future Work
 
