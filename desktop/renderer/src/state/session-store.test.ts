@@ -25,3 +25,82 @@ describe("session-store new shape", () => {
     expect(s.dispatchEntries).toBeUndefined();
   });
 });
+
+describe("ingest text frames", () => {
+  it("creates a turn and appends speech delta with a speech ordering entry", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "text", role: "assistant", delta: "Hi ", turn: 1 });
+    const t = store.getState().turns.get(1)!;
+    expect(t.speechDeltas).toEqual(["Hi "]);
+    expect(t.ordering).toEqual([{ kind: "speech", index: 0 }]);
+  });
+
+  it("appends to existing speech ordering entry when consecutive", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "text", role: "assistant", delta: "Hi ", turn: 1 });
+    store.getState().ingest({ type: "text", role: "assistant", delta: "there", turn: 1 });
+    const t = store.getState().turns.get(1)!;
+    expect(t.speechDeltas).toEqual(["Hi ", "there"]);
+    expect(t.ordering).toEqual([{ kind: "speech", index: 0 }]);
+  });
+});
+
+describe("ingest thinking frames", () => {
+  it("creates a turn and appends thinking delta with a thinking ordering entry", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "thinking", delta: "hmm", redacted: false, turn: 1 });
+    const t = store.getState().turns.get(1)!;
+    expect(t.thinkingDeltas).toEqual(["hmm"]);
+    expect(t.ordering).toEqual([{ kind: "thinking", index: 0 }]);
+  });
+});
+
+describe("ingest tool_call/tool_result", () => {
+  it("creates a ToolCall keyed by tool_use_id and pairs the result", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "tool_call", name: "bash", args: '{"cmd":"ls"}',
+      tool_use_id: "tu_1", turn: 1,
+    });
+    store.getState().ingest({
+      type: "tool_result", ok: true, preview: "file.txt",
+      tool_use_id: "tu_1", turn: 1,
+    });
+    const t = store.getState().turns.get(1)!;
+    const tc = t.toolCalls.get("tu_1")!;
+    expect(tc.name).toBe("bash");
+    expect(tc.result).toEqual({ ok: true, preview: "file.txt" });
+    expect(t.ordering).toEqual([{ kind: "tool", id: "tu_1" }]);
+  });
+
+  it("drops a tool_result with unknown tool_use_id", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "tool_result", ok: true, preview: "x",
+      tool_use_id: "unknown", turn: 1,
+    });
+    const t = store.getState().turns.get(1);
+    expect(t?.toolCalls.size ?? 0).toBe(0);
+  });
+});
+
+describe("ingest status frames", () => {
+  it("advances currentTurn on status running", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "status", phase: "running", turns: 1 });
+    expect(store.getState().currentTurn).toBe(1);
+    expect(store.getState().turns.get(1)?.status).toBe("streaming");
+
+    store.getState().ingest({ type: "status", phase: "running", turns: 2 });
+    expect(store.getState().currentTurn).toBe(2);
+    expect(store.getState().turns.get(1)?.status).toBe("done");
+  });
+
+  it("marks current turn done on awaiting_input", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "status", phase: "running", turns: 1 });
+    store.getState().ingest({ type: "status", phase: "awaiting_input" });
+    expect(store.getState().turns.get(1)?.status).toBe("done");
+    expect(store.getState().status).toBe("awaiting_input");
+  });
+});

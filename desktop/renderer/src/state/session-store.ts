@@ -5,18 +5,26 @@ import { create } from "zustand";
  * and docs/superpowers/specs/2026-05-13-electron-desktop-ui-design.md §3.3.
  */
 export type WSFrame =
-  | { type: "text"; role: "assistant"; delta: string }
-  | { type: "thinking"; delta: string; redacted: boolean }
-  | { type: "tool_call"; name: string; args: string }
-  | { type: "tool_result"; ok: boolean; preview: string }
-  | { type: "kb_update"; kind: string; row: unknown }
-  | { type: "hypothesis"; action: string; row: HypothesisRow }
-  | { type: "finding"; row: unknown }
-  | { type: "dispatch"; specialty: string; phase: string; content: string }
+  | { type: "text"; role: "assistant"; delta: string; turn: number }
+  | { type: "thinking"; delta: string; redacted: boolean; turn: number }
+  | { type: "tool_call"; name: string; args: string; tool_use_id: string; turn: number }
+  | { type: "tool_result"; ok: boolean; preview: string; tool_use_id: string; turn: number }
+  | DispatchFrame
+  | { type: "hypothesis"; action: "create" | "update"; row: HypothesisRow }
+  | { type: "finding"; action: "create" | "update"; row: FindingRow }
   | { type: "budget"; spent: number; remaining: number; turn: number }
   | { type: "conn_breaker"; target: string; tripped: boolean }
   | { type: "status"; phase: string; turns?: number; subtype?: string; cost?: number | null }
   | { type: "log"; level: string; msg: string };
+
+export type DispatchFrame =
+  | { type: "dispatch"; dispatch_id: string; turn: number; phase: "start";
+      specialty: string; hypothesis_id?: number; sub_goal: string }
+  | { type: "dispatch"; dispatch_id: string; turn: number; phase: "end";
+      specialty: string; status: string; cost: number; turns: number }
+  | { type: "dispatch"; dispatch_id: string; turn: number; sub_turn: number;
+      phase: "text" | "thinking" | "tool_call" | "tool_result" | "tool_error";
+      specialty: string; content: string };
 
 export type ToolCall = {
   id: string;                          // tool_use_id from backend
@@ -115,6 +123,23 @@ type Actions = {
   seedFindings: (rows: FindingRow[]) => void;
 };
 
+function _getOrCreateTurn(turns: Map<number, Turn>, turn: number): Turn {
+  let t = turns.get(turn);
+  if (!t) {
+    t = {
+      turn,
+      thinkingDeltas: [],
+      speechDeltas: [],
+      toolCalls: new Map(),
+      dispatches: new Map(),
+      status: "streaming",
+      ordering: [],
+    };
+    turns.set(turn, t);
+  }
+  return t;
+}
+
 const _initialState = (): SessionState => ({
   status: "idle",
   turns: new Map(),
@@ -132,7 +157,86 @@ export const makeSessionStore = () =>
     ..._initialState(),
     reset: () => set(_initialState()),
     appendUserMessage: () => set({}),
-    ingest: () => set({}),
+    ingest: (frame) =>
+      set((s) => {
+        switch (frame.type) {
+          case "text": {
+            const turns = new Map(s.turns);
+            const t = _getOrCreateTurn(turns, frame.turn);
+            t.speechDeltas = [...t.speechDeltas, frame.delta];
+            const last = t.ordering.at(-1);
+            if (!last || last.kind !== "speech") {
+              t.ordering = [...t.ordering, { kind: "speech", index: t.speechDeltas.length - 1 }];
+            }
+            return { turns };
+          }
+          case "thinking": {
+            const turns = new Map(s.turns);
+            const t = _getOrCreateTurn(turns, frame.turn);
+            t.thinkingDeltas = [...t.thinkingDeltas, frame.delta];
+            const last = t.ordering.at(-1);
+            if (!last || last.kind !== "thinking") {
+              t.ordering = [...t.ordering, { kind: "thinking", index: t.thinkingDeltas.length - 1 }];
+            }
+            return { turns };
+          }
+          case "tool_call": {
+            const turns = new Map(s.turns);
+            const t = _getOrCreateTurn(turns, frame.turn);
+            const tc: ToolCall = {
+              id: frame.tool_use_id, name: frame.name, args: frame.args,
+            };
+            t.toolCalls = new Map(t.toolCalls);
+            t.toolCalls.set(frame.tool_use_id, tc);
+            t.ordering = [...t.ordering, { kind: "tool", id: frame.tool_use_id }];
+            return { turns };
+          }
+          case "tool_result": {
+            const turns = new Map(s.turns);
+            const t = turns.get(frame.turn);
+            if (!t) return {};
+            const tc = t.toolCalls.get(frame.tool_use_id);
+            if (!tc) {
+              console.warn("tool_result for unknown tool_use_id", frame.tool_use_id);
+              return {};
+            }
+            t.toolCalls = new Map(t.toolCalls);
+            t.toolCalls.set(frame.tool_use_id, {
+              ...tc, result: { ok: frame.ok, preview: frame.preview },
+            });
+            return { turns };
+          }
+          case "status": {
+            const next: Partial<SessionState> = { status: frame.phase as SessionState["status"] };
+            if (frame.phase === "running" && typeof frame.turns === "number") {
+              const turns = new Map(s.turns);
+              const prev = turns.get(s.currentTurn);
+              if (prev && prev.status === "streaming") {
+                turns.set(s.currentTurn, { ...prev, status: "done" });
+              }
+              _getOrCreateTurn(turns, frame.turns);
+              next.turns = turns;
+              next.currentTurn = frame.turns;
+            } else if (["awaiting_input", "stopped", "completed", "error"].includes(frame.phase)) {
+              const turns = new Map(s.turns);
+              const cur = turns.get(s.currentTurn);
+              if (cur && cur.status === "streaming") {
+                turns.set(s.currentTurn, { ...cur, status: "done" });
+                next.turns = turns;
+              }
+            }
+            return next;
+          }
+          case "budget":
+            return { budget: { spent: frame.spent, remaining: frame.remaining, turn: frame.turn } };
+          case "conn_breaker":
+            return { connBreakerTripped: frame.tripped };
+          case "log":
+            return { log: [...s.log.slice(-499), { level: frame.level, msg: frame.msg, ts: Date.now() }] };
+          default:
+            return {};
+        }
+      }),
     seedFromSessionLog: () => set({ replayed: true }),
     seedHypotheses: (rows) => set(() => {
       const m = new Map<number, HypothesisRow>();
