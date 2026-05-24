@@ -18,30 +18,57 @@ export type WSFrame =
   | { type: "status"; phase: string; turns?: number; subtype?: string; cost?: number | null }
   | { type: "log"; level: string; msg: string };
 
-export type ChatMessage =
-  | { role: "user"; text: string; turn?: number }
-  | { role: "assistant"; text: string; turn?: number };
-
 export type ToolCall = {
-  id: string;
+  id: string;                          // tool_use_id from backend
   name: string;
   args: string;
   result?: { ok: boolean; preview: string };
-  startedAt: number;
 };
 
-export type ThinkingEntry = {
-  text: string;
-  turn?: number;
-  ts?: string | null;
+export type SubTurn = {
+  thinkingDeltas: string[];
+  speechDeltas: string[];
+  toolCalls: { name: string; content: string }[];
+  toolResults: { ok: boolean; content: string }[];
 };
 
-export type DispatchEntry = {
+export type Dispatch = {
+  id: string;
   specialty: string;
-  phase: string;
-  content: string;
-  turn?: number;
-  ts?: string | null;
+  hypothesisId?: number;
+  subGoal: string;
+  status: "running" | "completed" | "error";
+  cost?: number;
+  turnsConsumed?: number;
+  subTurns: Map<number, SubTurn>;
+};
+
+export type TurnOrderingEntry =
+  | { kind: "thinking"; index: number }
+  | { kind: "speech"; index: number }
+  | { kind: "tool"; id: string }
+  | { kind: "dispatch"; id: string };
+
+export type Turn = {
+  turn: number;
+  userMessage?: string;
+  thinkingDeltas: string[];
+  speechDeltas: string[];
+  toolCalls: Map<string, ToolCall>;
+  dispatches: Map<string, Dispatch>;
+  status: "streaming" | "done";
+  ordering: TurnOrderingEntry[];
+};
+
+export type FindingRow = {
+  id: number;
+  target?: string;
+  finding?: string;
+  severity?: string | null;
+  evidence?: string | null;
+  refs?: unknown[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 // HypothesisRow mirrors HypothesisFact from src/reverser/kb/store.py
@@ -69,21 +96,13 @@ type LogEventInput =
 
 export type SessionState = {
   status: "idle" | "running" | "awaiting_input" | "stopped" | "completed" | "error";
-  messages: ChatMessage[];
-  pendingAssistantText: string;
-  toolCalls: ToolCall[];
-  thinkingEntries: ThinkingEntry[];
-  dispatchEntries: DispatchEntry[];
-  /** Hypotheses keyed by id. The HypothesesPane builds the tree from
-   *  parent_id on render. Live WS updates overwrite-by-id; the initial
-   *  KB seed populates this map on mount. */
+  turns: Map<number, Turn>;
+  currentTurn: number;
   hypotheses: Map<number, HypothesisRow>;
-  findings: unknown[];
+  findings: Map<number, FindingRow>;
   budget: { spent: number; remaining: number; turn: number } | null;
   connBreakerTripped: boolean;
   log: { level: string; msg: string; ts: number }[];
-  /** True once a session-log replay has populated the historical event
-   *  slots. The tool timeline pane uses this to switch empty-state copy. */
   replayed: boolean;
 };
 
@@ -91,20 +110,17 @@ type Actions = {
   ingest: (frame: WSFrame) => void;
   appendUserMessage: (text: string) => void;
   reset: () => void;
-  seedConversation: (entries: { user: string; agent: string; turn: number }[]) => void;
   seedFromSessionLog: (events: LogEventInput[]) => void;
   seedHypotheses: (rows: HypothesisRow[]) => void;
+  seedFindings: (rows: FindingRow[]) => void;
 };
 
 const _initialState = (): SessionState => ({
   status: "idle",
-  messages: [],
-  pendingAssistantText: "",
-  toolCalls: [],
-  thinkingEntries: [],
-  dispatchEntries: [],
+  turns: new Map(),
+  currentTurn: 0,
   hypotheses: new Map(),
-  findings: [],
+  findings: new Map(),
   budget: null,
   connBreakerTripped: false,
   log: [],
@@ -114,140 +130,20 @@ const _initialState = (): SessionState => ({
 export const makeSessionStore = () =>
   create<SessionState & Actions>((set) => ({
     ..._initialState(),
-
-    appendUserMessage: (text) =>
-      set((s) => ({ messages: [...s.messages, { role: "user", text }] })),
-
     reset: () => set(_initialState()),
-
-    seedConversation: (entries) =>
-      set(() => {
-        const messages: ChatMessage[] = [];
-        for (const e of entries) {
-          if (e.user) messages.push({ role: "user", text: e.user, turn: e.turn });
-          if (e.agent) messages.push({ role: "assistant", text: e.agent, turn: e.turn });
-        }
-        return { messages };
-      }),
-
-    seedFromSessionLog: (events) =>
-      set(() => {
-        const toolCalls: ToolCall[] = [];
-        const thinkingEntries: ThinkingEntry[] = [];
-        const dispatchEntries: DispatchEntry[] = [];
-
-        for (const e of events) {
-          if (e.kind === "tool_call") {
-            toolCalls.push({
-              id: `${e.name}-${e.ts ?? ""}-${toolCalls.length}`,
-              name: e.name,
-              args: e.input,
-              startedAt: 0,
-            });
-          } else if (e.kind === "tool_result") {
-            for (let i = toolCalls.length - 1; i >= 0; i--) {
-              if (!toolCalls[i].result) {
-                toolCalls[i] = {
-                  ...toolCalls[i],
-                  result: { ok: e.ok, preview: e.preview },
-                };
-                break;
-              }
-            }
-          } else if (e.kind === "thinking") {
-            thinkingEntries.push({ text: e.content, ts: e.ts });
-          } else if (e.kind === "dispatch") {
-            dispatchEntries.push({
-              specialty: e.specialty,
-              phase: e.phase,
-              content: e.content,
-              ts: e.ts,
-            });
-          }
-        }
-
-        return { toolCalls, thinkingEntries, dispatchEntries, replayed: true };
-      }),
-
-    seedHypotheses: (rows) =>
-      set(() => {
-        const m = new Map<number, HypothesisRow>();
-        for (const r of rows) m.set(r.id, r);
-        return { hypotheses: m };
-      }),
-
-    ingest: (frame) =>
-      set((s) => {
-        switch (frame.type) {
-          case "text":
-            return { pendingAssistantText: s.pendingAssistantText + frame.delta };
-          case "tool_call":
-            return {
-              toolCalls: [
-                ...s.toolCalls,
-                {
-                  id: `${frame.name}-${Date.now()}-${s.toolCalls.length}`,
-                  name: frame.name, args: frame.args, startedAt: Date.now(),
-                },
-              ],
-            };
-          case "tool_result": {
-            const tc = [...s.toolCalls];
-            for (let i = tc.length - 1; i >= 0; i--) {
-              if (!tc[i].result) {
-                tc[i] = { ...tc[i], result: { ok: frame.ok, preview: frame.preview } };
-                break;
-              }
-            }
-            return { toolCalls: tc };
-          }
-          case "thinking":
-            return {
-              thinkingEntries: [
-                ...s.thinkingEntries,
-                { text: frame.delta },
-              ],
-            };
-          case "dispatch":
-            return {
-              dispatchEntries: [
-                ...s.dispatchEntries,
-                {
-                  specialty: frame.specialty,
-                  phase: frame.phase,
-                  content: frame.content,
-                },
-              ],
-            };
-          case "finding":
-            return { findings: [...s.findings, frame.row] };
-          case "hypothesis": {
-            const m = new Map(s.hypotheses);
-            m.set(frame.row.id, frame.row);
-            return { hypotheses: m };
-          }
-          case "budget":
-            return { budget: { spent: frame.spent, remaining: frame.remaining, turn: frame.turn } };
-          case "conn_breaker":
-            return { connBreakerTripped: frame.tripped };
-          case "log":
-            return { log: [...s.log.slice(-499), { level: frame.level, msg: frame.msg, ts: Date.now() }] };
-          case "status": {
-            const next: Partial<SessionState> = { status: frame.phase as SessionState["status"] };
-            if ((frame.phase === "awaiting_input" || frame.phase === "stopped" || frame.phase === "completed")
-                && s.pendingAssistantText) {
-              next.messages = [
-                ...s.messages,
-                { role: "assistant", text: s.pendingAssistantText, turn: frame.turns },
-              ];
-              next.pendingAssistantText = "";
-            }
-            return next;
-          }
-          case "kb_update":
-            return {};
-        }
-      }),
+    appendUserMessage: () => set({}),
+    ingest: () => set({}),
+    seedFromSessionLog: () => set({ replayed: true }),
+    seedHypotheses: (rows) => set(() => {
+      const m = new Map<number, HypothesisRow>();
+      for (const r of rows) m.set(r.id, r);
+      return { hypotheses: m };
+    }),
+    seedFindings: (rows) => set(() => {
+      const m = new Map<number, FindingRow>();
+      for (const r of rows) m.set(r.id, r);
+      return { findings: m };
+    }),
   }));
 
 const _stores = new Map<string, ReturnType<typeof makeSessionStore>>();
