@@ -10,6 +10,8 @@
     "build": "tsc -p tsconfig.electron.json && tsc -b && vite build",
     "preview": "vite preview",
     "lint": "tsc -b --noEmit",
+    "test": "vitest run --root renderer",
+    "test:watch": "vitest --root renderer",
     "test:e2e": "playwright test",
     "dist": "electron-builder",
     "postinstall": "patch-package"
@@ -32,19 +34,24 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^22.7.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
+    "@vitest/ui": "^4.1.7",
     "autoprefixer": "^10.4.20",
     "electron": "^32.2.0",
     "electron-builder": "25.1.8",
+    "jsdom": "^29.1.1",
     "patch-package": "^8.0.1",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vite-plugin-electron": "^0.28.8",
-    "vite-plugin-electron-renderer": "^0.14.6"
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^4.1.7"
   }
 }
