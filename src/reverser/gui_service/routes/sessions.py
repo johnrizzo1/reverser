@@ -114,16 +114,35 @@ async def stop_session(request: Request, session_id: str) -> Response:
     try:
         gs = mgr.get_active(session_id)
     except KeyError:
+        pass
+    else:
+        # Cancel any in-flight send_message task first so a long-running tool
+        # call unwinds promptly. Then mark stopped, release resources, and
+        # clear manager.active so list_sessions() stops overriding state to
+        # "active" (see session_manager.list_sessions, which clobbers on-disk
+        # state for whatever GUISession sits in mgr.active).
+        gs.cancel()
+        gs.stop()
+        gs.close()
+        mgr.active = None
+        return Response(status_code=204)
+
+    # Fall back to a disk-only snapshot mutation. Covers stale "active"
+    # snapshots whose original process is gone — e.g. orphans left behind
+    # by an earlier crash or by tests that wrote to the wrong targets dir.
+    # Mirrors the same fallback in mark_done().
+    row = next((r for r in mgr.list_sessions() if r["id"] == session_id), None)
+    if row is None:
         raise HTTPException(404)
-    # Cancel any in-flight send_message task first so a long-running tool
-    # call unwinds promptly. Then mark stopped, release resources, and
-    # clear manager.active so list_sessions() stops overriding state to
-    # "active" (see session_manager.list_sessions, which clobbers on-disk
-    # state for whatever GUISession sits in mgr.active).
-    gs.cancel()
-    gs.stop()
-    gs.close()
-    mgr.active = None
+    try:
+        snap = load_snapshot(row["target"], session_id)
+    except SessionNotFoundError:
+        raise HTTPException(404)
+    if snap.state != "completed":
+        snap.state = "stopped"
+        snap.stopped_at = snap.stopped_at or snap.last_active_at
+        snap.pid = None
+        save_snapshot(snap)
     return Response(status_code=204)
 
 

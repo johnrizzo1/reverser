@@ -121,6 +121,47 @@ async def test_stop_clears_active_so_list_reports_stopped(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_stop_disk_only_for_stale_active_snapshot(client, tmp_path):
+    """Regression: stop must work on a snapshot whose state-on-disk says
+    "active" but has no live GUISession (the process is long gone — e.g.
+    a crash, or an orphan left by an earlier test run). Without the
+    disk-only fallback, the desktop UI's Stop button returns 404 and the
+    user can't archive the row.
+    """
+    from reverser.sessions import (
+        SessionConfig, new_snapshot, save as save_snapshot,
+    )
+    # Manually write an orphan "active" snapshot to the targets dir. No
+    # live GUISession for it.
+    target = str(tmp_path / "bin")
+    snap = new_snapshot(
+        target=target,
+        log_path=str(tmp_path / "log.jsonl"),
+        config=SessionConfig(
+            profile="general", backend="claude",
+            model=None, api_base=None, budget=5.0, max_turns=50,
+        ),
+        session_id="orphan-1",
+    )
+    snap.state = "active"
+    snap.pid = 99999
+    save_snapshot(snap)
+
+    r = await client.post("/api/sessions/orphan-1/stop", headers=HEADERS)
+    assert r.status_code == 204, r.text
+
+    listing = await client.get("/api/sessions", headers=HEADERS)
+    row = next(r for r in listing.json()["sessions"] if r["id"] == "orphan-1")
+    assert row["state"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_stop_unknown_session_returns_404(client):
+    r = await client.post("/api/sessions/no-such-id/stop", headers=HEADERS)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_mark_done_clears_active_so_list_reports_completed(client, tmp_path):
     """Regression: POST /done on an active session must clear manager.active
     so list_sessions reports 'completed', not 'active'."""
