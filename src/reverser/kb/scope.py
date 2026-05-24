@@ -9,13 +9,12 @@ returns None and no enforcement is performed (legacy behavior).
 from __future__ import annotations
 
 import ipaddress
-import os
 import tomllib
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from .store import normalize_target
+from reverser.paths import targets_root
 
 
 class ScopeError(RuntimeError):
@@ -74,14 +73,10 @@ class Scope:
             )
 
 
-def _targets_root() -> Path:
-    return Path(os.environ.get("REVERSER_TARGETS_DIR", "targets"))
-
-
 def load_scope(target: str) -> Optional[Scope]:
     """Load `targets/<target>/scope.toml`. Return None if the file does not exist."""
     target_id = normalize_target(target)
-    path = _targets_root() / target_id / "scope.toml"
+    path = targets_root() / target_id / "scope.toml"
     if not path.is_file():
         return None
     try:

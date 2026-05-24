@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from .schema import apply_schema
+from reverser.paths import targets_root
 
 
 _VALID_CRED_STATUS = {"untested", "invalid", "valid"}
@@ -118,16 +117,12 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _targets_root() -> Path:
-    return Path(os.environ.get("REVERSER_TARGETS_DIR", "targets"))
-
-
 class KB:
     """Per-target knowledge base. Construct via reverser.kb.for_target(target)."""
 
     def __init__(self, target: str):
         self.target_id = normalize_target(target)
-        self.root = _targets_root() / self.target_id
+        self.root = targets_root() / self.target_id
         self._init_filesystem()
         self._init_database()
 

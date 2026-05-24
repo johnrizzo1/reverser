@@ -54,13 +54,12 @@ def for_target(target: str) -> KB:
     return _kb_cache[target_id]
 
 
-from pathlib import Path
-import os
+from reverser.paths import targets_root
 
 
 def list_targets() -> list[str]:
     """Return all target IDs that have a state.db on disk."""
-    root = Path(os.environ.get("REVERSER_TARGETS_DIR", "targets"))
+    root = targets_root()
     if not root.is_dir():
         return []
     return sorted(
