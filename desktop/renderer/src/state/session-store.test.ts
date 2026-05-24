@@ -165,3 +165,36 @@ describe("ingest dispatch frames", () => {
     expect(store.getState().turns.get(1)?.dispatches.size ?? 0).toBe(0);
   });
 });
+
+describe("ingest hypothesis/finding frames", () => {
+  it("hypothesis create adds a row keyed by id", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "hypothesis", action: "create",
+      row: { id: 4, parent_id: null, statement: "x", status: "proposed" },
+    });
+    expect(store.getState().hypotheses.get(4)?.statement).toBe("x");
+  });
+
+  it("hypothesis update overwrites by id", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "hypothesis", action: "create",
+      row: { id: 4, parent_id: null, statement: "x", status: "proposed" },
+    });
+    store.getState().ingest({
+      type: "hypothesis", action: "update",
+      row: { id: 4, parent_id: null, statement: "x", status: "confirmed" },
+    });
+    expect(store.getState().hypotheses.get(4)?.status).toBe("confirmed");
+  });
+
+  it("finding create adds a row keyed by id", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "finding", action: "create",
+      row: { id: 1, target: "ex", finding: "open port 22" },
+    });
+    expect(store.getState().findings.get(1)?.finding).toBe("open port 22");
+  });
+});

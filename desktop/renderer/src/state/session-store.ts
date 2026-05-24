@@ -233,6 +233,16 @@ export const makeSessionStore = () =>
             return { connBreakerTripped: frame.tripped };
           case "log":
             return { log: [...s.log.slice(-499), { level: frame.level, msg: frame.msg, ts: Date.now() }] };
+          case "hypothesis": {
+            const m = new Map(s.hypotheses);
+            m.set(frame.row.id, frame.row);
+            return { hypotheses: m };
+          }
+          case "finding": {
+            const m = new Map(s.findings);
+            m.set(frame.row.id, frame.row);
+            return { findings: m };
+          }
           case "dispatch": {
             const turns = new Map(s.turns);
             const t = _getOrCreateTurn(turns, frame.turn);
