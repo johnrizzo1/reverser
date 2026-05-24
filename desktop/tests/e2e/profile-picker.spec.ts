@@ -32,7 +32,7 @@ test("F2 opens profile picker modal", async () => {
   try {
     const w = await app.firstWindow();
     // Wait for dashboard — confirms backend is up and query client is ready.
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({
+    await expect(w.locator("text=Sessions").first()).toBeVisible({
       timeout: 30_000,
     });
 

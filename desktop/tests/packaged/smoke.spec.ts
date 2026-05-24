@@ -23,7 +23,7 @@ test("packaged app launches and dashboard renders", async () => {
   const app = await electron.launch({ executablePath: exe, args: [] });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 60_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 60_000 });
     const cards = w.locator(".grid > div");
     await expect(async () => {
       const count = await cards.count();
@@ -40,7 +40,7 @@ test("packaged app finds bundled nmap on PATH", async () => {
   const app = await electron.launch({ executablePath: exe, args: [] });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 60_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 60_000 });
 
     // Read the connection info from the zustand store exposed on window by
     // desktop/renderer/src/state/connection.ts (test-only handle).

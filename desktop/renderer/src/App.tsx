@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Shell } from "@/layout/Shell";
-import { Dashboard } from "@/pages/Dashboard";
 import { Health } from "@/pages/Health";
 import { Settings } from "@/pages/Settings";
 import { CrashScreen } from "@/pages/CrashScreen";
@@ -38,7 +37,7 @@ export default function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<Dashboard />} />
+        <Route index element={<Navigate to="/sessions" replace />} />
         <Route path="/new" element={<NewEngagement />} />
         <Route path="/sessions" element={<SessionsIndex />} />
         <Route path="/sessions/:id" element={<SessionLayout />} />

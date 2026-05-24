@@ -13,7 +13,7 @@ test("sessions panel: navigate /sessions and see the panel", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
 
     await w.click('[title="Sessions"]');
 
@@ -39,7 +39,7 @@ test("targets panel: navigate /targets and see the panel", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
 
     await w.click('[title="Targets"]');
 
@@ -65,7 +65,7 @@ test("legacy /session/:id redirects to /sessions/:id", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
 
     await w.evaluate(() => {
       window.history.pushState({}, "", "/session/legacy-id");

@@ -6,7 +6,7 @@ import path from "path";
 // so the Electron main process can spawn the Python service via `python -m …`.
 const shimBin = path.join(__dirname, "bin");
 
-test("dashboard loads profiles from the spawned python service", async () => {
+test("settings loads profiles from the spawned python service", async () => {
   const app = await electron.launch({
     args: [path.join(__dirname, "..", "..", "dist-electron", "main.js")],
     env: {
@@ -17,11 +17,12 @@ test("dashboard loads profiles from the spawned python service", async () => {
   });
   try {
     const window = await app.firstWindow();
-    // The dashboard renders 15 profile cards once the backend is ready.
-    await expect(window.locator("text=Profiles").first()).toBeVisible({ timeout: 30_000 });
-    const cards = window.locator(".grid > div"); // Cards are direct children of the grid
+    // Sessions is the home page; wait for the SessionsPanel header.
+    await expect(window.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
+    // Profile cards moved to Settings; navigate there and verify.
+    await window.locator('a[href="/settings"]').first().click();
+    const cards = window.locator(".grid > div");
     await expect(cards.first()).toBeVisible({ timeout: 30_000 });
-    // At least 10 cards visible (we shipped 15; allow a margin)
     await expect(async () => {
       const count = await cards.count();
       expect(count).toBeGreaterThanOrEqual(10);

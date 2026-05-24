@@ -1,11 +1,10 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Home, Layers, Target, Heart, Settings } from "lucide-react";
+import { Layers, Target, Heart, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ICONS = [
-  { to: "/", label: "Dashboard", icon: Home, match: (p: string) => p === "/" },
   { to: "/sessions", label: "Sessions", icon: Layers,
-    match: (p: string) => p.startsWith("/sessions") || p.startsWith("/session/") },
+    match: (p: string) => p === "/" || p.startsWith("/sessions") || p.startsWith("/session/") },
   { to: "/targets", label: "Targets", icon: Target,
     match: (p: string) => p.startsWith("/targets") || p.startsWith("/target/") },
   { to: "/health", label: "Health", icon: Heart, match: (p: string) => p === "/health" },

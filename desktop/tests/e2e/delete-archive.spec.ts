@@ -19,7 +19,7 @@ test("sessions panel renders the archived filter tab", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
     await w.click('[title="Sessions"]');
     await expect(w.locator("text=/^archived \\(/")).toBeVisible({ timeout: 5_000 });
   } finally {
@@ -39,7 +39,7 @@ test("targets panel renders the Show archived toggle", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
     await w.click('[title="Targets"]');
     await expect(w.locator("text=Show archived")).toBeVisible({ timeout: 5_000 });
   } finally {
@@ -59,7 +59,7 @@ test("sessions panel still shows the all filter (regression)", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
     await w.click('[title="Sessions"]');
     await expect(w.locator("text=/^all \\(/")).toBeVisible({ timeout: 5_000 });
   } finally {
@@ -79,7 +79,7 @@ test("targets panel still shows the by activity sort (regression)", async () => 
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
     await w.click('[title="Targets"]');
     await expect(w.locator("text=by activity")).toBeVisible({ timeout: 5_000 });
   } finally {

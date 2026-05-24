@@ -18,7 +18,7 @@ test("sessions panel still renders after Phase 3a refactor", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
 
     await w.click('[title="Sessions"]');
     await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 5_000 });
@@ -43,7 +43,7 @@ test("targets panel still renders after Phase 3a refactor", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
     await w.click('[title="Targets"]');
     await expect(w.locator("text=Targets").first()).toBeVisible({ timeout: 5_000 });
     await expect(w.locator("text=by activity")).toBeVisible({ timeout: 5_000 });
@@ -64,7 +64,7 @@ test("react-arborist import did not break the build (profiles grid still renders
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Profiles").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
     const cards = w.locator(".grid > div");
     await expect(async () => {
       const count = await cards.count();
@@ -87,7 +87,7 @@ test("legacy /session/:id still redirects (regression check)", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
     await w.evaluate(() => {
       window.history.pushState({}, "", "/session/legacy-id");
       window.dispatchEvent(new PopStateEvent("popstate"));

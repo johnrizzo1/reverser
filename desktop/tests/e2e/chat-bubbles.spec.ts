@@ -30,7 +30,7 @@ test("injected frames render turn bubbles and hypotheses pane", async () => {
   try {
     const w = await app.firstWindow();
     // Wait for dashboard — confirms the backend is up.
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({
+    await expect(w.locator("text=Sessions").first()).toBeVisible({
       timeout: 30_000,
     });
 

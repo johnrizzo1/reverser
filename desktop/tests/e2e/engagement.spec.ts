@@ -18,7 +18,7 @@ test("new engagement wizard loads and form interactions work", async () => {
   try {
     const w = await app.firstWindow();
     // Dashboard renders first
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
 
     // Click the CTA
     await w.click("text=New engagement");
@@ -58,7 +58,7 @@ test("session status bar exposes a config-toggle chevron", async () => {
   });
   try {
     const w = await app.firstWindow();
-    await expect(w.locator("text=Dashboard").first()).toBeVisible({ timeout: 30_000 });
+    await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
 
     // Navigate to a session URL without going through the New Engagement
     // flow — the legacy /session/:id redirect into /sessions/:id renders
