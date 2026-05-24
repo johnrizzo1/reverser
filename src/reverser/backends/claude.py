@@ -54,11 +54,11 @@ class ClaudeBackend(Backend):
         async for message in query(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
                 turn += 1
-                yield AgentEvent(kind="turn", turns=turn)
+                yield AgentEvent(kind="turn", turns=turn, turn=turn)
 
                 for block in message.content:
                     if isinstance(block, ThinkingBlock):
-                        yield AgentEvent(kind="thinking", content=block.thinking)
+                        yield AgentEvent(kind="thinking", content=block.thinking, turn=turn)
 
                     elif isinstance(block, ToolUseBlock):
                         try:
@@ -69,10 +69,12 @@ class ClaudeBackend(Backend):
                             kind="tool_call",
                             tool_name=block.name,
                             tool_input=input_str,
+                            tool_use_id=block.id,
+                            turn=turn,
                         )
 
                     elif isinstance(block, TextBlock):
-                        yield AgentEvent(kind="text", content=block.text)
+                        yield AgentEvent(kind="text", content=block.text, turn=turn)
 
             elif isinstance(message, UserMessage):
                 if isinstance(message.content, list):
@@ -82,7 +84,9 @@ class ClaudeBackend(Backend):
                             yield AgentEvent(
                                 kind="tool_result",
                                 content=text,
+                                tool_use_id=getattr(block, "tool_use_id", ""),
                                 is_error=bool(block.is_error),
+                                turn=turn,
                             )
 
             elif isinstance(message, ResultMessage):

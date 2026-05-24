@@ -12,6 +12,8 @@ class AgentEvent:
     content: str = ""
     tool_name: str = ""
     tool_input: str = ""
+    tool_use_id: str = ""        # present on tool_call/tool_result events
+    turn: int = 0                # 1-based; 0 means "not associated with a turn"
     is_error: bool = False
     cost: float | None = None
     turns: int | None = None
