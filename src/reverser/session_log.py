@@ -28,17 +28,25 @@ class SessionLog:
     def log_turn(self, turn: int):
         self._write({"type": "turn", "turn": turn})
 
-    def log_thinking(self, thinking: str):
-        self._write({"type": "thinking", "text": thinking})
+    def log_thinking(self, thinking: str, *, turn: int | None = None):
+        self._write({"type": "thinking", "text": thinking, "turn": turn})
 
-    def log_text(self, text: str):
-        self._write({"type": "text", "text": text})
+    def log_text(self, text: str, *, turn: int | None = None):
+        self._write({"type": "text", "text": text, "turn": turn})
 
-    def log_tool_call(self, name: str, input: dict):
-        self._write({"type": "tool_call", "name": name, "input": input})
+    def log_tool_call(self, name: str, input: dict, *, turn: int | None = None,
+                      tool_use_id: str | None = None):
+        self._write({
+            "type": "tool_call", "name": name, "input": input,
+            "turn": turn, "tool_use_id": tool_use_id,
+        })
 
-    def log_tool_result(self, content: str, is_error: bool = False):
-        self._write({"type": "tool_result", "content": content, "is_error": is_error})
+    def log_tool_result(self, content: str, is_error: bool = False, *,
+                        turn: int | None = None, tool_use_id: str | None = None):
+        self._write({
+            "type": "tool_result", "content": content, "is_error": is_error,
+            "turn": turn, "tool_use_id": tool_use_id,
+        })
 
     def log_session_end(self, result: str | None, cost: float | None, turns: int | None, subtype: str = "success"):
         self._write({

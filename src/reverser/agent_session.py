@@ -529,19 +529,27 @@ When you respond, present your findings clearly with relevant details.
                     yield AgentEvent(kind="turn", turns=self.stats.turns)
 
                 elif event.kind == "thinking":
-                    self._slog.log_thinking(event.content)
+                    self._slog.log_thinking(event.content, turn=event.turn or None)
                     yield event
 
                 elif event.kind == "tool_call":
-                    self._slog.log_tool_call(event.tool_name, event.tool_input)
+                    self._slog.log_tool_call(
+                        event.tool_name, event.tool_input,
+                        turn=event.turn or None,
+                        tool_use_id=event.tool_use_id or None,
+                    )
                     yield event
 
                 elif event.kind == "tool_result":
-                    self._slog.log_tool_result(event.content, is_error=event.is_error)
+                    self._slog.log_tool_result(
+                        event.content, is_error=event.is_error,
+                        turn=event.turn or None,
+                        tool_use_id=event.tool_use_id or None,
+                    )
                     yield event
 
                 elif event.kind == "text":
-                    self._slog.log_text(event.content)
+                    self._slog.log_text(event.content, turn=event.turn or None)
                     turn_text_parts.append(event.content)
                     yield event
 
