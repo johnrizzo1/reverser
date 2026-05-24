@@ -3,11 +3,11 @@ import { Layers, Target, Heart, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ICONS = [
-  { to: "/sessions", label: "Sessions", icon: Layers,
-    match: (p: string) => p === "/" || p.startsWith("/sessions") || p.startsWith("/session/") },
   { to: "/targets", label: "Targets", icon: Target,
     match: (p: string) => p.startsWith("/targets") || p.startsWith("/target/") },
-  { to: "/health", label: "Health", icon: Heart, match: (p: string) => p === "/health" },
+  { to: "/sessions", label: "Sessions", icon: Layers,
+    match: (p: string) => p === "/" || p.startsWith("/sessions") || p.startsWith("/session/") },
+  { to: "/health", label: "Backend Health", icon: Heart, match: (p: string) => p === "/health" },
   { to: "/settings", label: "Settings", icon: Settings, match: (p: string) => p === "/settings" },
 ];
 
