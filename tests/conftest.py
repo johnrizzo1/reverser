@@ -22,11 +22,15 @@ def _isolate_targets_dir(tmp_path_factory, monkeypatch):
     """
     targets_dir = tmp_path_factory.mktemp("reverser-targets")
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(targets_dir))
+    from reverser import paths
+    paths._reset_caches_for_tests()
     try:
         import reverser.kb
         reverser.kb._kb_cache.clear()
     except ImportError:
         pass
+    yield
+    paths._reset_caches_for_tests()
 
 
 @pytest.fixture
@@ -40,6 +44,8 @@ def tmp_targets_dir(tmp_path, monkeypatch):
     targets_dir = tmp_path / "targets"
     targets_dir.mkdir()
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(targets_dir))
+    from reverser import paths
+    paths._reset_caches_for_tests()
     try:
         import reverser.kb
         reverser.kb._kb_cache.clear()

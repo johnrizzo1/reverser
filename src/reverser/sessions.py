@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Literal, Optional, TYPE_CHECKING
 from urllib.parse import urlparse
 
+from reverser.paths import targets_root
+
 if TYPE_CHECKING:
     from reverser.tui.session import Session
 
@@ -140,11 +142,6 @@ class SchemaError(Exception):
 def _now_iso() -> str:
     """Return current time as ISO-8601 with seconds precision, UTC."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def _targets_root() -> Path:
-    """Resolve the targets/ directory from REVERSER_TARGETS_DIR or default."""
-    return Path(os.environ.get("REVERSER_TARGETS_DIR", "targets"))
 
 
 def make_session_id() -> str:
@@ -270,7 +267,7 @@ def _is_canonical_target_name(name: str) -> bool:
 
 def snapshot_path(target: str, session_id: str) -> Path:
     """Canonical path for a session snapshot file."""
-    return _targets_root() / target_key(target) / "sessions" / f"{session_id}.json"
+    return targets_root() / target_key(target) / "sessions" / f"{session_id}.json"
 
 
 def _from_dict(d: dict) -> SessionSnapshot:
@@ -356,7 +353,7 @@ def list_for_target(
     Skips orphan .tmp files (incomplete writes from crashes) and
     silently skips corrupted snapshot files.
     """
-    sessions_dir = _targets_root() / target_key(target) / "sessions"
+    sessions_dir = targets_root() / target_key(target) / "sessions"
     if not sessions_dir.is_dir():
         return []
 
@@ -385,7 +382,7 @@ def list_all(*, exclude_completed: bool = False) -> list[SessionSnapshot]:
     text targets, etc.). See _is_canonical_target_name. Also skips any
     dot-prefixed directory (e.g. .trash/) — those are not targets.
     """
-    root = _targets_root()
+    root = targets_root()
     if not root.is_dir():
         return []
 
