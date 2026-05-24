@@ -39,3 +39,48 @@ def project_root() -> Optional[Path]:
         if current == current.parent:  # reached filesystem root
             return None
         current = current.parent
+
+
+@functools.lru_cache(maxsize=1)
+def targets_root() -> Path:
+    """Resolve the directory holding per-target data (KB, sessions, scope)."""
+    env = os.environ.get("REVERSER_TARGETS_DIR")
+    if env:
+        return Path(env)
+    project = project_root()
+    if project is not None:
+        return project / "targets"
+    return Path(platformdirs.user_data_dir(_APP_NAME)) / "targets"
+
+
+@functools.lru_cache(maxsize=1)
+def logs_root() -> Path:
+    """Resolve the directory holding session JSONL logs."""
+    env = os.environ.get("REVERSER_LOGS_DIR")
+    if env:
+        return Path(env)
+    project = project_root()
+    if project is not None:
+        return project / "logs"
+    return Path(platformdirs.user_log_dir(_APP_NAME))
+
+
+@functools.lru_cache(maxsize=1)
+def cache_root() -> Path:
+    """Resolve the directory for shared caches (wordlists, etc.).
+
+    Caches do NOT follow the project marker — they are shared across
+    engagements and should not be duplicated per-project.
+    """
+    env = os.environ.get("REVERSER_CACHE_DIR")
+    if env:
+        return Path(env)
+    return Path(platformdirs.user_cache_dir(_APP_NAME))
+
+
+def _reset_caches_for_tests() -> None:
+    """Test-only helper: clear lru_caches so monkeypatch'd env/CWD take effect."""
+    project_root.cache_clear()
+    targets_root.cache_clear()
+    logs_root.cache_clear()
+    cache_root.cache_clear()
