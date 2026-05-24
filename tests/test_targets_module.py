@@ -321,3 +321,26 @@ def test_rename_with_active_sessions_rejected(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="active session"):
         targets.rename_target("dc1", "renamed")
+
+
+def test_rehash_binary_address_updates_sha(tmp_path, monkeypatch):
+    binary = tmp_path / "sample.bin"
+    binary.write_bytes(b"v1")
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "data"))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("sample", "binary", str(binary))
+    old_hash = t.primary_address.sha256
+    binary.write_bytes(b"v2-different-content")
+    t = targets.rehash_binary_address(t, t.primary_address.id)
+    assert t.primary_address.sha256 != old_hash
+
+
+def test_rehash_non_binary_address_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+    t = targets.create_target("dc1", "network", "10.0.0.5")
+    with pytest.raises(ValueError, match="binary"):
+        targets.rehash_binary_address(t, t.primary_address.id)

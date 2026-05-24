@@ -304,6 +304,21 @@ def retire_address(target: Target, address_id: str) -> Target:
     return updated
 
 
+def rehash_binary_address(target: Target, address_id: str) -> Target:
+    """Re-read a binary address's file and update its sha256."""
+    addr = target.get_address(address_id)
+    if addr.kind != "binary":
+        raise ValueError(f"Address {address_id!r} is not a binary address")
+    new_sha = _sha256_of_file(addr.value)
+    new_addresses = [
+        dataclasses.replace(a, sha256=new_sha) if a.id == address_id else a
+        for a in target.addresses
+    ]
+    updated = dataclasses.replace(target, addresses=new_addresses, updated_at=_now_iso())
+    save_target(updated)
+    return updated
+
+
 def _has_active_sessions(name: str) -> list[str]:
     """Return ids (filenames) of any session snapshots in lifecycle state 'active'."""
     sessions_dir = _target_dir(name) / "sessions"
