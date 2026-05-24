@@ -28,3 +28,87 @@ def test_address_binary_kind_carries_sha256():
         sha256="deadbeef",
     )
     assert addr.to_dict()["sha256"] == "deadbeef"
+
+
+import pytest
+from reverser.targets import Target, Address
+
+
+def _addr(id="a1", kind="ip", value="10.0.0.1", status="active", **kw):
+    return Address(id=id, kind=kind, value=value, status=status,
+                   added_at="2026-05-24T00:00:00Z", **kw)
+
+
+def test_target_primary_must_resolve_to_active_address():
+    with pytest.raises(ValueError, match="primary"):
+        Target(name="t", kind="network",
+               addresses=[_addr(status="retired")],
+               primary_address_id="a1",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+
+
+def test_target_primary_must_exist_in_addresses():
+    with pytest.raises(ValueError, match="primary"):
+        Target(name="t", kind="network",
+               addresses=[_addr(id="a1")],
+               primary_address_id="missing",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+
+
+def test_target_requires_at_least_one_address():
+    with pytest.raises(ValueError, match="at least one"):
+        Target(name="t", kind="network", addresses=[],
+               primary_address_id="",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+
+
+def test_target_network_rejects_binary_address():
+    with pytest.raises(ValueError, match="kind"):
+        Target(name="t", kind="network",
+               addresses=[_addr(kind="binary", value="/tmp/x")],
+               primary_address_id="a1",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+
+
+def test_target_binary_rejects_network_address():
+    with pytest.raises(ValueError, match="kind"):
+        Target(name="t", kind="binary",
+               addresses=[_addr(kind="ip", value="10.0.0.1")],
+               primary_address_id="a1",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+
+
+def test_target_duplicate_address_value_rejected():
+    with pytest.raises(ValueError, match="duplicate"):
+        Target(name="t", kind="network",
+               addresses=[_addr(id="a1", value="10.0.0.1"),
+                          _addr(id="a2", value="10.0.0.1")],
+               primary_address_id="a1",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+
+
+def test_target_round_trip_to_dict():
+    t = Target(name="dc1", kind="network",
+               addresses=[_addr(id="a1", value="10.0.0.1")],
+               primary_address_id="a1",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+    restored = Target.from_dict(t.to_dict())
+    assert restored == t
+
+
+def test_target_primary_address_property():
+    primary = _addr(id="a1", value="10.0.0.1")
+    other = _addr(id="a2", value="10.0.0.2")
+    t = Target(name="t", kind="network",
+               addresses=[primary, other],
+               primary_address_id="a1",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+    assert t.primary_address == primary

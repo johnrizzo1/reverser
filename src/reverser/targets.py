@@ -55,3 +55,86 @@ class Address:
             retired_at=payload.get("retired_at"),
             label=payload.get("label"),
         )
+
+
+@dataclass
+class Target:
+    name: str
+    kind: TargetKind
+    addresses: list[Address]
+    primary_address_id: str
+    created_at: str
+    updated_at: str
+    notes: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self._validate()
+
+    def _allowed_address_kinds(self) -> frozenset[str]:
+        return _NETWORK_KINDS if self.kind == "network" else _BINARY_KINDS
+
+    def _validate(self) -> None:
+        if not self.addresses:
+            raise ValueError(f"Target {self.name!r} must have at least one address")
+        allowed = self._allowed_address_kinds()
+        seen_values: set[str] = set()
+        seen_ids: dict[str, Address] = {}
+        for a in self.addresses:
+            if a.kind not in allowed:
+                raise ValueError(
+                    f"Target {self.name!r} kind={self.kind!r} rejects address "
+                    f"kind={a.kind!r} (allowed: {sorted(allowed)})"
+                )
+            if a.value in seen_values:
+                raise ValueError(
+                    f"Target {self.name!r} has duplicate address value {a.value!r}"
+                )
+            seen_values.add(a.value)
+            seen_ids[a.id] = a
+        primary = seen_ids.get(self.primary_address_id)
+        if primary is None:
+            raise ValueError(
+                f"Target {self.name!r} primary_address_id={self.primary_address_id!r} "
+                "does not match any address"
+            )
+        if primary.status != "active":
+            raise ValueError(
+                f"Target {self.name!r} primary address must be active "
+                f"(got status={primary.status!r})"
+            )
+
+    @property
+    def primary_address(self) -> Address:
+        for a in self.addresses:
+            if a.id == self.primary_address_id:
+                return a
+        raise ValueError(f"primary address {self.primary_address_id!r} not found")
+
+    def get_address(self, address_id: str) -> Address:
+        for a in self.addresses:
+            if a.id == address_id:
+                return a
+        raise KeyError(address_id)
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "kind": self.kind,
+            "addresses": [a.to_dict() for a in self.addresses],
+            "primary_address_id": self.primary_address_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "notes": self.notes,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "Target":
+        return cls(
+            name=payload["name"],
+            kind=payload["kind"],
+            addresses=[Address.from_dict(a) for a in payload["addresses"]],
+            primary_address_id=payload["primary_address_id"],
+            created_at=payload["created_at"],
+            updated_at=payload["updated_at"],
+            notes=payload.get("notes"),
+        )
