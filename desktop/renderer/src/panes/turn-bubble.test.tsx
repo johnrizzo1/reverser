@@ -1,4 +1,5 @@
 // desktop/renderer/src/panes/turn-bubble.test.tsx
+/// <reference types="@testing-library/jest-dom" />
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TurnBubble } from "./TurnBubble";
