@@ -280,3 +280,44 @@ def test_retire_primary_without_promoting_rejected(tmp_path, monkeypatch):
     primary_id = t.primary_address_id
     with pytest.raises(ValueError, match="promote"):
         targets.retire_address(t, primary_id)
+
+
+def test_rename_moves_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("oldname", "network", "10.0.0.5")
+    targets.rename_target("oldname", "newname")
+    with pytest.raises(FileNotFoundError):
+        targets.load_target("oldname")
+    loaded = targets.load_target("newname")
+    assert loaded.name == "newname"
+
+
+def test_rename_to_existing_name_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    targets.create_target("a", "network", "10.0.0.1")
+    targets.create_target("b", "network", "10.0.0.2")
+    with pytest.raises(ValueError, match="already exists"):
+        targets.rename_target("a", "b")
+
+
+def test_rename_with_active_sessions_rejected(tmp_path, monkeypatch):
+    """A session in lifecycle state 'active' under the target blocks rename."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    from reverser.sessions import target_key
+    paths._reset_caches_for_tests()
+
+    targets.create_target("dc1", "network", "10.0.0.5")
+    # Plant an "active" session snapshot.
+    sessions_dir = tmp_path / target_key("dc1") / "sessions"
+    sessions_dir.mkdir(parents=True)
+    (sessions_dir / "fake-session.json").write_text('{"state": "active"}')
+
+    with pytest.raises(ValueError, match="active session"):
+        targets.rename_target("dc1", "renamed")

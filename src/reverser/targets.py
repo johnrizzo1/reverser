@@ -302,3 +302,44 @@ def retire_address(target: Target, address_id: str) -> Target:
     updated = dataclasses.replace(target, addresses=new_addresses, updated_at=_now_iso())
     save_target(updated)
     return updated
+
+
+def _has_active_sessions(name: str) -> list[str]:
+    """Return ids (filenames) of any session snapshots in lifecycle state 'active'."""
+    sessions_dir = _target_dir(name) / "sessions"
+    if not sessions_dir.exists():
+        return []
+    active: list[str] = []
+    for snapshot_path in sessions_dir.glob("*.json"):
+        try:
+            with snapshot_path.open("r", encoding="utf-8") as f:
+                snap = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if snap.get("state") == "active":
+            active.append(snapshot_path.stem)
+    return active
+
+
+def rename_target(old_name: str, new_name: str) -> Target:
+    """Rename a target by moving its on-disk directory atomically.
+
+    Refuses if any session on the target is in lifecycle state 'active'.
+    """
+    old_dir = _target_dir(old_name)
+    new_dir = _target_dir(new_name)
+    if not (old_dir / _TARGET_FILE).exists():
+        raise FileNotFoundError(f"No target named {old_name!r}")
+    if new_dir.exists():
+        raise ValueError(f"Target {new_name!r} already exists at {new_dir}")
+    active = _has_active_sessions(old_name)
+    if active:
+        raise ValueError(
+            f"Cannot rename {old_name!r}: active session(s) {active}; stop them first"
+        )
+    os.replace(old_dir, new_dir)
+    # Update name field inside target.json.
+    t = load_target(new_name)
+    updated = dataclasses.replace(t, name=new_name, updated_at=_now_iso())
+    save_target(updated)
+    return updated
