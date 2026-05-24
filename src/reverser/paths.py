@@ -87,6 +87,13 @@ def _reset_caches_for_tests() -> None:
     cache_root.cache_clear()
 
 
+def _reset_logger_for_tests() -> None:
+    """Test-only helper: remove any handlers added by log_resolved_roots() so
+    handler-detection logic is exercised fresh in each test."""
+    _log.handlers.clear()
+    _log.propagate = True
+
+
 _log = logging.getLogger(__name__)
 
 
@@ -99,7 +106,19 @@ def _source_label(env_var: str, follows_marker: bool) -> str:
 
 
 def log_resolved_roots() -> None:
-    """Emit one INFO line per resolved root naming the precedence layer used."""
+    """Emit one INFO line per resolved root naming the precedence layer used.
+
+    Attaches a stderr handler to the `reverser.paths` logger if no logging
+    has been configured yet. This keeps the output visible without forcing
+    a project-wide logging configuration.
+    """
+    import sys
+    if not _log.handlers and not logging.getLogger().handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        _log.addHandler(handler)
+        _log.setLevel(logging.INFO)
+        _log.propagate = False  # don't double-log if root gets configured later
     _log.info("targets_root=%s (source: %s)", targets_root(), _source_label("REVERSER_TARGETS_DIR", True))
     _log.info("logs_root=%s (source: %s)", logs_root(), _source_label("REVERSER_LOGS_DIR", True))
     _log.info("cache_root=%s (source: %s)", cache_root(), _source_label("REVERSER_CACHE_DIR", False))

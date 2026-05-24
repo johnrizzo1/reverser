@@ -9,13 +9,15 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clear_path_env(monkeypatch):
-    """Ensure env-var overrides don't leak between tests."""
+    """Ensure env-var overrides and logger state don't leak between tests."""
     for var in ("REVERSER_TARGETS_DIR", "REVERSER_LOGS_DIR", "REVERSER_CACHE_DIR"):
         monkeypatch.delenv(var, raising=False)
     from reverser import paths
     paths._reset_caches_for_tests()
+    paths._reset_logger_for_tests()
     yield
     paths._reset_caches_for_tests()
+    paths._reset_logger_for_tests()
 
 
 def test_project_root_returns_none_when_no_marker(tmp_path, monkeypatch):
@@ -113,3 +115,31 @@ def test_log_resolved_roots_names_each_source(tmp_path, monkeypatch, caplog):
     assert "env REVERSER_TARGETS_DIR" in text
     assert "logs_root" in text
     assert "project marker" in text  # logs follow project marker
+
+
+def test_log_resolved_roots_writes_to_stderr_when_no_logging_configured(tmp_path):
+    """Without any logging.basicConfig, log_resolved_roots() must still produce output.
+
+    Runs in a subprocess to avoid pytest's live-logging infrastructure, which
+    pre-populates the root logger with null handlers and would mask the defect
+    being tested.
+    """
+    import subprocess
+    import sys
+
+    script = (
+        "import os, sys;"
+        f"os.chdir({str(tmp_path)!r});"
+        "from reverser.paths import log_resolved_roots;"
+        "log_resolved_roots()"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    # Output goes to stderr.
+    assert "targets_root" in result.stderr
+    assert "logs_root" in result.stderr
+    assert "cache_root" in result.stderr
