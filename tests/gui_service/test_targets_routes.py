@@ -8,10 +8,15 @@ from reverser.gui_service.config import ServiceConfig
 
 @pytest.fixture
 async def client(tmp_path, monkeypatch):
+    # The autouse `_isolate_targets_dir` fixture in conftest.py already
+    # points REVERSER_TARGETS_DIR at a fresh tmp dir. Override it here so
+    # this test owns the directory layout and can pre-populate fixtures.
+    targets_dir = tmp_path / "targets"
+    targets_dir.mkdir()
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(targets_dir))
     monkeypatch.chdir(tmp_path)
-    # Populate a fake targets/<t>/ directory so /api/targets has something
-    (tmp_path / "targets" / "10.10.10.5").mkdir(parents=True)
-    (tmp_path / "targets" / "example.com").mkdir(parents=True)
+    (targets_dir / "10.10.10.5").mkdir(parents=True)
+    (targets_dir / "example.com").mkdir(parents=True)
     config = ServiceConfig(host="127.0.0.1", port=0, token="t", project_root=str(tmp_path))
     app = create_app(config)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
