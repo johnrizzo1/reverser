@@ -233,6 +233,65 @@ export const makeSessionStore = () =>
             return { connBreakerTripped: frame.tripped };
           case "log":
             return { log: [...s.log.slice(-499), { level: frame.level, msg: frame.msg, ts: Date.now() }] };
+          case "dispatch": {
+            const turns = new Map(s.turns);
+            const t = _getOrCreateTurn(turns, frame.turn);
+            const dispatches = new Map(t.dispatches);
+
+            if (frame.phase === "start") {
+              dispatches.set(frame.dispatch_id, {
+                id: frame.dispatch_id,
+                specialty: frame.specialty,
+                hypothesisId: frame.hypothesis_id,
+                subGoal: frame.sub_goal,
+                status: "running",
+                subTurns: new Map(),
+              });
+              t.dispatches = dispatches;
+              t.ordering = [...t.ordering, { kind: "dispatch", id: frame.dispatch_id }];
+              return { turns };
+            }
+
+            if (frame.phase === "end") {
+              const d = dispatches.get(frame.dispatch_id);
+              if (!d) {
+                console.warn("dispatch end for unknown dispatch_id", frame.dispatch_id);
+                return {};
+              }
+              dispatches.set(frame.dispatch_id, {
+                ...d,
+                status: frame.status === "completed" ? "completed" : "error",
+                cost: frame.cost,
+                turnsConsumed: frame.turns,
+              });
+              t.dispatches = dispatches;
+              return { turns };
+            }
+
+            // sub-turn event
+            const d = dispatches.get(frame.dispatch_id);
+            if (!d) {
+              console.warn("dispatch event for unknown dispatch_id", frame.dispatch_id);
+              return {};
+            }
+            const subTurns = new Map(d.subTurns);
+            let st = subTurns.get(frame.sub_turn);
+            if (!st) {
+              st = { thinkingDeltas: [], speechDeltas: [], toolCalls: [], toolResults: [] };
+            } else {
+              st = { ...st };
+            }
+            if (frame.phase === "thinking") st.thinkingDeltas = [...st.thinkingDeltas, frame.content];
+            else if (frame.phase === "text") st.speechDeltas = [...st.speechDeltas, frame.content];
+            else if (frame.phase === "tool_call") st.toolCalls = [...st.toolCalls, { name: "", content: frame.content }];
+            else if (frame.phase === "tool_result") st.toolResults = [...st.toolResults, { ok: true, content: frame.content }];
+            else if (frame.phase === "tool_error") st.toolResults = [...st.toolResults, { ok: false, content: frame.content }];
+            subTurns.set(frame.sub_turn, st);
+
+            dispatches.set(frame.dispatch_id, { ...d, subTurns });
+            t.dispatches = dispatches;
+            return { turns };
+          }
           default:
             return {};
         }

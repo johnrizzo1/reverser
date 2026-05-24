@@ -104,3 +104,64 @@ describe("ingest status frames", () => {
     expect(store.getState().status).toBe("awaiting_input");
   });
 });
+
+describe("ingest dispatch frames", () => {
+  it("start creates a Dispatch on the parent turn", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "dispatch", dispatch_id: "d1", turn: 1, phase: "start",
+      specialty: "webpentest", sub_goal: "test xss", hypothesis_id: 4,
+    });
+    const t = store.getState().turns.get(1)!;
+    const d = t.dispatches.get("d1")!;
+    expect(d.specialty).toBe("webpentest");
+    expect(d.subGoal).toBe("test xss");
+    expect(d.hypothesisId).toBe(4);
+    expect(d.status).toBe("running");
+    expect(t.ordering).toEqual([{ kind: "dispatch", id: "d1" }]);
+  });
+
+  it("text/thinking/tool_call drill into the sub-turn", () => {
+    const store = makeSessionStore();
+    const ingest = store.getState().ingest;
+    ingest({ type: "dispatch", dispatch_id: "d1", turn: 1, phase: "start",
+      specialty: "webpentest", sub_goal: "x" });
+    ingest({ type: "dispatch", dispatch_id: "d1", turn: 1, sub_turn: 1,
+      phase: "thinking", specialty: "webpentest", content: "scoping" });
+    ingest({ type: "dispatch", dispatch_id: "d1", turn: 1, sub_turn: 1,
+      phase: "text", specialty: "webpentest", content: "starting" });
+    ingest({ type: "dispatch", dispatch_id: "d1", turn: 1, sub_turn: 2,
+      phase: "tool_call", specialty: "webpentest", content: "bash ls" });
+
+    const d = store.getState().turns.get(1)!.dispatches.get("d1")!;
+    const st1 = d.subTurns.get(1)!;
+    const st2 = d.subTurns.get(2)!;
+    expect(st1.thinkingDeltas).toEqual(["scoping"]);
+    expect(st1.speechDeltas).toEqual(["starting"]);
+    expect(st2.toolCalls.length).toBe(1);
+    expect(st2.toolCalls[0].content).toBe("bash ls");
+  });
+
+  it("end sets status/cost/turnsConsumed on the Dispatch", () => {
+    const store = makeSessionStore();
+    const ingest = store.getState().ingest;
+    ingest({ type: "dispatch", dispatch_id: "d1", turn: 1, phase: "start",
+      specialty: "webpentest", sub_goal: "x" });
+    ingest({ type: "dispatch", dispatch_id: "d1", turn: 1, phase: "end",
+      specialty: "webpentest", status: "completed", cost: 0.53, turns: 4 });
+
+    const d = store.getState().turns.get(1)!.dispatches.get("d1")!;
+    expect(d.status).toBe("completed");
+    expect(d.cost).toBe(0.53);
+    expect(d.turnsConsumed).toBe(4);
+  });
+
+  it("end without start is dropped silently", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "dispatch", dispatch_id: "ghost", turn: 1, phase: "end",
+      specialty: "x", status: "completed", cost: 0, turns: 0,
+    });
+    expect(store.getState().turns.get(1)?.dispatches.size ?? 0).toBe(0);
+  });
+});
