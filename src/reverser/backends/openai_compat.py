@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import uuid as _uuid
 from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI
@@ -222,7 +223,7 @@ class OpenAICompatBackend(Backend):
 
         while turn < max_turns:
             turn += 1
-            yield AgentEvent(kind="turn", turns=turn)
+            yield AgentEvent(kind="turn", turns=turn, turn=turn)
 
             try:
                 response = await self._client.chat.completions.create(
@@ -255,7 +256,7 @@ class OpenAICompatBackend(Backend):
             msg_data = assistant_msg.model_dump() if hasattr(assistant_msg, 'model_dump') else {}
             reasoning = msg_data.get("reasoning") or ""
             if reasoning.strip():
-                yield AgentEvent(kind="thinking", content=reasoning.strip())
+                yield AgentEvent(kind="thinking", content=reasoning.strip(), turn=turn)
 
             # Process content — extract any remaining thinking blocks in text
             raw_content = assistant_msg.content or ""
@@ -265,7 +266,7 @@ class OpenAICompatBackend(Backend):
             if thinking_match:
                 think_text = thinking_match.group(1).strip()
                 if think_text and not reasoning:
-                    yield AgentEvent(kind="thinking", content=think_text)
+                    yield AgentEvent(kind="thinking", content=think_text, turn=turn)
                 # Remove thinking block from content for further processing
                 display_content = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL).strip()
             else:
@@ -275,14 +276,14 @@ class OpenAICompatBackend(Backend):
             for gemma_think in _GEMMA_THINKING_PATTERN.finditer(display_content):
                 think_text = gemma_think.group("content").strip()
                 if think_text and not reasoning:
-                    yield AgentEvent(kind="thinking", content=think_text)
+                    yield AgentEvent(kind="thinking", content=think_text, turn=turn)
             display_content = _GEMMA_THINKING_PATTERN.sub('', display_content).strip()
 
             # Also handle unclosed <think> tags (known Qwen3.5 bug)
             if display_content.startswith('<think>'):
                 think_text = display_content[7:].strip()
                 if think_text and not reasoning:
-                    yield AgentEvent(kind="thinking", content=think_text)
+                    yield AgentEvent(kind="thinking", content=think_text, turn=turn)
                 display_content = ""
 
             # Emit visible text content (stripped of thinking/tool XML)
@@ -290,7 +291,7 @@ class OpenAICompatBackend(Backend):
             # Also strip Gemma tool call markers
             visible_text = re.sub(r'<\|tool_call>.*?<tool_call\|>', '', visible_text, flags=re.DOTALL).strip()
             if visible_text:
-                yield AgentEvent(kind="text", content=visible_text)
+                yield AgentEvent(kind="text", content=visible_text, turn=turn)
 
             # Check for tool calls
             if not assistant_msg.tool_calls:
@@ -305,12 +306,18 @@ class OpenAICompatBackend(Backend):
                 if text_calls:
                     has_used_tools = True
                     # Execute the tool calls the model embedded in its text.
+                    # Text-extracted calls have no native id, so synthesize one
+                    # per call. The renderer keys ToolCallChip on this id, so
+                    # two text-extracted calls in the same turn must not collide.
                     result_parts = []
                     for name, args in text_calls:
+                        tool_use_id = _uuid.uuid4().hex
                         yield AgentEvent(
                             kind="tool_call",
                             tool_name=name,
                             tool_input=args,
+                            tool_use_id=tool_use_id,
+                            turn=turn,
                         )
 
                         result_text, is_error = await execute_tool(
@@ -322,6 +329,8 @@ class OpenAICompatBackend(Backend):
                             kind="tool_result",
                             content=result_text,
                             is_error=is_error,
+                            tool_use_id=tool_use_id,
+                            turn=turn,
                         )
 
                         status = "ERROR" if is_error else "OK"
@@ -375,10 +384,17 @@ class OpenAICompatBackend(Backend):
             has_used_tools = True
             for tc in assistant_msg.tool_calls:
                 fn = tc.function
+                # `tc.id` is the OpenAI tool_call_id (cf. _message_to_dict
+                # below). The renderer pairs tool_result with tool_call by
+                # this id, and uses it as the React key — so it must be
+                # populated and unique within the turn.
+                tool_use_id = tc.id or _uuid.uuid4().hex
                 yield AgentEvent(
                     kind="tool_call",
                     tool_name=fn.name,
                     tool_input=fn.arguments,
+                    tool_use_id=tool_use_id,
+                    turn=turn,
                 )
 
                 result_text, is_error = await execute_tool(
@@ -390,6 +406,8 @@ class OpenAICompatBackend(Backend):
                     kind="tool_result",
                     content=result_text,
                     is_error=is_error,
+                    tool_use_id=tool_use_id,
+                    turn=turn,
                 )
 
                 # Append tool result to conversation

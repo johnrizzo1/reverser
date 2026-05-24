@@ -53,13 +53,16 @@ export function TurnBubble({ turn }: { turn: Turn }) {
         if (entry.kind === "tool") {
           const tc = turn.toolCalls.get(entry.id);
           if (!tc) return null;
-          return <ToolCallChip key={`tl-${entry.id}`} call={tc} />;
+          // Backends should always provide a non-empty tool_use_id; fall
+          // back to the ordering index when they don't so React doesn't
+          // warn about duplicate keys if a legacy/malformed frame slips in.
+          return <ToolCallChip key={`tl-${entry.id || i}`} call={tc} />;
         }
 
         if (entry.kind === "dispatch") {
           const d = turn.dispatches.get(entry.id);
           if (!d) return null;
-          return <DispatchPanel key={`d-${entry.id}`} dispatch={d} />;
+          return <DispatchPanel key={`d-${entry.id || i}`} dispatch={d} />;
         }
 
         return null;
