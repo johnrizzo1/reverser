@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Tree } from "react-arborist";
-import type { NodeRendererProps } from "react-arborist";
 import { useStore } from "zustand";
 import { useTargetKB, useSessions } from "@/api/queries";
 import { getSessionStore, type HypothesisRow } from "@/state/session-store";
@@ -55,34 +53,61 @@ function _ancestorIds(rows: HypothesisRow[], id: number): number[] {
   return out;
 }
 
-function HypothesisNode({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
-  const r = node.data.row;
+function HypothesisRowView({
+  node,
+  depth,
+  openIds,
+  setOpen,
+}: {
+  node: TreeNode;
+  depth: number;
+  openIds: Record<string, boolean>;
+  setOpen: (id: string, open: boolean) => void;
+}) {
+  const r = node.row;
   const status = (r.status ?? "proposed").toLowerCase();
   const isRefuted = status === "refuted";
-  const childCount = node.data.children.length;
+  const childCount = node.children.length;
+  const hasChildren = childCount > 0;
+  const isOpen = !!openIds[node.id];
   return (
-    <div
-      ref={dragHandle}
-      style={style}
-      className="flex items-center gap-1 text-xs cursor-pointer"
-      onClick={() => node.toggle()}
-    >
-      <span className="text-neutral-500 w-3 text-center">
-        {node.isLeaf ? "" : node.isOpen ? "▼" : "▶"}
-      </span>
-      <span className={STATUS_COLOR[status] ?? "text-neutral-400"}>●</span>
-      <span className={cn(
-        "text-neutral-200 truncate",
-        isRefuted && "line-through opacity-60",
-      )}>
-        {r.statement || "—"}
-      </span>
-      <span className="ml-auto text-[10px] text-neutral-500 font-mono">
-        {(r.dispatch_count ?? 0) > 0 && `${r.dispatch_count} disp · `}
-        {childCount > 0 && `${childCount} child${childCount === 1 ? "" : "ren"}`}
-        {childCount === 0 && status}
-      </span>
-    </div>
+    <>
+      <div
+        className="flex items-start gap-1 text-xs cursor-pointer py-1 hover:bg-neutral-900/50"
+        style={{ paddingLeft: 8 + depth * 16, paddingRight: 8 }}
+        onClick={() => hasChildren && setOpen(node.id, !isOpen)}
+      >
+        <span className="text-neutral-500 w-3 text-center shrink-0 leading-5">
+          {hasChildren ? (isOpen ? "▼" : "▶") : ""}
+        </span>
+        <span className={cn("shrink-0 leading-5", STATUS_COLOR[status] ?? "text-neutral-400")}>
+          ●
+        </span>
+        <span
+          className={cn(
+            "text-neutral-200 min-w-0 flex-1 break-words leading-5",
+            isRefuted && "line-through opacity-60",
+          )}
+        >
+          {r.statement || "—"}
+        </span>
+        <span className="text-[10px] text-neutral-500 font-mono shrink-0 leading-5 whitespace-nowrap">
+          {(r.dispatch_count ?? 0) > 0 && `${r.dispatch_count} disp · `}
+          {childCount > 0 && `${childCount} child${childCount === 1 ? "" : "ren"}`}
+          {childCount === 0 && status}
+        </span>
+      </div>
+      {isOpen &&
+        node.children.map((c) => (
+          <HypothesisRowView
+            key={c.id}
+            node={c}
+            depth={depth + 1}
+            openIds={openIds}
+            setOpen={setOpen}
+          />
+        ))}
+    </>
   );
 }
 
@@ -117,23 +142,24 @@ export function HypothesesPane({ sessionId }: { sessionId: string }) {
     }
   }, [rows]);
 
+  const setOpen = (id: string, open: boolean) =>
+    setOpenIds((prev) => ({ ...prev, [id]: open }));
+
   if (rows.length === 0) {
     return <p className="p-3 text-xs text-neutral-500">no hypotheses yet</p>;
   }
 
   return (
-    <div className="h-full overflow-auto p-2">
-      <Tree<TreeNode>
-        data={tree}
-        openByDefault={false}
-        initialOpenState={openIds}
-        rowHeight={28}
-        indent={16}
-        width="100%"
-        height={600}
-      >
-        {HypothesisNode}
-      </Tree>
+    <div className="h-full overflow-auto py-1">
+      {tree.map((n) => (
+        <HypothesisRowView
+          key={n.id}
+          node={n}
+          depth={0}
+          openIds={openIds}
+          setOpen={setOpen}
+        />
+      ))}
     </div>
   );
 }

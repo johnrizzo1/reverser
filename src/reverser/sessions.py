@@ -63,6 +63,11 @@ class ConversationEntry:
     turn: int
     timestamp: str   # ISO-8601
     cost: float      # USD spent on this exchange
+    # Structured per-turn events captured during the exchange: thinking,
+    # text, tool_call, tool_result. Used to rebuild a faithful resume
+    # context (so the agent doesn't restart from scratch after a stop).
+    # Each entry is a small dict — see _build_prompt for the shape.
+    events: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -287,7 +292,16 @@ def _from_dict(d: dict) -> SessionSnapshot:
         archived_at=d.get("archived_at"),
         config=SessionConfig(**config_data) if config_data else SessionConfig(profile="general"),
         stats=SessionStats(**stats_data) if stats_data else SessionStats(),
-        conversation=[ConversationEntry(**e) for e in conversation_data],
+        conversation=[
+            ConversationEntry(
+                user=e["user"], agent=e["agent"], turn=e["turn"],
+                timestamp=e["timestamp"], cost=e["cost"],
+                # Old snapshots written before the schema bump don't have
+                # `events`; default to [].
+                events=e.get("events", []),
+            )
+            for e in conversation_data
+        ],
         ui=UIState(**ui_data) if ui_data else UIState(),
         in_flight=InFlightDispatch(**in_flight_data) if in_flight_data else None,
         pid=d.get("pid"),

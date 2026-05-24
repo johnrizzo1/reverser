@@ -10,7 +10,10 @@ class SessionLog:
 
     def __init__(self, path: str):
         self.path = path
-        self._f = open(path, "w")
+        # Append, not truncate — resume reopens the same log path and
+        # losing the prior session's events on every reopen broke
+        # /api/sessions/log/{id} replay for any resumed session.
+        self._f = open(path, "a")
 
     def _write(self, entry: dict):
         entry["ts"] = datetime.now(timezone.utc).isoformat()

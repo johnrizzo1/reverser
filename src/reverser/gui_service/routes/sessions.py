@@ -208,10 +208,26 @@ async def update_budget(request: Request, session_id: str, body: BudgetBody) -> 
 
 @router.post("/api/sessions/{session_id}/sudo", status_code=204)
 async def set_sudo(request: Request, session_id: str, body: SudoBody) -> Response:
+    mgr = _manager(request)
     try:
-        gs = _manager(request).get_active(session_id)
+        gs = mgr.get_active(session_id)
     except KeyError:
-        raise HTTPException(404)
+        # Fall back to writing the process-wide sudo store directly. The
+        # SudoModal renders from the cached `useSessions` row state, which
+        # can lag mgr.active by up to 5 s (post-stop/done/create-new) and
+        # can also report "active" for orphan snapshots after a backend
+        # restart — both windows produce Save clicks against a session_id
+        # that's no longer mgr.active. The password is process-global
+        # (tools/_common._sudo_password), so writing it here works for
+        # whatever GUISession runs next regardless of which row the user
+        # clicked. Still 404 when the session_id is unknown entirely, so
+        # typos can't silently set the global.
+        if not any(r["id"] == session_id for r in mgr.list_sessions()):
+            raise HTTPException(404)
+        from ...tools._common import set_sudo_password
+        set_sudo_password(body.password)
+        os.environ["REVERSER_SUDO_PASSWORD"] = body.password
+        return Response(status_code=204)
     gs.set_sudo(body.password)
     return Response(status_code=204)
 
@@ -250,8 +266,11 @@ def get_conversation(session_id: str, target: str) -> dict:
 def get_session_log(session_id: str, target: str) -> dict:
     """Return filtered session-log events for read-only chat/timeline replay.
 
-    Filters to {thinking, tool_call, tool_result, dispatch}. Caps at 5000
-    events (oldest dropped).
+    Filters to {turn, text, thinking, tool_call, tool_result, dispatch}.
+    Caps at 5000 events (oldest dropped). `turn` and `text` are essential
+    for the read-only view: `turn` lets the frontend bucket per-turn
+    events into the right Turn, and `text` carries the LLM's assistant
+    response (without it the main pane shows only tool chips).
     """
     try:
         snap = load_snapshot(target, session_id)
@@ -263,7 +282,7 @@ def get_session_log(session_id: str, target: str) -> dict:
         raise HTTPException(404, detail=f"session log file not found: {log_path!r}")
 
     raw = load_session_log(log_path)
-    _ALLOWED = {"thinking", "tool_call", "tool_result", "dispatch"}
+    _ALLOWED = {"turn", "text", "thinking", "tool_call", "tool_result", "dispatch"}
 
     out: list[dict] = []
     for entry in raw:
@@ -271,7 +290,11 @@ def get_session_log(session_id: str, target: str) -> dict:
         if kind not in _ALLOWED:
             continue
         ts = entry.get("ts")
-        if kind == "thinking":
+        if kind == "turn":
+            out.append({"kind": "turn", "turn": entry.get("turn", 0), "ts": ts})
+        elif kind == "text":
+            out.append({"kind": "text", "content": entry.get("text", ""), "ts": ts})
+        elif kind == "thinking":
             out.append({"kind": "thinking", "content": entry.get("text", ""), "ts": ts})
         elif kind == "tool_call":
             input_val = entry.get("input")

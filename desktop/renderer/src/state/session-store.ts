@@ -98,6 +98,7 @@ export type HypothesisRow = {
 // Log event shape from /api/sessions/log/{id}.
 type LogEventInput =
   | { kind: "turn"; turn: number; ts: string | null }
+  | { kind: "text"; content: string; ts: string | null }
   | { kind: "thinking"; content: string; ts: string | null }
   | { kind: "tool_call"; name: string; input: string; ts: string | null }
   | { kind: "tool_result"; ok: boolean; preview: string; ts: string | null }
@@ -325,6 +326,10 @@ export const makeSessionStore = () =>
           if (e.kind === "turn") {
             currentTurn = e.turn;
             _getOrCreateTurn(turns, currentTurn);
+          } else if (e.kind === "text") {
+            const t = _getOrCreateTurn(turns, Math.max(1, currentTurn));
+            t.speechDeltas.push(e.content);
+            t.ordering.push({ kind: "speech", index: t.speechDeltas.length - 1 });
           } else if (e.kind === "thinking") {
             const t = _getOrCreateTurn(turns, Math.max(1, currentTurn));
             t.thinkingDeltas.push(e.content);

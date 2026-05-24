@@ -244,6 +244,54 @@ async def test_sudo_makes_password_visible_to_tools(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sudo_disk_only_for_stale_active_snapshot(client, tmp_path):
+    """Regression: POST /sudo must succeed when the snapshot is "active"
+    on disk but no live GUISession exists in mgr.active. The SudoModal
+    is rendered from the cached `useSessions` row's state, which can lag
+    mgr.active by up to 5 s (post-stop/post-create) and can also report
+    "active" for orphan snapshots after a backend restart. Before this
+    fix, the user's Save click 404'd in those windows even though the
+    password belongs on the process-wide tool store, not on any
+    specific GUISession.
+    """
+    from reverser.sessions import (
+        SessionConfig, new_snapshot, save as save_snapshot,
+    )
+    from reverser.tools._common import get_sudo_password, set_sudo_password
+    set_sudo_password(None)
+
+    target = str(tmp_path / "bin")
+    snap = new_snapshot(
+        target=target,
+        log_path=str(tmp_path / "log.jsonl"),
+        config=SessionConfig(
+            profile="general", backend="claude",
+            model=None, api_base=None, budget=5.0, max_turns=50,
+        ),
+        session_id="orphan-1",
+    )
+    snap.state = "active"
+    snap.pid = 99999
+    save_snapshot(snap)
+
+    r = await client.post("/api/sessions/orphan-1/sudo",
+                          headers=HEADERS, json={"password": "hunter2"})
+    assert r.status_code == 204, r.text
+    assert get_sudo_password() == "hunter2"
+    set_sudo_password(None)
+
+
+@pytest.mark.asyncio
+async def test_sudo_unknown_session_returns_404(client):
+    """The orphan-snapshot fallback must still reject session_ids that
+    don't exist anywhere — otherwise a typo'd id would silently set the
+    process-wide sudo password."""
+    r = await client.post("/api/sessions/no-such-id/sudo",
+                          headers=HEADERS, json={"password": "x"})
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_unknown_session_returns_404(client):
     r = await client.post("/api/sessions/missing/messages", headers=HEADERS, json={"text": "x"})
     assert r.status_code == 404

@@ -86,16 +86,26 @@ async def test_log_filters_to_allowed_kinds(client, tmp_path):
     assert r.status_code == 200
     body = r.json()
     kinds = [e["kind"] for e in body["events"]]
-    assert kinds == ["thinking", "tool_call", "tool_result", "dispatch"]
-    e_thinking = body["events"][0]
+    # text and turn must pass through so read-only replay shows the LLM's
+    # assistant responses and buckets per-turn events correctly. Without
+    # them the main pane shows only tool chips and everything piles into
+    # turn 1.
+    assert kinds == [
+        "turn", "text", "thinking", "tool_call", "tool_result", "dispatch",
+    ]
+    e_turn = body["events"][0]
+    assert e_turn["turn"] == 1
+    e_text = body["events"][1]
+    assert e_text["content"] == "hi"
+    e_thinking = body["events"][2]
     assert e_thinking["content"] == "Considering options"
-    e_tc = body["events"][1]
+    e_tc = body["events"][3]
     assert e_tc["name"] == "nmap_scan"
     assert isinstance(e_tc["input"], str)  # serialized for the frontend
-    e_tr = body["events"][2]
+    e_tr = body["events"][4]
     assert e_tr["ok"] is True
     assert e_tr["preview"] == "open 22/tcp"
-    e_dispatch = body["events"][3]
+    e_dispatch = body["events"][5]
     assert e_dispatch["specialty"] == "ad"
     assert e_dispatch["phase"] == "tool_call"
 

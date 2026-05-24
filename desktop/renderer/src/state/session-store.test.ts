@@ -230,4 +230,18 @@ describe("seedFromSessionLog", () => {
     expect(tc.result?.preview).toBe("out");
     expect(store.getState().replayed).toBe(true);
   });
+
+  it("seeds the LLM assistant text into speechDeltas", () => {
+    const store = makeSessionStore();
+    store.getState().seedFromSessionLog([
+      { kind: "turn", turn: 1, ts: null } as any,
+      { kind: "text", content: "Here is the plan: ...", ts: null } as any,
+      { kind: "tool_call", name: "bash", input: "ls", ts: null },
+    ]);
+    const t = store.getState().turns.get(1)!;
+    expect(t.speechDeltas).toEqual(["Here is the plan: ..."]);
+    // Speech must be ordered before the tool chip so the replay reads in
+    // the same order the LLM emitted it.
+    expect(t.ordering.map((e) => e.kind)).toEqual(["speech", "tool"]);
+  });
 });

@@ -81,6 +81,7 @@ def _build_checks() -> dict:
         "ffuf": _check_binary_on_path("ffuf", "ffuf"),
         "gobuster": _check_binary_on_path("gobuster", "gobuster"),
         "nuclei": _check_binary_on_path("nuclei", "nuclei"),
+        "testssl": _check_binary_on_path("testssl.sh", "testssl.sh"),
     }
 
 

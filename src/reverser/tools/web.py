@@ -234,7 +234,14 @@ async def nmap_scan(args: dict) -> dict:
     "misconfigurations, exposures, and more. Returns findings as structured list.",
     {
         "target": {"type": "string", "description": "Target URL (e.g. https://example.com)"},
-        "templates": {"type": "string", "description": "Template tags to use (e.g. 'cves,misconfigurations,exposures')"},
+        "templates": {
+            "type": "string",
+            # Nuclei template tags are singular: `cve` (~4100 templates),
+            # `misconfig` (~960), `exposure` (~1400). The plural forms
+            # match ~0 templates and were the source of empty scans.
+            "description": "Template tags to use (e.g. 'cve,misconfig,exposure'); singular forms",
+            "default": "cve,misconfig,exposure",
+        },
         "severity": {"type": "string", "description": "Filter by severity (e.g. 'critical,high,medium')", "default": "critical,high,medium"},
         "tags": {"type": "string", "description": "Additional tags filter (e.g. 'sqli,xss,rce')"},
         "timeout": {"type": "integer", "description": "Scan timeout in seconds", "default": 120},
@@ -246,7 +253,7 @@ async def nuclei_scan(args: dict) -> dict:
         return auth_err
 
     target = args["target"]
-    templates = args.get("templates")
+    templates = args.get("templates", "cve,misconfig,exposure")
     severity = args.get("severity", "critical,high,medium")
     tags = args.get("tags")
     timeout = args.get("timeout", 120)

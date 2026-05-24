@@ -57,6 +57,50 @@ def test_conversation_entry_required_fields():
     assert e.cost == 0.01
 
 
+def test_conversation_entry_events_default_empty():
+    """Every entry carries an `events` list — the per-turn thinking /
+    tool_call / tool_result records the resumed agent needs to know what
+    happened previously. Defaults to [] so old code paths keep working."""
+    e = ConversationEntry(
+        user="hello", agent="hi", turn=1,
+        timestamp="2026-05-09T14:23:00Z", cost=0.01,
+    )
+    assert e.events == []
+
+
+def test_load_old_snapshot_without_events_field(tmp_path, monkeypatch):
+    """Snapshots written before the events field existed must still load
+    (the field defaults to []). Regression for the rich-context schema
+    bump — without backward compat, all existing snapshots break."""
+    import json
+    from reverser.sessions import load, snapshot_path
+
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    p = snapshot_path("10.10.10.5", "old-session")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    # Hand-written old-shape entry: no `events` key.
+    p.write_text(json.dumps({
+        "session_id": "old-session",
+        "target": "10.10.10.5",
+        "log_path": "logs/old.jsonl",
+        "state": "stopped",
+        "started_at": "2026-05-09T14:23:00",
+        "last_active_at": "2026-05-09T14:23:00",
+        "config": {"profile": "general"},
+        "stats": {"total_cost": 0.0, "turns": 1},
+        "conversation": [
+            {"user": "q", "agent": "a", "turn": 1,
+             "timestamp": "2026-05-09T14:23:00", "cost": 0.01},
+        ],
+        "ui": {},
+        "schema_version": 1,
+    }))
+
+    snap = load("10.10.10.5", "old-session")
+    assert len(snap.conversation) == 1
+    assert snap.conversation[0].events == []
+
+
 def test_ui_state_defaults():
     u = UIState()
     assert u.focused_panel == "chat"

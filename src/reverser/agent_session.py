@@ -1,8 +1,9 @@
 """Agent session manager — runs the agent and streams events to the TUI."""
 
+import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -34,6 +35,11 @@ class Exchange:
     turn: int
     timestamp: str   # ISO-8601
     cost: float      # USD spent on this exchange
+    # Structured per-turn events captured during this exchange. Used by
+    # _build_prompt to give the resumed LLM a faithful record of what
+    # tools ran and what they returned, instead of only the agent's
+    # truncated text.
+    events: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -165,6 +171,11 @@ class AgentSession:
         self._running = False
         self._cancel = False
         self._stop_requested = False
+        # Consumed (once) by send() to inject a KB-consult kickoff into
+        # the first prompt of the session. True for both fresh starts
+        # and resumes — the KB is per-target so even a fresh session
+        # may have prior data worth recalling.
+        self._first_send_pending = True
 
         if log_path is None:
             log_path = session_log_path(binary_path, is_url=self._is_url_target)
@@ -249,6 +260,10 @@ class AgentSession:
         self._running = False
         self._cancel = False
         self._stop_requested = False
+        # First send after this resume gets the kickoff hint (which
+        # additionally mentions "resuming" + prior turn count when
+        # snap.stats.turns > 0). See _build_prompt.
+        self._first_send_pending = True
 
         # Reuse the existing log
         self._log_path = snap.log_path
@@ -397,15 +412,88 @@ When you respond, present your findings clearly with relevant details.
             for e in self.exchanges[-limit:]
         ]
 
+    def _render_exchange_history(self, limit: int = 8) -> str:
+        """Render the last `limit` exchanges as a structured history block.
+
+        Includes tool calls and tool results when the exchange carries
+        `events` (post schema bump), otherwise falls back to the
+        truncated agent-text summary for backward compat with old
+        snapshots. Thinking events are dropped — too noisy for the
+        prompt — but tool I/O is preserved so the resumed LLM doesn't
+        have to rediscover state from scratch.
+        """
+        out: list[str] = []
+        recent = self.exchanges[-limit:]
+        for i, e in enumerate(recent, 1):
+            out.append(f"### Exchange {i} (turn {e.turn})")
+            out.append(f"User: {e.user}")
+            if e.events:
+                for ev in e.events[-60:]:  # per-exchange cap keeps prompt sane
+                    kind = ev.get("kind")
+                    if kind == "tool_call":
+                        out.append(
+                            f"[tool {ev.get('name', '?')}] {ev.get('args', '')[:300]}"
+                        )
+                    elif kind == "tool_result":
+                        marker = "OK" if ev.get("ok") else "ERR"
+                        out.append(f"[{marker}] {ev.get('content', '')[:500]}")
+                    elif kind == "text":
+                        out.append(f"Agent: {ev.get('content', '')[:500]}")
+                    # `thinking` is intentionally dropped.
+            else:
+                out.append(f"Agent: {e.agent}")
+            out.append("")
+        return "\n".join(out)
+
+    def _recent_findings_strings(self, limit: int = 8) -> list[str]:
+        """Legacy projection of exchanges into "User: X\\n\\nAgent: Y"
+        strings. Retained for tests that exercise the old shape; the
+        live prompt builder uses _render_exchange_history instead.
+        """
+        return [
+            f"User: {e.user}\n\nAgent: {e.agent}"
+            for e in self.exchanges[-limit:]
+        ]
+
     def _build_prompt(self, user_message: str) -> str:
         """Build the prompt including conversation context."""
         parts = []
 
-        recent = self._recent_findings_strings()
-        if recent:
-            parts.append("## Previous findings from this session\n")
-            for i, finding in enumerate(recent, 1):
-                parts.append(f"### Exchange {i}\n{finding}\n")
+        if self._first_send_pending:
+            prior_turns = (
+                self._snapshot.stats.turns
+                if getattr(self, "_snapshot", None)
+                else 0
+            )
+            # The KB is per-target, so even a fresh session may have
+            # findings/hypotheses/notes from earlier sessions worth
+            # recalling. Always tell the agent to check; reword for
+            # resume to flag the prior-turn context too.
+            if prior_turns > 0:
+                parts.append(
+                    "## Resuming session\n"
+                    f"You are resuming a session that previously ran "
+                    f"{prior_turns} turn(s). Before deciding what to do "
+                    "next, consult the knowledge base for this target — "
+                    "`kb_show`, `kb_list_hypotheses`, `kb_list_services`, "
+                    "`kb_list_creds`, `kb_list_hosts` — so you don't "
+                    "repeat work you've already done.\n"
+                )
+            else:
+                parts.append(
+                    "## Session start\n"
+                    "Before deciding what to do, consult the knowledge "
+                    "base for prior context on this target — `kb_show`, "
+                    "`kb_list_hypotheses`, `kb_list_services`, "
+                    "`kb_list_creds`, `kb_list_hosts`. The KB persists "
+                    "across sessions, so earlier engagements may have "
+                    "left findings, hypotheses, or notes worth reading "
+                    "before you start any new work.\n"
+                )
+
+        if self.exchanges:
+            parts.append("## Previous session activity\n")
+            parts.append(self._render_exchange_history())
             parts.append("---\n")
 
         parts.append(user_message)
@@ -493,6 +581,7 @@ When you respond, present your findings clearly with relevant details.
             ConversationEntry(
                 user=e.user, agent=e.agent, turn=e.turn,
                 timestamp=e.timestamp, cost=e.cost,
+                events=list(e.events),
             )
             for e in self.exchanges
         ]
@@ -505,92 +594,123 @@ When you respond, present your findings clearly with relevant details.
 
         prompt = self._build_prompt(user_message)
         system_prompt = self._build_system_prompt()
+        # Kickoff hint is one-shot — consume the flag before the loop so
+        # any subsequent send() (this turn or later) sees a normal prompt.
+        self._first_send_pending = False
 
         remaining_budget = max(0.1, self.budget - self.stats.total_cost)
 
-        turn_text_parts = []
+        turn_text_parts: list[str] = []
+        turn_events: list[dict] = []
         last_turn_cost: float = 0.0
 
         try:
-            async for event in self._backend.run(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                max_turns=self.max_turns,
-                max_budget_usd=remaining_budget,
-                allowed_tools=self.profile.tools_allowlist,
-            ):
-                if self._cancel:
-                    break
+            try:
+                async for event in self._backend.run(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    max_turns=self.max_turns,
+                    max_budget_usd=remaining_budget,
+                    allowed_tools=self.profile.tools_allowlist,
+                ):
+                    if self._cancel:
+                        break
 
-                # Log events
-                if event.kind == "turn":
-                    self.stats.turns += 1
-                    self._slog.log_turn(self.stats.turns)
-                    yield AgentEvent(kind="turn", turns=self.stats.turns)
+                    if event.kind == "turn":
+                        self.stats.turns += 1
+                        self._slog.log_turn(self.stats.turns)
+                        yield AgentEvent(kind="turn", turns=self.stats.turns)
 
-                elif event.kind == "thinking":
-                    self._slog.log_thinking(event.content, turn=event.turn or None)
-                    yield event
+                    elif event.kind == "thinking":
+                        self._slog.log_thinking(event.content, turn=event.turn or None)
+                        turn_events.append({
+                            "kind": "thinking",
+                            "content": (event.content or "")[:2000],
+                        })
+                        yield event
 
-                elif event.kind == "tool_call":
-                    self._slog.log_tool_call(
-                        event.tool_name, event.tool_input,
-                        turn=event.turn or None,
-                        tool_use_id=event.tool_use_id or None,
-                    )
-                    yield event
+                    elif event.kind == "tool_call":
+                        self._slog.log_tool_call(
+                            event.tool_name, event.tool_input,
+                            turn=event.turn or None,
+                            tool_use_id=event.tool_use_id or None,
+                        )
+                        args_str = (
+                            event.tool_input
+                            if isinstance(event.tool_input, str)
+                            else json.dumps(event.tool_input)
+                        )
+                        turn_events.append({
+                            "kind": "tool_call",
+                            "name": event.tool_name or "",
+                            "args": (args_str or "")[:2000],
+                        })
+                        yield event
 
-                elif event.kind == "tool_result":
-                    self._slog.log_tool_result(
-                        event.content, is_error=event.is_error,
-                        turn=event.turn or None,
-                        tool_use_id=event.tool_use_id or None,
-                    )
-                    yield event
+                    elif event.kind == "tool_result":
+                        self._slog.log_tool_result(
+                            event.content, is_error=event.is_error,
+                            turn=event.turn or None,
+                            tool_use_id=event.tool_use_id or None,
+                        )
+                        turn_events.append({
+                            "kind": "tool_result",
+                            "ok": not event.is_error,
+                            "content": (event.content or "")[:2000],
+                        })
+                        yield event
 
-                elif event.kind == "text":
-                    self._slog.log_text(event.content, turn=event.turn or None)
-                    turn_text_parts.append(event.content)
-                    yield event
+                    elif event.kind == "text":
+                        self._slog.log_text(event.content, turn=event.turn or None)
+                        turn_text_parts.append(event.content)
+                        turn_events.append({
+                            "kind": "text",
+                            "content": (event.content or "")[:2000],
+                        })
+                        yield event
 
-                elif event.kind == "result":
-                    if event.cost:
-                        self.stats.total_cost += event.cost
-                        last_turn_cost = float(event.cost)
-                    self._slog.log_session_end(
-                        event.content if event.subtype == "success" else None,
-                        event.cost, event.turns, event.subtype,
-                    )
-                    yield event
+                    elif event.kind == "result":
+                        if event.cost:
+                            self.stats.total_cost += event.cost
+                            last_turn_cost = float(event.cost)
+                        self._slog.log_session_end(
+                            event.content if event.subtype == "success" else None,
+                            event.cost, event.turns, event.subtype,
+                        )
+                        yield event
 
-                elif event.kind == "error":
-                    yield event
+                    elif event.kind == "error":
+                        yield event
 
-        except Exception as e:
-            yield AgentEvent(kind="error", content=str(e), is_error=True)
-
+            except Exception as e:
+                yield AgentEvent(kind="error", content=str(e), is_error=True)
         finally:
+            # Runs on normal completion, error, cancel, and aclose(). The
+            # prior layout had the append+autosave AFTER the try/finally —
+            # CancelledError propagated past finally and the partial
+            # exchange was lost, which is why a stopped 44-turn session
+            # could resume with `conversation: []`.
             self._running = False
-
-        # Store exchange for context in future turns
-        full_text = "".join(turn_text_parts)
-        if full_text.strip():
-            summary = full_text[:2000]
-            if len(full_text) > 2000:
-                summary += "\n[... truncated]"
-            self.exchanges.append(Exchange(
-                user=user_message,
-                agent=summary,
-                turn=self.stats.turns,
-                timestamp=_now_iso_session(),
-                cost=last_turn_cost,
-            ))
-
-        # Autosave snapshot at end of every turn (cheap; gives crash recovery)
-        try:
-            self._autosave_snapshot()
-        except Exception:
-            pass  # autosave is best-effort; never block the session loop
+            try:
+                full_text = "".join(turn_text_parts)
+                if full_text.strip() or turn_events:
+                    summary = full_text[:2000]
+                    if len(full_text) > 2000:
+                        summary += "\n[... truncated]"
+                    self.exchanges.append(Exchange(
+                        user=user_message,
+                        agent=summary,
+                        turn=self.stats.turns,
+                        timestamp=_now_iso_session(),
+                        cost=last_turn_cost,
+                        events=turn_events,
+                    ))
+            except Exception:
+                pass  # never block the cancel/stop path
+            try:
+                self._autosave_snapshot()
+            except Exception:
+                pass
 
     def close(self):
         self._slog.close()
