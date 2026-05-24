@@ -180,3 +180,60 @@ def list_targets() -> list[Target]:
             with candidate.open("r", encoding="utf-8") as f:
                 out.append(Target.from_dict(json.load(f)))
     return out
+
+
+def _infer_address_kind(value: str, target_kind: TargetKind) -> AddressKind:
+    if target_kind == "binary":
+        return "binary"
+    if value.startswith(("http://", "https://")):
+        return "url"
+    return "ip"
+
+
+def _sha256_of_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _new_address(value: str, kind: AddressKind, label: Optional[str] = None) -> Address:
+    sha = None
+    if kind == "binary":
+        sha = _sha256_of_file(value)
+    return Address(
+        id=uuid.uuid4().hex,
+        kind=kind,
+        value=value,
+        status="active",
+        added_at=_now_iso(),
+        sha256=sha,
+        label=label,
+    )
+
+
+def create_target(
+    name: str,
+    kind: TargetKind,
+    initial_address: str,
+    *,
+    label: Optional[str] = None,
+) -> Target:
+    """Create and persist a new target with one initial primary address."""
+    directory = _target_dir(name)
+    if (directory / _TARGET_FILE).exists():
+        raise ValueError(f"Target {name!r} already exists")
+    addr_kind = _infer_address_kind(initial_address, kind)
+    address = _new_address(initial_address, addr_kind, label=label)
+    now = _now_iso()
+    target = Target(
+        name=name,
+        kind=kind,
+        addresses=[address],
+        primary_address_id=address.id,
+        created_at=now,
+        updated_at=now,
+    )
+    save_target(target)
+    return target

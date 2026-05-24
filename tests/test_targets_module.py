@@ -152,3 +152,52 @@ def test_list_targets_returns_all_saved(tmp_path, monkeypatch):
         ))
     names = sorted(t.name for t in targets.list_targets())
     assert names == ["alpha", "beta", "gamma"]
+
+
+def test_create_target_with_initial_address(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target(name="dc1", kind="network",
+                              initial_address="10.0.0.5")
+    assert t.name == "dc1"
+    assert t.kind == "network"
+    assert len(t.addresses) == 1
+    assert t.primary_address.value == "10.0.0.5"
+    assert t.primary_address.kind == "ip"
+
+
+def test_create_target_infers_url_kind(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target(name="webapp", kind="network",
+                              initial_address="https://example.com")
+    assert t.primary_address.kind == "url"
+
+
+def test_create_binary_target_computes_sha256(tmp_path, monkeypatch):
+    binary = tmp_path / "sample.bin"
+    binary.write_bytes(b"hello world")
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "data"))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target(name="sample", kind="binary",
+                              initial_address=str(binary))
+    assert t.primary_address.kind == "binary"
+    assert t.primary_address.sha256 is not None
+    assert len(t.primary_address.sha256) == 64  # sha256 hex
+
+
+def test_create_target_rejects_duplicate_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    targets.create_target(name="dc1", kind="network", initial_address="10.0.0.5")
+    with pytest.raises(ValueError, match="already exists"):
+        targets.create_target(name="dc1", kind="network",
+                              initial_address="10.0.0.6")
