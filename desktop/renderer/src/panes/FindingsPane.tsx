@@ -36,7 +36,7 @@ export function FindingsPane({ sessionId }: { sessionId: string }) {
           <FindingRowComponent
             key={f.id}
             target={target}
-            finding={f}
+            finding={{ ...f, severity: f.severity ?? undefined }}
             onClickEvidence={(findingId, startIndex) =>
               setLightbox({ findingId, startIndex })
             }
@@ -45,7 +45,7 @@ export function FindingsPane({ sessionId }: { sessionId: string }) {
       </div>
       {lightbox && (
         <ScreenshotLightboxModal
-          target={target}
+          target={target ?? ""}
           findingId={lightbox.findingId}
           startIndex={lightbox.startIndex}
           open={true}
