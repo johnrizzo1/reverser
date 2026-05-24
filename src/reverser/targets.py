@@ -237,3 +237,68 @@ def create_target(
     )
     save_target(target)
     return target
+
+
+def add_address(
+    target: Target,
+    value: str,
+    kind: AddressKind,
+    *,
+    label: Optional[str] = None,
+    make_primary: bool = False,
+) -> Target:
+    """Add a new address. Returns the updated target (also persisted)."""
+    if any(a.value == value for a in target.addresses):
+        raise ValueError(f"Target {target.name!r} already has address {value!r} (duplicate)")
+    allowed = target._allowed_address_kinds()
+    if kind not in allowed:
+        raise ValueError(
+            f"Target {target.name!r} kind={target.kind!r} rejects address kind={kind!r}"
+        )
+    address = _new_address(value, kind, label=label)
+    updated = dataclasses.replace(
+        target,
+        addresses=[*target.addresses, address],
+        primary_address_id=address.id if make_primary else target.primary_address_id,
+        updated_at=_now_iso(),
+    )
+    save_target(updated)
+    return updated
+
+
+def set_primary(target: Target, address_id: str) -> Target:
+    """Promote an existing active address to primary."""
+    addr = target.get_address(address_id)
+    if addr.status != "active":
+        raise ValueError(
+            f"Cannot set primary to retired address {address_id!r}; re-add it first"
+        )
+    updated = dataclasses.replace(
+        target,
+        primary_address_id=address_id,
+        updated_at=_now_iso(),
+    )
+    save_target(updated)
+    return updated
+
+
+def retire_address(target: Target, address_id: str) -> Target:
+    """Mark an address retired. Refuses to retire the primary or the last active."""
+    addr = target.get_address(address_id)
+    actives = [a for a in target.addresses if a.status == "active"]
+    if len(actives) <= 1:
+        raise ValueError(
+            f"Cannot retire {address_id!r}: it is the last active address on {target.name!r}"
+        )
+    if address_id == target.primary_address_id:
+        raise ValueError(
+            f"Cannot retire primary address {address_id!r}; promote another active address first"
+        )
+    new_addresses = []
+    for a in target.addresses:
+        if a.id == address_id:
+            a = dataclasses.replace(a, status="retired", retired_at=_now_iso())
+        new_addresses.append(a)
+    updated = dataclasses.replace(target, addresses=new_addresses, updated_at=_now_iso())
+    save_target(updated)
+    return updated

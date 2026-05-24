@@ -201,3 +201,82 @@ def test_create_target_rejects_duplicate_name(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="already exists"):
         targets.create_target(name="dc1", kind="network",
                               initial_address="10.0.0.6")
+
+
+def test_add_address_appends_and_optionally_promotes(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("dc1", "network", "10.0.0.5")
+    t = targets.add_address(t, "10.0.0.6", kind="ip", make_primary=True)
+    assert t.primary_address.value == "10.0.0.6"
+    assert len(t.addresses) == 2
+
+
+def test_add_duplicate_address_value_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("dc1", "network", "10.0.0.5")
+    with pytest.raises(ValueError, match="duplicate"):
+        targets.add_address(t, "10.0.0.5", kind="ip")
+
+
+def test_add_wrong_kind_address_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("dc1", "network", "10.0.0.5")
+    with pytest.raises(ValueError, match="kind"):
+        targets.add_address(t, "/tmp/x", kind="binary")
+
+
+def test_set_primary_by_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("dc1", "network", "10.0.0.5")
+    t = targets.add_address(t, "10.0.0.6", kind="ip")
+    new_primary_id = t.addresses[1].id
+    t = targets.set_primary(t, new_primary_id)
+    assert t.primary_address_id == new_primary_id
+
+
+def test_set_primary_to_retired_address_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("dc1", "network", "10.0.0.5")
+    t = targets.add_address(t, "10.0.0.6", kind="ip", make_primary=True)
+    old_id = t.addresses[0].id
+    t = targets.retire_address(t, old_id)
+    with pytest.raises(ValueError, match="retired"):
+        targets.set_primary(t, old_id)
+
+
+def test_retire_only_active_address_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("dc1", "network", "10.0.0.5")
+    only_id = t.addresses[0].id
+    with pytest.raises(ValueError, match="last active"):
+        targets.retire_address(t, only_id)
+
+
+def test_retire_primary_without_promoting_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = targets.create_target("dc1", "network", "10.0.0.5")
+    t = targets.add_address(t, "10.0.0.6", kind="ip")  # not primary
+    primary_id = t.primary_address_id
+    with pytest.raises(ValueError, match="promote"):
+        targets.retire_address(t, primary_id)
