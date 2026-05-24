@@ -121,6 +121,9 @@ def main():
 
     args = parser.parse_args()
 
+    from reverser import paths as _paths
+    _paths.log_resolved_roots()
+
     # Top-level --list-sessions short-circuit (no subcommand required)
     if args.list_sessions:
         _run_list_sessions()

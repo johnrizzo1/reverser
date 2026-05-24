@@ -95,3 +95,21 @@ def test_cache_root_does_not_follow_project_marker(tmp_path, monkeypatch):
 
     expected = Path(platformdirs.user_cache_dir("reverser"))
     assert paths.cache_root() == expected
+
+
+def test_log_resolved_roots_names_each_source(tmp_path, monkeypatch, caplog):
+    import logging
+    explicit = tmp_path / "explicit"
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(explicit))
+    (tmp_path / ".reverser-authorized").touch()
+    monkeypatch.chdir(tmp_path)
+
+    from reverser import paths
+    with caplog.at_level(logging.INFO, logger="reverser.paths"):
+        paths.log_resolved_roots()
+
+    text = caplog.text
+    assert "targets_root" in text
+    assert "env REVERSER_TARGETS_DIR" in text
+    assert "logs_root" in text
+    assert "project marker" in text  # logs follow project marker

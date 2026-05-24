@@ -8,6 +8,7 @@ Three-layer precedence for every root:
 from __future__ import annotations
 
 import functools
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -84,3 +85,21 @@ def _reset_caches_for_tests() -> None:
     targets_root.cache_clear()
     logs_root.cache_clear()
     cache_root.cache_clear()
+
+
+_log = logging.getLogger(__name__)
+
+
+def _source_label(env_var: str, follows_marker: bool) -> str:
+    if os.environ.get(env_var):
+        return f"env {env_var}"
+    if follows_marker and project_root() is not None:
+        return "project marker"
+    return "platform default"
+
+
+def log_resolved_roots() -> None:
+    """Emit one INFO line per resolved root naming the precedence layer used."""
+    _log.info("targets_root=%s (source: %s)", targets_root(), _source_label("REVERSER_TARGETS_DIR", True))
+    _log.info("logs_root=%s (source: %s)", logs_root(), _source_label("REVERSER_LOGS_DIR", True))
+    _log.info("cache_root=%s (source: %s)", cache_root(), _source_label("REVERSER_CACHE_DIR", False))
