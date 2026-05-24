@@ -14,6 +14,7 @@ import { SkillPickerModal } from "@/modals/SkillPickerModal";
 import { SudoModal } from "@/modals/SudoModal";
 import { StopModal } from "@/modals/StopModal";
 import { DoneModal } from "@/modals/DoneModal";
+import { ProfilePickerModal } from "@/modals/ProfilePickerModal";
 import { getSessionStore } from "@/state/session-store";
 
 export function SessionLayout() {
@@ -40,11 +41,13 @@ export function SessionLayout() {
   const [sudoOpen, setSudoOpen] = useState(false);
   const [stopOpen, setStopOpen] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   useEffect(() => {
     if (!isActive) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "F1") { e.preventDefault(); setSkillOpen(true); }
+      if (e.key === "F2") { e.preventDefault(); setProfileOpen(true); }
       if (e.key === "F4") { e.preventDefault(); setSudoOpen(true); }
       if (e.key === "F6") { e.preventDefault(); setStopOpen(true); }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
@@ -113,6 +116,7 @@ export function SessionLayout() {
       {isActive ? (
         <div className="h-9 border-t border-neutral-800 bg-neutral-950/80 px-3 flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={() => setSkillOpen(true)}>Skills (F1)</Button>
+          <Button size="sm" variant="ghost" onClick={() => setProfileOpen(true)}>Profile (F2)</Button>
           <Button size="sm" variant="ghost" onClick={() => setSudoOpen(true)}>Sudo (F4)</Button>
           <Button size="sm" variant="ghost" onClick={() => setStopOpen(true)}>Stop (F6)</Button>
           <Button size="sm" variant="ghost" onClick={() => setDoneOpen(true)}>Mark done</Button>
@@ -131,6 +135,14 @@ export function SessionLayout() {
           <SudoModal sessionId={id} open={sudoOpen} onOpenChange={setSudoOpen} />
           <StopModal sessionId={id} open={stopOpen} onOpenChange={setStopOpen} />
           <DoneModal sessionId={id} open={doneOpen} onOpenChange={setDoneOpen} />
+          <ProfilePickerModal
+            open={profileOpen}
+            onClose={() => setProfileOpen(false)}
+            sessionId={id}
+            target={target ?? ""}
+            currentProfile={row?.profile ?? ""}
+            sessionRunning={isActive}
+          />
         </>
       )}
     </div>
