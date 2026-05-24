@@ -6,10 +6,20 @@ from .tools import mcp_tools_to_openai, extract_tool_result_text
 __all__ = [
     "AgentEvent",
     "Backend",
+    "DEFAULT_API_BASES",
     "mcp_tools_to_openai",
     "extract_tool_result_text",
     "create_backend",
 ]
+
+
+# Default api_base per backend key. Shared between create_backend()
+# (the runtime dispatcher) and the gui_service models route.
+DEFAULT_API_BASES: dict[str, str] = {
+    "ollama": "http://localhost:11434/v1",
+    "lmstudio": "http://localhost:1234/v1",
+}
+_GENERIC_DEFAULT_API_BASE = "http://localhost:8000/v1"
 
 
 def create_backend(
@@ -39,12 +49,7 @@ def create_backend(
         raise ValueError(f"--model is required for backend '{name}'")
 
     if api_base is None:
-        if name == "ollama":
-            api_base = "http://localhost:11434/v1"
-        elif name == "lmstudio":
-            api_base = "http://localhost:1234/v1"
-        else:
-            api_base = "http://localhost:8000/v1"
+        api_base = DEFAULT_API_BASES.get(name, _GENERIC_DEFAULT_API_BASE)
 
     from .openai_compat import OpenAICompatBackend
     return OpenAICompatBackend(

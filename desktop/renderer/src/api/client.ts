@@ -68,6 +68,9 @@ export type Backend = {
 
 export type BackendsResponse = { backends: Backend[] };
 
+export type BackendModel = { id: string };
+export type BackendModelsResponse = { models: BackendModel[] };
+
 // ---- Sessions ----
 
 export type SessionRow = {

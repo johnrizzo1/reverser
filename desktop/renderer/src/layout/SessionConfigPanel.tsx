@@ -4,6 +4,7 @@ import { useBackends, useProfiles, useUpdateSessionConfig } from "@/api/queries"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ModelSelector } from "@/components/ModelSelector";
 
 type FormState = {
   backend: string;
@@ -118,12 +119,22 @@ export function SessionConfigPanel({ session }: { session: SessionRow }) {
       ) : <span className="text-neutral-300 font-mono">{session.backend}</span>)}
 
       {_row("model", editable ? (
-        <Input
-          value={form.model}
-          onChange={(e) => setForm({ ...form, model: e.target.value })}
-          placeholder="(optional)"
-          className="h-7 text-xs"
-        />
+        form.backend === "lmstudio" || form.backend === "ollama" ? (
+          <ModelSelector
+            backend={form.backend}
+            apiBase={form.api_base}
+            value={form.model}
+            onChange={(v) => setForm({ ...form, model: v })}
+            placeholder="(optional)"
+          />
+        ) : (
+          <Input
+            value={form.model}
+            onChange={(e) => setForm({ ...form, model: e.target.value })}
+            placeholder="(optional)"
+            className="h-7 text-xs"
+          />
+        )
       ) : <span className="text-neutral-300 font-mono">{session.model ?? "—"}</span>)}
 
       {_row("api_base", editable ? (

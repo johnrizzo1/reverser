@@ -4,6 +4,7 @@ import {
   type HealthResponse,
   type ProfilesResponse,
   type BackendsResponse,
+  type BackendModelsResponse,
   type SessionsResponse,
   type CreateSessionRequest,
   type CreateSessionResponse,
@@ -51,6 +52,20 @@ export function useBackends() {
     queryFn: () => api.get<BackendsResponse>("/api/backends"),
     enabled: ready,
     staleTime: 60_000,
+  });
+}
+
+export function useBackendModels(backend: string, apiBase: string) {
+  const ready = useReady();
+  const supports = backend === "lmstudio" || backend === "ollama";
+  const qs = apiBase ? `?api_base=${encodeURIComponent(apiBase)}` : "";
+  return useQuery({
+    queryKey: ["backend-models", backend, apiBase],
+    queryFn: () =>
+      api.get<BackendModelsResponse>(`/api/backends/${backend}/models${qs}`),
+    enabled: ready && supports,
+    staleTime: 30_000,
+    retry: false,
   });
 }
 

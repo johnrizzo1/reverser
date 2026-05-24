@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ModelSelector } from "@/components/ModelSelector";
 import { AuthGateModal } from "@/modals/AuthGateModal";
 import { ApiError } from "@/api/client";
 
@@ -105,7 +106,17 @@ export function NewEngagement() {
             </div>
             <div>
               <label className="block text-xs text-neutral-500 mb-1">Model (optional for Claude)</label>
-              <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. qwen3.5:35b" />
+              {backend === "lmstudio" || backend === "ollama" ? (
+                <ModelSelector
+                  backend={backend}
+                  apiBase={apiBase}
+                  value={model}
+                  onChange={setModel}
+                  placeholder="e.g. qwen3.5:35b"
+                />
+              ) : (
+                <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. qwen3.5:35b" />
+              )}
             </div>
             <div>
               <label className="block text-xs text-neutral-500 mb-1">API base URL (optional)</label>
