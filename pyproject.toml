@@ -13,6 +13,7 @@ dependencies = [
     "click",
     "textual>=1.0.0",
     "openai>=1.0.0",
+    "platformdirs>=4.0.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
 ]
