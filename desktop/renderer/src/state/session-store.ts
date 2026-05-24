@@ -97,10 +97,12 @@ export type HypothesisRow = {
 
 // Log event shape from /api/sessions/log/{id}.
 type LogEventInput =
+  | { kind: "turn"; turn: number; ts: string | null }
   | { kind: "thinking"; content: string; ts: string | null }
   | { kind: "tool_call"; name: string; input: string; ts: string | null }
   | { kind: "tool_result"; ok: boolean; preview: string; ts: string | null }
-  | { kind: "dispatch"; specialty: string; phase: string; content: string; ts: string | null };
+  | { kind: "dispatch"; specialty: string; phase: string; content: string; ts: string | null;
+      dispatch_id?: string; sub_turn?: number };
 
 export type SessionState = {
   status: "idle" | "running" | "awaiting_input" | "stopped" | "completed" | "error";
@@ -156,7 +158,14 @@ export const makeSessionStore = () =>
   create<SessionState & Actions>((set) => ({
     ..._initialState(),
     reset: () => set(_initialState()),
-    appendUserMessage: () => set({}),
+    appendUserMessage: (text) =>
+      set((s) => {
+        const targetTurn = s.currentTurn + 1;
+        const turns = new Map(s.turns);
+        const t = _getOrCreateTurn(turns, targetTurn);
+        turns.set(targetTurn, { ...t, userMessage: text });
+        return { turns };
+      }),
     ingest: (frame) =>
       set((s) => {
         switch (frame.type) {
@@ -306,7 +315,62 @@ export const makeSessionStore = () =>
             return {};
         }
       }),
-    seedFromSessionLog: () => set({ replayed: true }),
+    seedFromSessionLog: (events) =>
+      set(() => {
+        const turns = new Map<number, Turn>();
+        let currentTurn = 0;
+        let synthCounter = 0;
+        let lastToolCallId: string | null = null;
+        for (const e of events) {
+          if (e.kind === "turn") {
+            currentTurn = e.turn;
+            _getOrCreateTurn(turns, currentTurn);
+          } else if (e.kind === "thinking") {
+            const t = _getOrCreateTurn(turns, Math.max(1, currentTurn));
+            t.thinkingDeltas.push(e.content);
+            t.ordering.push({ kind: "thinking", index: t.thinkingDeltas.length - 1 });
+          } else if (e.kind === "tool_call") {
+            const t = _getOrCreateTurn(turns, Math.max(1, currentTurn));
+            const id = `syn-${e.name}-${synthCounter++}`;
+            t.toolCalls.set(id, { id, name: e.name, args: e.input });
+            t.ordering.push({ kind: "tool", id });
+            lastToolCallId = id;
+          } else if (e.kind === "tool_result") {
+            const t = _getOrCreateTurn(turns, Math.max(1, currentTurn));
+            if (lastToolCallId) {
+              const tc = t.toolCalls.get(lastToolCallId);
+              if (tc) {
+                t.toolCalls.set(lastToolCallId, {
+                  ...tc, result: { ok: e.ok, preview: e.preview },
+                });
+              }
+              lastToolCallId = null;
+            }
+          } else if (e.kind === "dispatch") {
+            const t = _getOrCreateTurn(turns, Math.max(1, currentTurn));
+            const dispatchId = e.dispatch_id ?? `syn-disp-${synthCounter++}`;
+            let d = t.dispatches.get(dispatchId);
+            if (!d) {
+              d = { id: dispatchId, specialty: e.specialty, subGoal: "",
+                    status: "running", subTurns: new Map() };
+              t.dispatches.set(dispatchId, d);
+              t.ordering.push({ kind: "dispatch", id: dispatchId });
+            }
+            const subTurn = e.sub_turn ?? 1;
+            let st = d.subTurns.get(subTurn);
+            if (!st) {
+              st = { thinkingDeltas: [], speechDeltas: [], toolCalls: [], toolResults: [] };
+              d.subTurns.set(subTurn, st);
+            }
+            if (e.phase === "thinking") st.thinkingDeltas.push(e.content);
+            else if (e.phase === "text") st.speechDeltas.push(e.content);
+            else if (e.phase === "tool_call") st.toolCalls.push({ name: "", content: e.content });
+            else if (e.phase === "tool_result") st.toolResults.push({ ok: true, content: e.content });
+            else if (e.phase === "tool_error") st.toolResults.push({ ok: false, content: e.content });
+          }
+        }
+        return { turns, currentTurn, replayed: true };
+      }),
     seedHypotheses: (rows) => set(() => {
       const m = new Map<number, HypothesisRow>();
       for (const r of rows) m.set(r.id, r);

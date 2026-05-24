@@ -198,3 +198,36 @@ describe("ingest hypothesis/finding frames", () => {
     expect(store.getState().findings.get(1)?.finding).toBe("open port 22");
   });
 });
+
+describe("appendUserMessage", () => {
+  it("attaches text to the next turn's userMessage", () => {
+    const store = makeSessionStore();
+    store.getState().appendUserMessage("what does this do");
+    expect(store.getState().turns.get(1)?.userMessage).toBe("what does this do");
+  });
+
+  it("attaches to currentTurn+1 when a turn is already in flight", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "status", phase: "running", turns: 1 });
+    store.getState().appendUserMessage("follow-up");
+    expect(store.getState().turns.get(2)?.userMessage).toBe("follow-up");
+  });
+});
+
+describe("seedFromSessionLog", () => {
+  it("rebuilds turns from a log", () => {
+    const store = makeSessionStore();
+    store.getState().seedFromSessionLog([
+      { kind: "turn", turn: 1, ts: null } as any,
+      { kind: "thinking", content: "hmm", ts: null },
+      { kind: "tool_call", name: "bash", input: "ls", ts: null },
+      { kind: "tool_result", ok: true, preview: "out", ts: null },
+    ]);
+    const t = store.getState().turns.get(1)!;
+    expect(t.thinkingDeltas).toEqual(["hmm"]);
+    expect(t.toolCalls.size).toBe(1);
+    const tc = [...t.toolCalls.values()][0];
+    expect(tc.result?.preview).toBe("out");
+    expect(store.getState().replayed).toBe(true);
+  });
+});
