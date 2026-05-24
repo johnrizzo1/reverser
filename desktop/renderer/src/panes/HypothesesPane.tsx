@@ -95,10 +95,9 @@ export function HypothesesPane({ sessionId }: { sessionId: string }) {
   const kb = useTargetKB(target);
 
   useEffect(() => {
-    if (hypothesesMap.size > 0) return;
     const kbHypotheses = (kb.data?.hypotheses ?? []) as HypothesisRow[];
     if (kbHypotheses.length > 0) seedHypotheses(kbHypotheses);
-  }, [hypothesesMap.size, kb.data, seedHypotheses]);
+  }, [kb.data, seedHypotheses]);
 
   const rows = useMemo(() => Array.from(hypothesesMap.values()), [hypothesesMap]);
   const tree = useMemo(() => _buildTree(rows), [rows]);
