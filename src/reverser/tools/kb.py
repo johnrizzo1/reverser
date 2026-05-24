@@ -303,6 +303,11 @@ async def kb_add_finding(args: dict) -> dict:
     except ValueError as e:
         return format_error(str(e))
     fid = for_target(target).record_finding(finding)
+    from ..gui_service.kb_emitter import emit_finding
+    from dataclasses import asdict, is_dataclass
+    row = asdict(finding) if is_dataclass(finding) else dict(finding)
+    row["id"] = fid
+    emit_finding("create", row)
     return format_tool_result(f"Finding added: id={fid} title={finding.title!r}")
 
 
@@ -362,6 +367,9 @@ async def kb_add_hypothesis(args: dict) -> dict:
         confidence=args.get("confidence"),
         tags=args.get("tags"),
     )
+    from ..gui_service.kb_emitter import emit_hypothesis
+    if h is not None:
+        emit_hypothesis("create", h)
     return format_tool_result(
         f"Hypothesis #{h.id} added (status={h.status}, confidence={h.confidence}): "
         f"{h.statement}"
@@ -458,6 +466,12 @@ async def kb_update_hypothesis(args: dict) -> dict:
         if k in args
     }
     kb.update_hypothesis(args["id"], **update_kwargs)
+    # Emit a hypothesis WS frame so the renderer's Hypotheses pane
+    # updates live. Best-effort; no-op when no current session.
+    from ..gui_service.kb_emitter import emit_hypothesis
+    updated = kb.get_hypothesis(args["id"])
+    if updated is not None:
+        emit_hypothesis("update", updated)
     return format_tool_result(
         f"Hypothesis #{args['id']} updated: {sorted(update_kwargs.keys())}"
     )
