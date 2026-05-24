@@ -15,27 +15,30 @@ from .event_bus import EventBus
 
 
 def _event_to_frame(ev: AgentEvent) -> dict[str, Any] | None:
-    """Translate a single AgentEvent into a WS frame.
-
-    Returns None for events we deliberately do not surface to the UI.
-    """
+    """Translate a single AgentEvent into a WS frame."""
     if ev.kind == "text":
-        return {"type": "text", "role": "assistant", "delta": ev.content}
+        return {"type": "text", "role": "assistant", "delta": ev.content, "turn": ev.turn}
     if ev.kind == "thinking":
-        return {"type": "thinking", "delta": ev.content, "redacted": False}
+        return {"type": "thinking", "delta": ev.content, "redacted": False, "turn": ev.turn}
     if ev.kind == "tool_call":
-        return {"type": "tool_call", "name": ev.tool_name, "args": ev.tool_input}
+        return {
+            "type": "tool_call",
+            "name": ev.tool_name,
+            "args": ev.tool_input,
+            "tool_use_id": ev.tool_use_id,
+            "turn": ev.turn,
+        }
     if ev.kind == "tool_result":
         return {
             "type": "tool_result",
             "ok": not ev.is_error,
             "preview": (ev.content or "")[:4096],
+            "tool_use_id": ev.tool_use_id,
+            "turn": ev.turn,
         }
     if ev.kind == "turn":
         return {"type": "status", "phase": "running", "turns": ev.turns}
     if ev.kind == "result":
-        # Surface separately as both a budget update and a terminal status
-        # so the UI can react to either.
         return {"type": "status", "phase": "awaiting_input",
                 "subtype": ev.subtype, "cost": ev.cost, "turns": ev.turns}
     if ev.kind == "error":
@@ -87,6 +90,7 @@ class GUISession:
         # each dispatched specialist is doing in real time. The TUI hooks
         # the same callback at tui/app.py for the same purpose.
         self._agent.on_dispatch_event = self._on_dispatch_event
+        self._agent.on_kb_event = self._on_kb_event
 
     def _on_dispatch_event(
         self,
@@ -98,21 +102,42 @@ class GUISession:
     ) -> None:
         """Publish a dispatch sub-agent event to the bus.
 
-        Called synchronously from inside the dispatch tool's async loop, so
-        we are already on the event-loop thread and can schedule the publish
-        as a task. The publish itself is fire-and-forget — the EventBus
-        drops to the oldest queued frame if a subscriber is slow.
+        kind is one of: "start", "end", "text", "thinking", "tool_call",
+        "tool_result", "tool_error". For "start"/"end", `content` is a JSON
+        string of structured payload; for other kinds it's free-form text.
         """
-        frame = {
+        frame: dict[str, Any] = {
             "type": "dispatch",
-            "specialty": specialty,
+            "dispatch_id": dispatch_id,
+            "turn": self._agent.stats.turns,
             "phase": kind,
-            "content": content,
+            "specialty": specialty,
         }
+        if kind in ("start", "end"):
+            try:
+                import json
+                payload = json.loads(content) if content else {}
+                frame.update(payload)
+            except Exception:
+                pass
+        else:
+            frame["sub_turn"] = sub_turn
+            frame["content"] = content
+
         try:
             asyncio.create_task(self._bus.publish(self.session_id, frame))
         except RuntimeError:
-            # No running loop (shouldn't happen in normal flow) — drop.
+            pass
+
+    def _on_kb_event(self, kind: str, payload: dict) -> None:
+        """Publish a KB write to the bus.
+
+        kind is "hypothesis" or "finding"; payload is {"action", "row"}.
+        """
+        frame = {"type": kind, **payload}
+        try:
+            asyncio.create_task(self._bus.publish(self.session_id, frame))
+        except RuntimeError:
             pass
 
     @property

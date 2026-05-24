@@ -179,9 +179,47 @@ async def test_dispatch_events_publish_to_bus(bus, gui_session):
     dispatch_frames = [f for f in frames if f.get("type") == "dispatch"]
     assert len(dispatch_frames) == 3, f"expected 3 dispatch frames, got: {frames}"
     assert dispatch_frames[0]["specialty"] == "ad"
+    assert dispatch_frames[0]["dispatch_id"] == "abc123"
     assert dispatch_frames[0]["phase"] == "thinking"
     assert dispatch_frames[0]["content"] == "scanning hosts..."
+    assert dispatch_frames[0]["sub_turn"] == 1
+    assert "turn" in dispatch_frames[0]
     assert dispatch_frames[1]["phase"] == "tool_call"
     assert dispatch_frames[1]["content"] == "nmap -sV 10.0.0.0/24"
     assert dispatch_frames[2]["phase"] == "tool_result"
     assert dispatch_frames[2]["content"] == "open ports: 22, 80"
+
+
+def test_text_frame_has_turn():
+    from reverser.backends.base import AgentEvent
+    from reverser.gui_service.session_adapter import _event_to_frame
+    ev = AgentEvent(kind="text", content="hi", turn=3)
+    frame = _event_to_frame(ev)
+    assert frame == {"type": "text", "role": "assistant", "delta": "hi", "turn": 3}
+
+
+def test_tool_call_frame_has_tool_use_id_and_turn():
+    from reverser.backends.base import AgentEvent
+    from reverser.gui_service.session_adapter import _event_to_frame
+    ev = AgentEvent(
+        kind="tool_call", tool_name="bash", tool_input="ls",
+        tool_use_id="tool_abc", turn=2,
+    )
+    frame = _event_to_frame(ev)
+    assert frame["type"] == "tool_call"
+    assert frame["tool_use_id"] == "tool_abc"
+    assert frame["turn"] == 2
+
+
+def test_tool_result_frame_has_tool_use_id_and_turn():
+    from reverser.backends.base import AgentEvent
+    from reverser.gui_service.session_adapter import _event_to_frame
+    ev = AgentEvent(
+        kind="tool_result", content="ok", is_error=False,
+        tool_use_id="tool_abc", turn=2,
+    )
+    frame = _event_to_frame(ev)
+    assert frame["type"] == "tool_result"
+    assert frame["tool_use_id"] == "tool_abc"
+    assert frame["turn"] == 2
+    assert frame["ok"] is True
