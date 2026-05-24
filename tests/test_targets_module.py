@@ -112,3 +112,43 @@ def test_target_primary_address_property():
                created_at="2026-05-24T00:00:00Z",
                updated_at="2026-05-24T00:00:00Z")
     assert t.primary_address == primary
+
+
+def test_save_and_load_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    t = Target(name="dc1", kind="network",
+               addresses=[_addr(id="a1", value="10.0.0.1")],
+               primary_address_id="a1",
+               created_at="2026-05-24T00:00:00Z",
+               updated_at="2026-05-24T00:00:00Z")
+    targets.save_target(t)
+    loaded = targets.load_target("dc1")
+    assert loaded == t
+
+
+def test_load_unknown_target_raises(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+    with pytest.raises(FileNotFoundError):
+        targets.load_target("nope")
+
+
+def test_list_targets_returns_all_saved(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths, targets
+    paths._reset_caches_for_tests()
+
+    for name in ("alpha", "beta", "gamma"):
+        targets.save_target(Target(
+            name=name, kind="network",
+            addresses=[_addr(id=f"{name}-1", value=f"10.0.0.{ord(name[0])}")],
+            primary_address_id=f"{name}-1",
+            created_at="2026-05-24T00:00:00Z",
+            updated_at="2026-05-24T00:00:00Z",
+        ))
+    names = sorted(t.name for t in targets.list_targets())
+    assert names == ["alpha", "beta", "gamma"]

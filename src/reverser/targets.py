@@ -138,3 +138,45 @@ class Target:
             updated_at=payload["updated_at"],
             notes=payload.get("notes"),
         )
+
+
+from reverser.paths import targets_root
+from reverser.sessions import target_key  # reuse existing slug logic
+
+_TARGET_FILE = "target.json"
+
+
+def _target_dir(name: str) -> Path:
+    return targets_root() / target_key(name)
+
+
+def load_target(name: str) -> Target:
+    path = _target_dir(name) / _TARGET_FILE
+    if not path.exists():
+        raise FileNotFoundError(f"No target named {name!r} at {path}")
+    with path.open("r", encoding="utf-8") as f:
+        return Target.from_dict(json.load(f))
+
+
+def save_target(target: Target) -> None:
+    target._validate()  # final defensive check
+    directory = _target_dir(target.name)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / _TARGET_FILE
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(target.to_dict(), f, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def list_targets() -> list[Target]:
+    root = targets_root()
+    if not root.exists():
+        return []
+    out: list[Target] = []
+    for entry in sorted(root.iterdir()):
+        candidate = entry / _TARGET_FILE
+        if candidate.is_file():
+            with candidate.open("r", encoding="utf-8") as f:
+                out.append(Target.from_dict(json.load(f)))
+    return out
