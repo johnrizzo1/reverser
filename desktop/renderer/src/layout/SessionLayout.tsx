@@ -102,7 +102,7 @@ export function SessionLayout() {
               </div>
               <div className="flex-1 min-h-0 overflow-auto">
                 {rightTab === "hypotheses" && <HypothesesPane sessionId={id} />}
-                {rightTab === "findings" && <FindingsPane target={target} />}
+                {rightTab === "findings" && <FindingsPane sessionId={id} />}
                 {rightTab === "kb" && <KBPane target={target} />}
               </div>
             </div>
