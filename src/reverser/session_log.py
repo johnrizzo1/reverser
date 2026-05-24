@@ -4,6 +4,8 @@ import json
 import os
 from datetime import datetime, timezone
 
+from reverser.paths import logs_root
+
 
 class SessionLog:
     """Append-only JSONL logger that captures the full agent session."""
@@ -138,11 +140,8 @@ def session_log_path(binary_path: str, log_dir: str | None = None, is_url: bool 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{binary_name}_{ts}.jsonl"
 
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-        return os.path.join(log_dir, filename)
+    if log_dir is None:
+        log_dir = str(logs_root())
 
-    # Default: logs/ directory in project root
-    default_dir = os.path.join(os.getcwd(), "logs")
-    os.makedirs(default_dir, exist_ok=True)
-    return os.path.join(default_dir, filename)
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, filename)
