@@ -26,17 +26,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from reverser.paths import targets_root
+
 
 # ── Path helpers ────────────────────────────────────────────────────
 
 
-def _targets_root() -> Path:
-    return Path(os.environ.get("REVERSER_TARGETS_DIR", "targets"))
-
-
 def _evidence_dir(target: str, finding_id: int) -> Path:
     """Returns targets/<target>/findings/<finding_id>/, created if absent."""
-    p = _targets_root() / target / "findings" / str(finding_id)
+    p = targets_root() / target / "findings" / str(finding_id)
     p.mkdir(parents=True, exist_ok=True)
     return p
 

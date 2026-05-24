@@ -12,8 +12,10 @@ import pytest
 
 def test_targets_root_from_env(tmp_path, monkeypatch):
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
-    from reverser.tools.web_browser import _targets_root
-    assert _targets_root() == tmp_path
+    from reverser import paths
+    paths._reset_caches_for_tests()
+    from reverser.paths import targets_root
+    assert targets_root() == tmp_path
 
 
 def test_evidence_dir_creates_findings_subdir(tmp_targets_dir):
