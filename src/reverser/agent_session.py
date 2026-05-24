@@ -93,23 +93,17 @@ class AgentSession:
         from .sessions import current_session
         current_session.set(self)
 
-    def emit_dispatch_event(self, *args) -> None:
-        """Surface a dispatch sub-agent event to the host.
-
-        Accepts either 5 args (specialty, dispatch_id, sub_turn, kind, content)
-        — the current signature — or 3 args (specialty, kind, content) as a
-        transitional shim while callers are migrated. Remove the 3-arg shim
-        once Task 4 lands.
-        """
+    def emit_dispatch_event(
+        self,
+        specialty: str,
+        dispatch_id: str,
+        sub_turn: int,
+        kind: str,
+        content: str,
+    ) -> None:
+        """Surface a dispatch_specialist sub-agent event to the host."""
         cb = self.on_dispatch_event
         if cb is None:
-            return
-        if len(args) == 5:
-            specialty, dispatch_id, sub_turn, kind, content = args
-        elif len(args) == 3:
-            specialty, kind, content = args
-            dispatch_id, sub_turn = "", 0
-        else:
             return
         try:
             cb(specialty, dispatch_id, sub_turn, kind, content)

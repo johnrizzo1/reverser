@@ -71,20 +71,34 @@ class SessionLog:
             "turns": turns,
         })
 
-    def log_dispatch_event(self, specialty: str, kind: str, content: str):
+    def log_dispatch_event(
+        self,
+        specialty: str,
+        kind: str,
+        content: str,
+        *,
+        dispatch_id: str | None = None,
+        sub_turn: int | None = None,
+    ):
         """Persist a dispatch_specialist sub-agent event so read-only
         session replay can render it.
 
         Specialty: 'ad', 'webpentest', etc.
-        Kind: 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'tool_error' | 'start' | 'result' | 'error'.
+        Kind: 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'tool_error' | 'start' | 'end' | 'result' | 'error'.
         Content: truncated to 4096 chars.
+        dispatch_id and sub_turn are optional; included in the record when provided.
         """
-        self._write({
+        record: dict = {
             "type": "dispatch",
             "specialty": specialty,
             "kind": kind,
             "content": (content or "")[:4096],
-        })
+        }
+        if dispatch_id is not None:
+            record["dispatch_id"] = dispatch_id
+        if sub_turn is not None:
+            record["sub_turn"] = sub_turn
+        self._write(record)
 
     def close(self):
         self._f.close()

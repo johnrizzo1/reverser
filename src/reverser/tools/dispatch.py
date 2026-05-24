@@ -316,17 +316,59 @@ async def dispatch_specialist(args: dict) -> dict:
     # Helper to push a sub-agent event up to the TUI (no-op when no session
     # or no callback is registered). Truncate tool_result bodies to keep the
     # chat log readable; the full body is still in the session log.
+    import uuid as _uuid
+    import json as _json
+    dispatch_id = _uuid.uuid4().hex
+    _sub_turn = [0]
+
     def _emit(kind: str, content: str) -> None:
         if sess is None:
             return
-        # Persist for read-only replay (Phase 3a). Best-effort; the in-process
-        # callback below drives the live UI either way.
         try:
-            sess._slog.log_dispatch_event(specialty, kind, content)
+            sess._slog.log_dispatch_event(
+                specialty, kind, content,
+                dispatch_id=dispatch_id, sub_turn=_sub_turn[0],
+            )
+        except TypeError:
+            try:
+                sess._slog.log_dispatch_event(specialty, kind, content)
+            except Exception:
+                pass
         except Exception:
             pass
         try:
-            sess.emit_dispatch_event(specialty, kind, content)
+            sess.emit_dispatch_event(
+                specialty, dispatch_id, _sub_turn[0], kind, content,
+            )
+        except Exception:
+            pass
+
+    def _emit_start() -> None:
+        if sess is None:
+            return
+        try:
+            sess.emit_dispatch_event(
+                specialty, dispatch_id, 0, "start",
+                _json.dumps({
+                    "hypothesis_id": hypothesis_id,
+                    "sub_goal": sub_goal,
+                }),
+            )
+        except Exception:
+            pass
+
+    def _emit_end(status: str, cost: float, turns_consumed: int) -> None:
+        if sess is None:
+            return
+        try:
+            sess.emit_dispatch_event(
+                specialty, dispatch_id, 0, "end",
+                _json.dumps({
+                    "status": status,
+                    "cost": cost,
+                    "turns": turns_consumed,
+                }),
+            )
         except Exception:
             pass
 
@@ -355,12 +397,14 @@ async def dispatch_specialist(args: dict) -> dict:
         text = text.strip()
         return text if len(text) <= 400 else text[:400] + "…"
 
+    _emit_start()
     try:
         async for message in query(prompt=sub_goal, options=options):
             if isinstance(message, AssistantMessage):
+                _sub_turn[0] += 1
                 for block in message.content:
                     if isinstance(block, TextBlock):
-                        report_text = block.text  # last text block wins
+                        report_text = block.text
                         if block.text.strip():
                             _emit("text", block.text)
                     elif isinstance(block, ThinkingBlock):
@@ -375,9 +419,6 @@ async def dispatch_specialist(args: dict) -> dict:
                             f"{tool_name} {_summarize_tool_input(tool_input)}",
                         )
             elif isinstance(message, UserMessage):
-                # Sub-agent's tool results come back as UserMessage with
-                # ToolResultBlock content. Surface them so the user sees
-                # what the specialist learned.
                 content = getattr(message, "content", None)
                 if isinstance(content, list):
                     for block in content:
@@ -406,7 +447,7 @@ async def dispatch_specialist(args: dict) -> dict:
         if not report_text:
             report_text = f"(dispatch failed: {error_msg})"
     finally:
-        # Clear in_flight whether the dispatch succeeded, errored, or was cancelled
+        _emit_end(status, cost_usd, turns_consumed)
         if sess is not None:
             sess._snapshot.in_flight = None
             try:

@@ -37,13 +37,3 @@ def test_kb_event_no_callback_is_safe(session):
 def test_kb_event_callback_exception_swallowed(session):
     session.on_kb_event = MagicMock(side_effect=RuntimeError("ui crashed"))
     session.emit_kb_event("hypothesis", {})  # no raise
-
-
-def test_emit_dispatch_event_3_arg_transitional_shim(session):
-    """Existing dispatch tool callers pass (specialty, kind, content);
-    the shim normalizes to the 5-arg form with empty dispatch_id and sub_turn=0.
-    Remove this test when Task 4 retires the 3-arg form."""
-    spy = MagicMock()
-    session.on_dispatch_event = spy
-    session.emit_dispatch_event("webpentest", "thinking", "hmm")
-    spy.assert_called_once_with("webpentest", "", 0, "thinking", "hmm")

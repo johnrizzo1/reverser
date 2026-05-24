@@ -169,9 +169,9 @@ async def test_dispatch_events_publish_to_bus(bus, gui_session):
     frames: list[dict] = []
     async with bus.subscribe(gui_session.session_id) as q:
         # Simulate the dispatch tool firing events via the AgentSession hook.
-        gui_session._agent.emit_dispatch_event("ad", "thinking", "scanning hosts...")
-        gui_session._agent.emit_dispatch_event("ad", "tool_call", "nmap -sV 10.0.0.0/24")
-        gui_session._agent.emit_dispatch_event("ad", "tool_result", "open ports: 22, 80")
+        gui_session._agent.emit_dispatch_event("ad", "abc123", 1, "thinking", "scanning hosts...")
+        gui_session._agent.emit_dispatch_event("ad", "abc123", 1, "tool_call", "nmap -sV 10.0.0.0/24")
+        gui_session._agent.emit_dispatch_event("ad", "abc123", 1, "tool_result", "open ports: 22, 80")
 
         for _ in range(3):
             frames.append(await asyncio.wait_for(q.get(), timeout=1.0))
