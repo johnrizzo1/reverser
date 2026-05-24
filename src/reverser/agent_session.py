@@ -465,12 +465,6 @@ When you respond, present your findings clearly with relevant details.
         self.stats.max_turns = int(new_max_turns)
         self._snapshot.config.max_turns = int(new_max_turns)
         save_snapshot(self._snapshot)
-        try:
-            self._slog.log_session_completed(
-                cost=self.stats.total_cost, turns=self.stats.turns,
-            )
-        except Exception:
-            pass
 
     def _autosave_snapshot(self) -> None:
         """Update the snapshot with current stats + exchanges and persist.

@@ -193,3 +193,11 @@ def test_update_max_turns_preserves_conversation(tmp_path, monkeypatch):
     loaded = load(sess.target, sid)
     assert loaded.config.max_turns == 100
     assert len(loaded.conversation) == 1
+
+    # Regression: updating the cap is NOT session completion. The session log
+    # must not contain a `session_completed` event from this call.
+    import json
+    sess._slog._f.flush()
+    log_lines = open(sess._log_path).read().strip().split("\n")
+    types = [json.loads(line)["type"] for line in log_lines if line]
+    assert "session_completed" not in types
