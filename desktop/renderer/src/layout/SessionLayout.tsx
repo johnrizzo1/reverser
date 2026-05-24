@@ -7,7 +7,6 @@ import { ChatPane } from "@/panes/ChatPane";
 import { KBPane } from "@/panes/KBPane";
 import { FindingsPane } from "@/panes/FindingsPane";
 import { HypothesesPane } from "@/panes/HypothesesPane";
-import { Footer } from "./Footer";
 import { Button } from "@/components/ui/button";
 import { useSessions, useResumeSession, useSessionLogReplay } from "@/api/queries";
 import { SkillPickerModal } from "@/modals/SkillPickerModal";
@@ -120,12 +119,10 @@ export function SessionLayout() {
           <Button size="sm" variant="ghost" onClick={() => setSudoOpen(true)}>Sudo (F4)</Button>
           <Button size="sm" variant="ghost" onClick={() => setStopOpen(true)}>Stop (F6)</Button>
           <Button size="sm" variant="ghost" onClick={() => setDoneOpen(true)}>Mark done</Button>
-          <div className="ml-auto"><Footer /></div>
         </div>
       ) : (
         <div className="h-9 border-t border-neutral-800 bg-neutral-950/80 px-3 flex items-center text-xs text-neutral-500">
           <span>view-only mode · session id: {id}</span>
-          <div className="ml-auto"><Footer /></div>
         </div>
       )}
 

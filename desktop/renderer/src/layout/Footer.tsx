@@ -1,6 +1,6 @@
 export function Footer() {
   return (
-    <footer className="h-5 border-t border-neutral-800 bg-neutral-950/80 flex items-center px-3 text-[10px] text-neutral-500 font-mono gap-3">
+    <footer className="flex items-center gap-4 text-[10px] text-neutral-500 px-3 py-1 border-t border-neutral-800">
       <span>F1 skills</span>
       <span>F2 profile</span>
       <span>F4 sudo</span>
