@@ -88,7 +88,14 @@ class GUISession:
         # the same callback at tui/app.py for the same purpose.
         self._agent.on_dispatch_event = self._on_dispatch_event
 
-    def _on_dispatch_event(self, specialty: str, kind: str, content: str) -> None:
+    def _on_dispatch_event(
+        self,
+        specialty: str,
+        dispatch_id: str,
+        sub_turn: int,
+        kind: str,
+        content: str,
+    ) -> None:
         """Publish a dispatch sub-agent event to the bus.
 
         Called synchronously from inside the dispatch tool's async loop, so

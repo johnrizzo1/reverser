@@ -68,11 +68,12 @@ class AgentSession:
         resume_from: "SessionSnapshot | None" = None,
         session_id: str | None = None,
     ):
-        # Per-turn callback set by the TUI to render dispatch_specialist
-        # sub-agent events (thinking / tool_call / tool_result / text) with
-        # a [specialty] prefix. Signature: (specialty, kind, content) -> None.
-        # None means "do not render" — useful for CLI-only contexts.
+        # Per-turn callbacks set by the host to bridge sub-agent events:
+        #   on_dispatch_event(specialty, dispatch_id, sub_turn, kind, content)
+        #   on_kb_event(kind, payload)   # kind in {"hypothesis", "finding"}
+        # None means "do not surface" — used by CLI-only contexts.
         self.on_dispatch_event = None
+        self.on_kb_event = None
 
         if resume_from is not None:
             self._init_resumed(resume_from, profile, backend_name, model, api_base)
@@ -92,20 +93,40 @@ class AgentSession:
         from .sessions import current_session
         current_session.set(self)
 
-    def emit_dispatch_event(self, specialty: str, kind: str, content: str) -> None:
-        """Surface a dispatch_specialist sub-agent event to the TUI.
+    def emit_dispatch_event(self, *args) -> None:
+        """Surface a dispatch sub-agent event to the host.
 
-        Called by `tools/dispatch.py` for each sub-agent message (thinking,
-        tool_call, tool_result, text) while a specialist is running. The TUI
-        sets `on_dispatch_event` per-turn to write to the chat log with a
-        `[specialty]` prefix. Exceptions in the callback are swallowed so a
-        rendering bug cannot crash the dispatch tool.
+        Accepts either 5 args (specialty, dispatch_id, sub_turn, kind, content)
+        — the current signature — or 3 args (specialty, kind, content) as a
+        transitional shim while callers are migrated. Remove the 3-arg shim
+        once Task 4 lands.
         """
         cb = self.on_dispatch_event
         if cb is None:
             return
+        if len(args) == 5:
+            specialty, dispatch_id, sub_turn, kind, content = args
+        elif len(args) == 3:
+            specialty, kind, content = args
+            dispatch_id, sub_turn = "", 0
+        else:
+            return
         try:
-            cb(specialty, kind, content)
+            cb(specialty, dispatch_id, sub_turn, kind, content)
+        except Exception:
+            pass
+
+    def emit_kb_event(self, kind: str, payload: dict) -> None:
+        """Surface a KB write to the host.
+
+        `kind` is "hypothesis" or "finding"; payload matches the WS frame
+        body without the `type` field, i.e. {"action": ..., "row": ...}.
+        """
+        cb = self.on_kb_event
+        if cb is None:
+            return
+        try:
+            cb(kind, payload)
         except Exception:
             pass
 
