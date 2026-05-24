@@ -98,6 +98,51 @@ async def test_stop_then_done(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_stop_clears_active_so_list_reports_stopped(client, tmp_path):
+    """Regression: POST /stop must clear manager.active. Otherwise
+    list_sessions() overrides state to "active" and the UI's status
+    indicator never changes."""
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        create = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": str(tmp_path / "bin"), "profile": "general",
+            "backend": "claude", "model": None, "api_base": None,
+            "budget": 5.0, "max_turns": 50,
+        })
+        sid = create.json()["id"]
+        stop = await client.post(f"/api/sessions/{sid}/stop", headers=HEADERS)
+        assert stop.status_code == 204
+
+        listing = await client.get("/api/sessions", headers=HEADERS)
+    row = next(r for r in listing.json()["sessions"] if r["id"] == sid)
+    assert row["state"] == "stopped", (
+        f"after POST /stop, list_sessions should report 'stopped' but "
+        f"reported {row['state']!r} (manager.active not cleared)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_mark_done_clears_active_so_list_reports_completed(client, tmp_path):
+    """Regression: POST /done on an active session must clear manager.active
+    so list_sessions reports 'completed', not 'active'."""
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        create = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": str(tmp_path / "bin"), "profile": "general",
+            "backend": "claude", "model": None, "api_base": None,
+            "budget": 5.0, "max_turns": 50,
+        })
+        sid = create.json()["id"]
+        done = await client.post(f"/api/sessions/{sid}/done", headers=HEADERS)
+        assert done.status_code == 204
+
+        listing = await client.get("/api/sessions", headers=HEADERS)
+    row = next(r for r in listing.json()["sessions"] if r["id"] == sid)
+    assert row["state"] == "completed", (
+        f"after POST /done, list_sessions should report 'completed' but "
+        f"reported {row['state']!r} (manager.active not cleared)"
+    )
+
+
+@pytest.mark.asyncio
 async def test_budget_update(client, tmp_path):
     with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
         create = await client.post("/api/sessions", headers=HEADERS, json={

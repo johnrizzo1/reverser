@@ -110,11 +110,20 @@ async def trigger_skill(request: Request, session_id: str, skill_key: str) -> Re
 
 @router.post("/api/sessions/{session_id}/stop", status_code=204)
 async def stop_session(request: Request, session_id: str) -> Response:
+    mgr = _manager(request)
     try:
-        gs = _manager(request).get_active(session_id)
+        gs = mgr.get_active(session_id)
     except KeyError:
         raise HTTPException(404)
+    # Cancel any in-flight send_message task first so a long-running tool
+    # call unwinds promptly. Then mark stopped, release resources, and
+    # clear manager.active so list_sessions() stops overriding state to
+    # "active" (see session_manager.list_sessions, which clobbers on-disk
+    # state for whatever GUISession sits in mgr.active).
+    gs.cancel()
     gs.stop()
+    gs.close()
+    mgr.active = None
     return Response(status_code=204)
 
 
@@ -123,7 +132,11 @@ async def mark_done(request: Request, session_id: str) -> Response:
     mgr = _manager(request)
     try:
         gs = mgr.get_active(session_id)
+        # See stop_session for why we cancel/close/clear-active here.
+        gs.cancel()
         gs.mark_completed()
+        gs.close()
+        mgr.active = None
         return Response(status_code=204)
     except KeyError:
         pass
