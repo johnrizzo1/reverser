@@ -4,13 +4,12 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useSessionStream } from "@/hooks/useSessionStream";
 import { SessionStatusBar } from "./SessionStatusBar";
 import { ChatPane } from "@/panes/ChatPane";
-import { ToolTimelinePane } from "@/panes/ToolTimelinePane";
 import { KBPane } from "@/panes/KBPane";
 import { FindingsPane } from "@/panes/FindingsPane";
 import { HypothesesPane } from "@/panes/HypothesesPane";
 import { Footer } from "./Footer";
 import { Button } from "@/components/ui/button";
-import { useSessions, useConversation, useResumeSession, useSessionLogReplay } from "@/api/queries";
+import { useSessions, useResumeSession, useSessionLogReplay } from "@/api/queries";
 import { SkillPickerModal } from "@/modals/SkillPickerModal";
 import { SudoModal } from "@/modals/SudoModal";
 import { StopModal } from "@/modals/StopModal";
@@ -29,13 +28,7 @@ export function SessionLayout() {
   // WebSocket only when active.
   useSessionStream(isActive ? id ?? null : null);
 
-  // Read-only: fetch and inject conversation history once on mount.
-  const conversation = useConversation(!isActive ? id ?? null : null, target);
-  useEffect(() => {
-    if (!id || isActive || !conversation.data) return;
-    getSessionStore(id).getState().seedConversation(conversation.data.conversation);
-  }, [id, isActive, conversation.data]);
-
+  // Read-only: replay session log once on mount.
   const sessionLog = useSessionLogReplay(!isActive ? id ?? null : null, target);
   useEffect(() => {
     if (!id || isActive || !sessionLog.data) return;
@@ -93,34 +86,26 @@ export function SessionLayout() {
       )}
 
       <div className="flex-1 min-h-0">
-        <PanelGroup direction="vertical">
-          <Panel defaultSize={70} minSize={30}>
-            <PanelGroup direction="horizontal">
-              <Panel defaultSize={68} minSize={40}>
-                <ChatPane sessionId={id} readOnly={!isActive} />
-              </Panel>
-              <PanelResizeHandle className="w-px bg-neutral-800 hover:bg-neutral-700" />
-              <Panel defaultSize={32} minSize={20}>
-                <div className="flex flex-col h-full">
-                  <div className="flex gap-3 px-3 border-b border-neutral-800 text-[10px] uppercase tracking-wide text-neutral-500 h-7 items-center">
-                    {(["hypotheses", "findings", "kb"] as const).map((t) => (
-                      <button key={t}
-                        className={t === rightTab ? "text-neutral-200" : "hover:text-neutral-300"}
-                        onClick={() => setRightTab(t)}>{t}</button>
-                    ))}
-                  </div>
-                  <div className="flex-1 min-h-0 overflow-auto">
-                    {rightTab === "hypotheses" && <HypothesesPane sessionId={id} />}
-                    {rightTab === "findings" && <FindingsPane target={target} />}
-                    {rightTab === "kb" && <KBPane target={target} />}
-                  </div>
-                </div>
-              </Panel>
-            </PanelGroup>
+        <PanelGroup direction="horizontal">
+          <Panel defaultSize={68} minSize={40}>
+            <ChatPane sessionId={id} readOnly={!isActive} />
           </Panel>
-          <PanelResizeHandle className="h-px bg-neutral-800 hover:bg-neutral-700" />
-          <Panel defaultSize={30} minSize={10}>
-            <ToolTimelinePane sessionId={id} readOnly={!isActive} />
+          <PanelResizeHandle className="w-px bg-neutral-800 hover:bg-neutral-700" />
+          <Panel defaultSize={32} minSize={20}>
+            <div className="flex flex-col h-full">
+              <div className="flex gap-3 px-3 border-b border-neutral-800 text-[10px] uppercase tracking-wide text-neutral-500 h-7 items-center">
+                {(["hypotheses", "findings", "kb"] as const).map((t) => (
+                  <button key={t}
+                    className={t === rightTab ? "text-neutral-200" : "hover:text-neutral-300"}
+                    onClick={() => setRightTab(t)}>{t}</button>
+                ))}
+              </div>
+              <div className="flex-1 min-h-0 overflow-auto">
+                {rightTab === "hypotheses" && <HypothesesPane sessionId={id} />}
+                {rightTab === "findings" && <FindingsPane target={target} />}
+                {rightTab === "kb" && <KBPane target={target} />}
+              </div>
+            </div>
           </Panel>
         </PanelGroup>
       </div>
