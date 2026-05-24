@@ -75,6 +75,12 @@ class GUISession:
         )
         self._send_lock = asyncio.Lock()
         self._sudo_password: str | None = None
+        # Track the asyncio.Task running send_message so cancel() can
+        # preempt an in-flight long-running tool call. Without this,
+        # AgentSession.cancel() only flips a cooperative flag that's
+        # checked between events — useless while the backend is awaiting
+        # a slow tool.
+        self._current_send_task: asyncio.Task | None = None
 
         # Bridge dispatch_specialist sub-agent events (thinking, tool_call,
         # tool_result, text) to the WebSocket so the renderer can show what
@@ -129,24 +135,31 @@ class GUISession:
     async def send_message(self, user_text: str) -> None:
         """Send a user message and drain all resulting events to the bus."""
         async with self._send_lock:
-            await self._bus.publish(self.session_id, {"type": "status", "phase": "running"})
-            async for ev in self._agent.send(user_text):
-                frame = _event_to_frame(ev)
-                if frame is not None:
-                    await self._bus.publish(self.session_id, frame)
-                # Emit a budget frame after every result event
-                if ev.kind == "result" and ev.cost is not None:
-                    spent = self._agent.stats.total_cost
-                    await self._bus.publish(self.session_id, {
-                        "type": "budget",
-                        "spent": spent,
-                        "remaining": max(0.0, self._agent.budget - spent),
-                        "turn": self._agent.stats.turns,
-                    })
-            await self._bus.publish(self.session_id, {
-                "type": "status",
-                "phase": "awaiting_input",
-            })
+            # Record the running task so cancel() can preempt it. Cleared
+            # in the finally block whether we exit normally or via
+            # CancelledError raised by cancel().
+            self._current_send_task = asyncio.current_task()
+            try:
+                await self._bus.publish(self.session_id, {"type": "status", "phase": "running"})
+                async for ev in self._agent.send(user_text):
+                    frame = _event_to_frame(ev)
+                    if frame is not None:
+                        await self._bus.publish(self.session_id, frame)
+                    # Emit a budget frame after every result event
+                    if ev.kind == "result" and ev.cost is not None:
+                        spent = self._agent.stats.total_cost
+                        await self._bus.publish(self.session_id, {
+                            "type": "budget",
+                            "spent": spent,
+                            "remaining": max(0.0, self._agent.budget - spent),
+                            "turn": self._agent.stats.turns,
+                        })
+                await self._bus.publish(self.session_id, {
+                    "type": "status",
+                    "phase": "awaiting_input",
+                })
+            finally:
+                self._current_send_task = None
 
     async def trigger_skill(self, skill_key: str) -> None:
         """Run a profile skill by key. Equivalent to TUI's F1 picker."""
@@ -171,8 +184,17 @@ class GUISession:
             self._agent.update_max_turns(new_max_turns)
 
     def cancel(self) -> None:
-        """Abort the in-flight turn, if any."""
+        """Abort the in-flight turn, if any.
+
+        Flips the cooperative flag on AgentSession AND cancels the
+        asyncio.Task running send_message. The latter is what actually
+        preempts a blocked-on-slow-tool await; the cooperative flag
+        alone can't interrupt an in-progress await.
+        """
         self._agent.cancel()
+        task = self._current_send_task
+        if task is not None and not task.done():
+            task.cancel()
 
     def close(self) -> None:
         self._agent.close()

@@ -94,6 +94,71 @@ async def test_budget_frame_tracks_spend(bus, gui_session):
 
 
 @pytest.mark.asyncio
+async def test_cancel_aborts_in_flight_send(bus, tmp_path):
+    """Regression: GUISession.cancel() must actually preempt an in-flight
+    send_message that is blocked inside a long-running tool call.
+
+    Before the fix, cancel() only flipped a cooperative flag that
+    AgentSession.send() checks BETWEEN events. If the backend was
+    awaiting a slow tool, the flag had no effect until the tool returned.
+    """
+    from reverser.backends.base import AgentEvent, Backend
+    from collections.abc import AsyncIterator
+
+    class SlowBackend(Backend):
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run(self, prompt, system_prompt, *, max_turns=50,
+                      max_budget_usd=5.0, allowed_tools=None) -> AsyncIterator[AgentEvent]:
+            yield AgentEvent(kind="turn", turns=1)
+            yield AgentEvent(kind="tool_call", tool_name="bash", tool_input={"cmd": "sleep 30"})
+            # Simulate a slow tool — this is where the agent would be stuck
+            # waiting for nmap / bash / etc. to return.
+            await asyncio.sleep(30.0)
+            yield AgentEvent(kind="tool_result", content="done", is_error=False)
+            yield AgentEvent(kind="result", subtype="success", cost=0.01, turns=1)
+
+    profile = get_profile("general")
+    with patch("reverser.agent_session.create_backend", return_value=SlowBackend()):
+        gs = GUISession(
+            session_id="cancel-test",
+            target=str(tmp_path / "bin"),
+            profile=profile,
+            backend_name="claude",
+            model=None,
+            api_base=None,
+            budget=5.0,
+            max_turns=50,
+            bus=bus,
+        )
+    try:
+        send_task = asyncio.create_task(gs.send_message("hi"))
+        # Give the task a moment to enter the slow await
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if not send_task.done() and gs._current_send_task is not None:
+                break
+
+        gs.cancel()
+
+        # Without the fix, this hangs for ~30s and times out. With the fix,
+        # the task finishes (with CancelledError or normally) almost immediately.
+        try:
+            await asyncio.wait_for(send_task, timeout=2.0)
+        except asyncio.CancelledError:
+            pass  # expected — cancellation propagated
+        except asyncio.TimeoutError:
+            pytest.fail(
+                "send_message did not unwind after cancel() — the in-flight "
+                "tool sleep is still blocking. cancel() must cancel the "
+                "send task, not just flip a cooperative flag."
+            )
+    finally:
+        gs.close()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_events_publish_to_bus(bus, gui_session):
     """Dispatch sub-agent events (thinking, tool_call, tool_result, text)
     must reach the WebSocket so the renderer can show what each dispatched
