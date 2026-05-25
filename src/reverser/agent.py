@@ -51,6 +51,7 @@ async def run_agent(
     backend_name: str = "claude",
     model: str | None = None,
     api_base: str | None = None,
+    model_family: str | None = None,
 ) -> str | None:
     """Run the RE agent on a binary.
 
@@ -63,6 +64,8 @@ async def run_agent(
         backend_name: Backend to use ('claude', 'ollama', etc.).
         model: Model name for non-claude backends.
         api_base: API base URL override.
+        model_family: 'deepseek' | 'generic' | None. None auto-detects
+            from the model name. Ignored by the Claude backend.
 
     Returns:
         The agent's final result text, or None if stopped.
@@ -87,6 +90,7 @@ async def run_agent(
         ALL_TOOLS,
         model=model,
         api_base=api_base,
+        model_family=model_family,
     )
 
     result_text = None

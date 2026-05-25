@@ -52,6 +52,11 @@ def main():
                          help="Model name/tag for non-claude backends (e.g. qwen3.5:35b-a3b-coding-nvfp4)")
         sub.add_argument("--api-base", default=None,
                          help="API base URL override (default: http://localhost:11434/v1 for ollama)")
+        sub.add_argument("--model-family", default=None, choices=["deepseek", "generic"],
+                         help="Override model-family detection. By default the family "
+                              "is inferred from the model name. Use 'deepseek' for "
+                              "DeepSeek-derived models that don't have 'deepseek' in "
+                              "the name.")
 
     triage_parser = subparsers.add_parser("triage", help="Quick binary triage")
     add_common_args(triage_parser)
@@ -230,6 +235,7 @@ def _run_agent(args):
         backend_name=args.backend,
         model=args.model,
         api_base=args.api_base,
+        model_family=args.model_family,
     ))
 
 

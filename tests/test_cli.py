@@ -27,3 +27,22 @@ def test_list_profiles_includes_manager():
         capture_output=True, text=True,
     )
     assert "manager" in result.stdout.lower(), result.stdout
+
+
+def test_triage_help_mentions_model_family():
+    """--model-family appears in the triage-command help output."""
+    result = subprocess.run(
+        [PYTHON, "-m", "reverser", "triage", "--help"],
+        capture_output=True, text=True,
+    )
+    assert "--model-family" in result.stdout, result.stdout
+    assert "deepseek" in result.stdout, result.stdout
+
+
+def test_interactive_help_mentions_model_family():
+    """And in the interactive-command help too (same shared helper)."""
+    result = subprocess.run(
+        [PYTHON, "-m", "reverser", "interactive", "--help"],
+        capture_output=True, text=True,
+    )
+    assert "--model-family" in result.stdout, result.stdout
