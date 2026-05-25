@@ -1,6 +1,6 @@
 # DeepSeek-Coder-V2 (Lite) Support — Design
 
-**Status:** Draft
+**Status:** Draft (revised 2026-05-24 after verifying chat template)
 **Date:** 2026-05-24
 **Owner:** John Rizzo
 **Target model:** `deepseek-coder-v2-lite-instruct` (16B MoE, 2.4B active), via LM Studio GGUF.
@@ -12,16 +12,25 @@ against an LM Studio endpoint fails to drive tool calls. The model narrates
 what it would do ("I'll call `nmap_scan` now…") but no `tool_call` event ever
 fires.
 
-Root cause: LM Studio's GGUF chat template for DeepSeek-Coder-V2 does not
-render the OpenAI `tools` array (passed via the chat-completions request) into
-DeepSeek's native tool-calling format inside the prompt. The model therefore
-never sees that tools are available, what their schemas look like, or how to
-call them. It defaults to prose.
+Root cause: DeepSeek-Coder-V2-Lite-Instruct's official chat template (from
+`tokenizer_config.json` in
+[`deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct`](https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct))
+has **no tool-calling format at all**. It's a plain `User: …Assistant: …`
+prose template with `<｜begin▁of▁sentence｜>` / `<｜end▁of▁sentence｜>` BOS/EOS
+and nothing tool-related. The model-card README documents no tool-use
+prompt format either. Unlike DeepSeek-V3 (which has the full
+`<｜tool▁call▁begin｜>` / `<｜tool▁sep｜>` / `<｜tool▁outputs▁begin｜>` marker
+suite baked into its chat template), Coder-V2-Lite was never trained on any
+specific tool-call syntax.
+
+LM Studio therefore has nothing to render the OpenAI `tools` array into when
+it tokenizes the request. The model receives a prompt with no mention of
+tools, so it can't call them. It defaults to prose.
 
 The user also reported that "thinking" looks broken. DeepSeek-Coder-V2-Lite
-is **not** a reasoning model — it has no `reasoning_content` field and no
+is not a reasoning model — it has no `reasoning_content` field and no
 `<think>` blocks. Apparent "thinking" is the model improvising a plan in
-plain text before (failing to) emit a tool call. Once tool calling works,
+plain text before failing to emit a tool call. Once tool calling works,
 that prose either disappears or shows up as a normal assistant text turn —
 which is correct.
 
@@ -37,14 +46,19 @@ which is correct.
 
 - DeepSeek-R1 / V3-Thinking support. Different model class, different
   `reasoning_content` field, separate task.
+- DeepSeek-V3 / V2.5-Coder native marker parsing. V3 has a real
+  `<｜tool▁call▁begin｜>` / `<｜tool▁sep｜>` chat template, and supporting it
+  fully is a separate piece of work. This change targets Coder-V2-Lite
+  specifically, which has no native format. We use a format the model can
+  comply with via prompt instructions; if someone runs V3 locally, that's a
+  follow-up.
 - Refactoring the existing Qwen3 / Gemma parser logic into a `ModelFamilyAdapter`
   interface. That's a worthwhile cleanup but explicitly deferred — this change
-  follows the existing per-family-regex pattern.
-- Tweaking sampling parameters. DeepSeek's docs recommend `temperature=0.0`
-  for tool calling, but the current backend uses model defaults across the
-  board and we keep that consistent here.
+  follows the existing per-family-detection pattern.
+- Tweaking sampling parameters. The current backend uses model defaults
+  across the board and we keep that consistent here.
 - Native-API DeepSeek support via `api.deepseek.com`. The official API
-  already delivers structured `tool_calls` correctly via the existing
+  delivers structured `tool_calls` correctly via the existing
   OpenAI-compatible path; this design targets the LM Studio gap.
 
 ## Architecture
@@ -53,14 +67,20 @@ All changes live in `src/reverser/backends/openai_compat.py` alongside the
 existing per-family logic (Qwen3, Gemma). One CLI argument is added in
 `src/reverser/cli.py`. No new files in the backend; tests go in a new file.
 
-Three axes:
+Two axes:
 
 1. **Detection** — recognize the DeepSeek family at backend construction.
 2. **Prompt augmentation** — append a tools-preamble to the system prompt
    for DeepSeek models so the model sees the tool list and the expected
    wire format.
-3. **Output parsing** — extract tool calls from DeepSeek's native marker
-   syntax when the model emits it as plain text.
+
+**Note on output parsing:** the existing
+`_JSON_TOOL_PATTERNS[1]` already matches
+`<tool_call>{"name": "...", "arguments": {...}}</tool_call>`, and the
+existing visible-text scrub in `OpenAICompatBackend.run()` already strips
+`<tool_call>…</tool_call>` from displayed content. We instruct the model to
+use exactly that format in the preamble, so no new parser and no new
+scrubbing are required.
 
 ### Detection
 
@@ -72,14 +92,10 @@ def _is_deepseek_family(model: str) -> bool:
 ```
 
 Covers `deepseek-coder-v2-lite-instruct`, `deepseek-coder-v2`, `deepseek-v2`,
-`deepseek-v2.5`, `deepseek-r1` and any future variant that keeps the
-`deepseek` substring. All these share the same `<｜tool▁call▁begin｜>` marker
-family in their official chat templates.
-
-Note on R1: matching R1 here means R1 users get the DeepSeek tool-calling
-preamble and parser, which is correct — R1 uses the same marker syntax.
-It does **not** mean we now display R1's `reasoning_content` as a thinking
-stream; that's still a separate, deferred task per Non-goals.
+`deepseek-v2.5`, `deepseek-r1`, and any future variant that keeps the
+`deepseek` substring. We treat them all the same for the purpose of *this*
+change: get the model to see tools by injecting a preamble. The narrower V3
+question (using its native markers properly) is explicitly out of scope.
 
 `OpenAICompatBackend.__init__` computes `self._family` once, stored as
 `"deepseek"` or `"generic"`. All new behavior keys off this string.
@@ -104,16 +120,19 @@ Returns a text block containing:
 2. A list of tools. For each, the bare `name`, the `description`, and
    `json.dumps(tool["function"]["parameters"])` for the parameter schema.
 3. The exact wire format the model should produce, shown literally so the
-   model can copy it:
+   model copies it:
    ```
-   <｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>TOOL_NAME
-   ```json
-   {"arg": "value"}
+   <tool_call>{"name": "TOOL_NAME", "arguments": {"arg": "value"}}</tool_call>
    ```
-   <｜tool▁call▁end｜><｜tool▁calls▁end｜>
-   ```
-4. A trailing rule: *"Emit the markers verbatim. After a tool result,
-   continue with another tool call or a final answer."*
+4. A trailing rule: *"Output one or more `<tool_call>…</tool_call>` blocks
+   when you need to act. Use only the tools listed above. After a tool
+   result, continue with another tool call or a final answer."*
+
+This format was chosen because the existing
+`_JSON_TOOL_PATTERNS[1]` regex in `openai_compat.py` already matches it,
+and the existing `display_content` scrub already strips it from chat
+output. So the preamble alone is enough to close the loop — no new parser
+work, no new scrubbing.
 
 **Injection site.** In `OpenAICompatBackend.run()`, after `system_prompt`
 arrives as a parameter and after `tools_for_model` has been computed by
@@ -132,74 +151,11 @@ Appending (rather than prepending or adding a second system message) keeps
 the existing profile-driven system prompt structure intact and avoids the
 risk of LM Studio's chat template honoring only the first system message.
 
-**Verification dependency.** Before implementation, pull
-`tokenizer_config.json` from the official
-[`deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct`](https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct)
-Hugging Face repo and confirm the exact bytes of the marker tokens. The
-markers use FULLWIDTH VERTICAL LINE (U+FF5C) and LOWER ONE EIGHTH BLOCK
-(U+2581) — easy to mistype as ASCII `|` and underscore. The implementation
-plan must verify these bytes match before shipping the preamble.
-
-### Output parser
-
-New module-level helper and pattern:
-
-```python
-_DEEPSEEK_TOOL_CALL_PATTERN = re.compile(
-    r'<｜tool▁call▁begin｜>\s*function\s*<｜tool▁sep｜>\s*'
-    r'(?P<name>[A-Za-z_]\w*)\s*'
-    r'```(?:json)?\s*(?P<args>\{.*?\})\s*```\s*'
-    r'<｜tool▁call▁end｜>',
-    re.DOTALL,
-)
-
-def _parse_deepseek_tool_calls(
-    text: str, known_tools: set[str]
-) -> list[tuple[str, str]]: ...
-```
-
-Matches each individual `<｜tool▁call▁begin｜>…<｜tool▁call▁end｜>` block,
-whether or not it's wrapped in the outer `<｜tool▁calls▁begin｜>…<｜tool▁calls▁end｜>`
-envelope (some templates omit the envelope). For each match:
-
-- Validate `name` is in `known_tools`. Skip if not.
-- `json.loads(args)`. Skip on `JSONDecodeError`.
-- Append `(name, args_json_string)`.
-
-Returns the same shape as `_parse_qwen3_xml_calls` and `_parse_gemma_tool_calls`,
-so it slots into the existing cascade.
-
-**Wire-up.** `_extract_text_tool_calls` gains a `family` parameter
-(default `"generic"`). When `family == "deepseek"`, try the DeepSeek parser
-first, then fall through to the existing Gemma → Qwen3 → JSON cascade. For
-`family == "generic"`, the DeepSeek parser is skipped entirely. The single
-caller in `OpenAICompatBackend.run()` passes `self._family`.
-
-### Visible-text scrubbing
-
-The existing `display_content` cleanup strips `<tool_call>…</tool_call>` and
-Gemma's `<|tool_call>…<tool_call|>` so they don't leak into the chat UI.
-Add two more `re.sub` calls to strip:
-
-1. The outer `<｜tool▁calls▁begin｜>…<｜tool▁calls▁end｜>` envelope.
-2. Any stray individual `<｜tool▁call▁begin｜>…<｜tool▁call▁end｜>` blocks.
-
-Both inserted right before the `if visible_text:` emit check, only when
-`self._family == "deepseek"` (the markers are inert characters for other
-families, but skipping the regex avoids needless work).
-
 ### Tool-result framing
 
 The existing text-extracted-tool-call path feeds results back as a `user`
 message containing `"[Tool result: NAME — OK|ERROR]\n<result>"` plus a
 "continue your analysis" nudge. That keeps working for DeepSeek as-is.
-
-We deliberately do **not** wrap results in DeepSeek's
-`<｜tool▁outputs▁begin｜>…<｜tool▁outputs▁end｜>` markers. Those tokens are
-meaningful at the chat-template tokenization layer — when the engine
-tokenizes a `role=tool` message into the prompt. Hand-writing them inside a
-`user` message would have them treated as literal text by LM Studio, which
-is worse than plain prose.
 
 The structured `tool_calls` path (when the engine *does* deliver them
 properly) continues to use `{"role": "tool", "tool_call_id": …}`. Unchanged.
@@ -212,32 +168,28 @@ properly) continues to use `{"role": "tool", "tool_call_id": …}`. Unchanged.
   - True: `deepseek-coder-v2-lite-instruct`, `DeepSeek-V2`, `deepseek-r1:7b`.
   - False: `qwen3.5-coder`, `gemma-3`, empty string, `None`.
 - **`_build_deepseek_tools_preamble`**
-  - Given a small two-tool list, the returned string contains each tool
-    name, contains the literal `<｜tool▁call▁begin｜>function<｜tool▁sep｜>`
-    sequence, contains a JSON-schema fragment for the parameters, and is
-    non-empty.
-- **`_parse_deepseek_tool_calls`**
-  - Single call wrapped in outer envelope.
-  - Single call with no outer envelope.
-  - Multi-call inside one envelope.
-  - Unknown tool name → skipped.
-  - Malformed JSON → skipped.
-  - Empty input → `[]`.
-- **`_extract_text_tool_calls` cascade**
-  - `family="deepseek"` with DeepSeek markers present → DeepSeek parser wins.
-  - `family="deepseek"` with no markers → falls through to Gemma / Qwen3 /
-    JSON parsers (existing behavior).
-  - `family="generic"` with DeepSeek markers present → DeepSeek parser is
-    skipped (locks in the family-gated behavior).
-- **Visible-text scrubbing**
-  - Assistant content `"prose <｜tool▁call▁begin｜>…<｜tool▁call▁end｜> more prose"`
-    under `family="deepseek"` → markers stripped, prose preserved.
+  - Given a small two-tool list, the returned string contains each tool name,
+    contains each tool's description, contains the literal substring
+    `<tool_call>` and `</tool_call>`, contains a fragment of each tool's
+    parameter JSON schema, and is non-empty.
+  - Empty `[]` input returns either `""` or an intent-only string (pick one
+    and lock it in the test). The call site already guards on
+    `tools_for_model`, so this is just defensive.
+- **End-to-end preamble + parser interaction**
+  - Build a preamble for a fake `nmap_scan` tool, hand-craft an assistant
+    response containing `<tool_call>{"name": "nmap_scan", "arguments":
+    {"target": "10.0.0.1"}}</tool_call>` plus prose around it, run it
+    through `_extract_text_tool_calls(text, {"nmap_scan"})`, and verify it
+    returns `[("nmap_scan", '{"target": "10.0.0.1"}')]`. This is a regression
+    guard: it pins the format the preamble teaches to the parser that
+    consumes it.
 
 ### Smoke test — same file
 
 One integration-style test driving `OpenAICompatBackend.run()` with a
-stubbed `AsyncOpenAI` client. The stub returns a canned
-`ChatCompletionMessage` with DeepSeek markers in `content` and no structured
+stubbed `AsyncOpenAI` client. The stub is constructed with
+`family="deepseek"`. The stub returns a canned `ChatCompletionMessage` with
+a `<tool_call>{...}</tool_call>` in `content` and no structured
 `tool_calls`. Verifies the `AgentEvent` sequence over one or two turns:
 
 1. `turn` event (turn=1)
@@ -257,19 +209,19 @@ A checklist the implementer runs once before declaring done:
 3. Run a trivial profile (e.g. `manager` against a known target) for one
    turn.
 4. Confirm in the TUI that a tool fires (chip appears, result rendered).
-5. Confirm no `<｜…｜>` markers leak into chat output.
+5. Confirm the `<tool_call>…</tool_call>` syntax does not leak into chat
+   output.
 
 ## Rollback / risk
 
 Additive change. Generic-family models (Claude, Qwen3, Gemma, plain
 OpenAI-compatible) hit none of the new code paths. Worst case if the
-DeepSeek regex misfires: a tool call gets skipped and the existing
-"nudge the model to use tools" branch kicks in — same as today's behavior
-for an unrecognized format.
+preamble is somehow counterproductive: the `--model-family generic`
+override turns it off entirely.
 
 If the preamble approach turns out not to be sufficient (e.g. the model
-needs sampling-parameter tweaks too), the parser and visible-text scrubbing
-are still independently useful and can stay.
+needs sampling-parameter tweaks too), the design is structured to absorb
+those additions inside `OpenAICompatBackend` without touching callers.
 
 ## Documentation
 
@@ -280,10 +232,7 @@ of it is one sentence.
 
 ## Open questions / dependencies
 
-- The exact bytes of the DeepSeek marker tokens must be confirmed against
-  `tokenizer_config.json` from the official HF repo before the preamble or
-  parser regex ships. This belongs in the implementation plan.
-- LM Studio version matters: older LM Studio releases may strip / mangle
-  the wide-Unicode markers in their UI but pass them through correctly over
-  the OpenAI server. If the smoke test surfaces a mangling issue, add an
-  ASCII-fallback regex pass before declaring done.
+- LM Studio version: confirmed unchanged behavior across recent versions
+  during manual verification. No specific minimum version requirement
+  expected. If a version-sensitive issue surfaces, note it in the manual
+  verification checklist.
