@@ -28,6 +28,7 @@ def create_backend(
     *,
     model: str | None = None,
     api_base: str | None = None,
+    model_family: str | None = None,
 ) -> Backend:
     """Factory to create a backend by name.
 
@@ -36,6 +37,8 @@ def create_backend(
         tools: List of SdkMcpTool instances (from the tools package).
         model: Model name/tag. Required for non-claude backends.
         api_base: API base URL override. Defaults per backend.
+        model_family: 'deepseek' | 'generic' | None. None (default) means
+            auto-detect from the model name. Ignored by the Claude backend.
     """
     if name == "claude":
         from .claude import ClaudeBackend
@@ -56,4 +59,5 @@ def create_backend(
         tools=tools,
         model=model,
         api_base=api_base,
+        model_family=model_family,
     )

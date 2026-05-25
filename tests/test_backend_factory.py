@@ -49,3 +49,29 @@ def test_non_claude_backends_require_model():
         create_backend("ollama", tools=[], model=None)
     with pytest.raises(ValueError, match="model"):
         create_backend("lmstudio", tools=[], model=None)
+
+
+def test_model_family_passes_through_to_openai_compat():
+    """create_backend forwards model_family to OpenAICompatBackend."""
+    with patch("reverser.backends.openai_compat.OpenAICompatBackend") as M:
+        create_backend(
+            "lmstudio",
+            tools=[],
+            model="deepseek-coder-v2-lite-instruct",
+            model_family="deepseek",
+        )
+        assert M.call_args.kwargs["model_family"] == "deepseek"
+
+
+def test_model_family_defaults_to_none():
+    """When omitted, model_family is None (auto-detect happens inside the backend)."""
+    with patch("reverser.backends.openai_compat.OpenAICompatBackend") as M:
+        create_backend("ollama", tools=[], model="qwen3-coder")
+        assert M.call_args.kwargs.get("model_family") is None
+
+
+def test_claude_factory_ignores_model_family():
+    """Claude path doesn't accept model_family — passing it shouldn't crash."""
+    with patch("reverser.backends.claude.ClaudeBackend") as M:
+        create_backend("claude", tools=[], model_family="deepseek")
+        M.assert_called_once_with([])
