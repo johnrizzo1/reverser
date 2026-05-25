@@ -27,6 +27,19 @@ integration for webpentest/webapi/webrecon, manager-reliability bundle
 Major capabilities added after the initial roadmap was written. Each links to
 its spec / plan under `docs/superpowers/`.
 
+- **Target / session decoupling + XDG storage** (2026-05-24) — Sessions no
+  longer pin to a raw IP/URL/binary string. A named `Target` owns mutable
+  `Address` history (with one primary), the per-target KB, scope, and
+  sessions. Sessions pin to `active_address_id` at start for predictable
+  resume after rebinds. Persistent storage now uses a three-layer precedence:
+  env var > project marker (`.reverser-authorized`) > platformdirs default.
+  Engagement folders keep co-located data; casual use lands in OS-native
+  locations. Wordlist and Playwright caches stay shared across engagements.
+  CLI: `reverser target {create|list|show|rename|add-address|set-primary|retire-address}`.
+  GUI: new `TargetsPane` and updated `NewEngagement` picker.
+  Spec: `docs/superpowers/specs/2026-05-24-target-session-decoupling-design.md`
+  Plan: `docs/superpowers/plans/2026-05-24-target-session-decoupling.md`
+
 - **Manager profile reliability bundle** (2026-05-12) — six-item follow-up
   derived from a post-mortem of the 10.129.60.148 engagement (83 turns,
   no foothold). Makes manager discipline enforceable at the code level
