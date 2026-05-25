@@ -74,6 +74,16 @@ _GEMMA_THINKING_PATTERN = re.compile(
 )
 
 
+def _is_deepseek_family(model: str | None) -> bool:
+    """True for any DeepSeek model name (covers Coder-V2, V2, V2.5, R1).
+
+    Detection is by substring so that LM Studio's full GGUF paths
+    (e.g. ``lmstudio-community/DeepSeek-Coder-V2-Lite-Instruct-GGUF``)
+    match as well as bare tags.
+    """
+    return "deepseek" in (model or "").lower()
+
+
 def _parse_qwen3_xml_calls(text: str, known_tools: set[str]) -> list[tuple[str, str]]:
     """Extract tool calls from Qwen3's native XML format."""
     results = []
