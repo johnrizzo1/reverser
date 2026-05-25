@@ -93,3 +93,85 @@ async def test_get_target_detail_unknown_returns_404(client):
     """GET /api/targets/{name} for an unknown target returns 404."""
     r = await client.get("/api/targets/does-not-exist", headers=HEADERS)
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Task 27 — create and patch
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_target_via_post(client, tmp_path, monkeypatch):
+    """POST /api/targets creates a target and returns 201 with the target payload."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths
+    paths._reset_caches_for_tests()
+
+    r = await client.post("/api/targets", headers=HEADERS, json={
+        "name": "dc1",
+        "kind": "network",
+        "initial_address": "10.0.0.5",
+    })
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["name"] == "dc1"
+    assert body["kind"] == "network"
+    assert len(body["addresses"]) == 1
+    assert body["addresses"][0]["value"] == "10.0.0.5"
+
+
+@pytest.mark.asyncio
+async def test_create_target_duplicate_returns_400(client, tmp_path, monkeypatch):
+    """POST /api/targets with a duplicate name returns 400."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    tmod.create_target("dc1", "network", "10.0.0.5")
+
+    r = await client.post("/api/targets", headers=HEADERS, json={
+        "name": "dc1",
+        "kind": "network",
+        "initial_address": "10.0.0.6",
+    })
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_rename_target_via_patch(client, tmp_path, monkeypatch):
+    """PATCH /api/targets/{name} with a new name renames the target."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    tmod.create_target("oldname", "network", "10.0.0.5")
+
+    r = await client.patch("/api/targets/oldname", headers=HEADERS, json={
+        "name": "newname",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "newname"
+
+
+@pytest.mark.asyncio
+async def test_patch_target_unknown_returns_404(client):
+    """PATCH /api/targets/{name} on an unknown target returns 404."""
+    r = await client.patch("/api/targets/no-such", headers=HEADERS, json={"name": "x"})
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_patch_target_notes(client, tmp_path, monkeypatch):
+    """PATCH /api/targets/{name} with notes updates the notes field."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    tmod.create_target("dc1", "network", "10.0.0.5")
+
+    r = await client.patch("/api/targets/dc1", headers=HEADERS, json={
+        "notes": "primary domain controller",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["notes"] == "primary domain controller"

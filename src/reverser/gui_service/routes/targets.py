@@ -491,6 +491,33 @@ def _target_detail(t) -> dict:
     return t.to_dict()
 
 
+# --- Pydantic request models (Tasks 27-28) ---
+
+class CreateTargetRequest(BaseModel):
+    name: str
+    kind: str  # "network" | "binary"
+    initial_address: str
+    label: Optional[str] = None
+
+
+class PatchTargetRequest(BaseModel):
+    name: Optional[str] = None    # new name (rename)
+    notes: Optional[str] = None
+
+
+class AddAddressRequest(BaseModel):
+    value: str
+    kind: str
+    label: Optional[str] = None
+    make_primary: bool = False
+
+
+class PatchAddressRequest(BaseModel):
+    make_primary: Optional[bool] = None
+    retire: Optional[bool] = None
+    label: Optional[str] = None
+
+
 # --- Task 26: Read endpoints ---
 
 @router.get("/api/targets/{name}")
@@ -505,4 +532,50 @@ def get_target_detail(name: str) -> dict:
         t = tmod.load_target(name)
     except FileNotFoundError:
         raise HTTPException(404, detail=f"unknown target: {name!r}")
+    return _target_detail(t)
+
+
+# --- Task 27: Create and patch endpoints ---
+
+@router.post("/api/targets", status_code=201)
+def create_target_endpoint(body: CreateTargetRequest) -> dict:
+    """Create a new Target and return its full dict."""
+    tmod = _targets_mod()
+    try:
+        t = tmod.create_target(
+            body.name,
+            body.kind,  # type: ignore[arg-type]
+            body.initial_address,
+            label=body.label,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _target_detail(t)
+
+
+@router.patch("/api/targets/{name}")
+def patch_target(name: str, body: PatchTargetRequest) -> dict:
+    """Rename a target and/or update its notes."""
+    tmod = _targets_mod()
+    try:
+        t = tmod.load_target(name)
+    except FileNotFoundError:
+        raise HTTPException(404, detail=f"unknown target: {name!r}")
+
+    import dataclasses
+
+    # Apply rename first so we work with the right target object.
+    if body.name is not None and body.name != name:
+        try:
+            t = tmod.rename_target(name, body.name)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc))
+
+    # Apply notes update if supplied.
+    if body.notes is not None:
+        t = dataclasses.replace(t, notes=body.notes)
+        tmod.save_target(t)
+
     return _target_detail(t)
