@@ -45,6 +45,9 @@ def resolve_target(arg: str, *, override_address: Optional[str] = None) -> Targe
     After resolution, if override_address is given, it is added (if not already
     present) and promoted to primary. If it is already the primary, no-op.
     """
+    if not arg or not arg.strip():
+        raise ValueError("session start requires a target name or address")
+
     target: Optional[Target] = None
 
     # Rule 1: exact name match

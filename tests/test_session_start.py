@@ -114,3 +114,19 @@ def test_address_override_promotes_existing_non_primary(env):
     t = resolve_target("dc1", override_address="10.0.0.6")
     assert t.primary_address.value == "10.0.0.6"
     assert len(t.addresses) == 2  # not duplicated
+
+
+def test_session_start_unknown_arg_with_no_inferred_kind_fails(env):
+    """An empty string or unrecognizable arg should fail clearly."""
+    from reverser.session_start import resolve_target
+
+    with pytest.raises(ValueError):
+        resolve_target("")
+
+
+def test_session_start_blank_arg_fails(env):
+    """A whitespace-only string should also raise ValueError."""
+    from reverser.session_start import resolve_target
+
+    with pytest.raises(ValueError):
+        resolve_target("   ")
