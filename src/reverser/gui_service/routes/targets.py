@@ -579,3 +579,68 @@ def patch_target(name: str, body: PatchTargetRequest) -> dict:
         tmod.save_target(t)
 
     return _target_detail(t)
+
+
+# --- Task 28: Address management endpoints ---
+
+@router.post("/api/targets/{name}/addresses")
+def add_address_endpoint(name: str, body: AddAddressRequest) -> dict:
+    """Add a new address to a target."""
+    tmod = _targets_mod()
+    try:
+        t = tmod.load_target(name)
+    except FileNotFoundError:
+        raise HTTPException(404, detail=f"unknown target: {name!r}")
+    try:
+        t = tmod.add_address(
+            t,
+            body.value,
+            body.kind,  # type: ignore[arg-type]
+            label=body.label,
+            make_primary=body.make_primary,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc))
+    return _target_detail(t)
+
+
+@router.patch("/api/targets/{name}/addresses/{address_id}")
+def patch_address_endpoint(name: str, address_id: str, body: PatchAddressRequest) -> dict:
+    """Set an address as primary, retire it, or relabel it."""
+    tmod = _targets_mod()
+    try:
+        t = tmod.load_target(name)
+    except FileNotFoundError:
+        raise HTTPException(404, detail=f"unknown target: {name!r}")
+
+    try:
+        if body.make_primary:
+            t = tmod.set_primary(t, address_id)
+        if body.retire:
+            t = tmod.retire_address(t, address_id)
+        if body.label is not None:
+            import dataclasses as _dc
+            new_addresses = [
+                _dc.replace(a, label=body.label) if a.id == address_id else a
+                for a in t.addresses
+            ]
+            t = _dc.replace(t, addresses=new_addresses)
+            tmod.save_target(t)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(400, detail=str(exc))
+    return _target_detail(t)
+
+
+@router.post("/api/targets/{name}/addresses/{address_id}/rehash")
+def rehash_address_endpoint(name: str, address_id: str) -> dict:
+    """Re-compute the sha256 for a binary address."""
+    tmod = _targets_mod()
+    try:
+        t = tmod.load_target(name)
+    except FileNotFoundError:
+        raise HTTPException(404, detail=f"unknown target: {name!r}")
+    try:
+        t = tmod.rehash_binary_address(t, address_id)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc))
+    return _target_detail(t)

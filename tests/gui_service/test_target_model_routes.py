@@ -175,3 +175,71 @@ async def test_patch_target_notes(client, tmp_path, monkeypatch):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["notes"] == "primary domain controller"
+
+
+# ---------------------------------------------------------------------------
+# Task 28 — address management
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_add_address_endpoint(client, tmp_path, monkeypatch):
+    """POST /api/targets/{name}/addresses adds a new address."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    tmod.create_target("dc1", "network", "10.0.0.5")
+
+    r = await client.post("/api/targets/dc1/addresses", headers=HEADERS, json={
+        "value": "10.0.0.6",
+        "kind": "ip",
+        "make_primary": False,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["addresses"]) == 2
+    values = {a["value"] for a in body["addresses"]}
+    assert "10.0.0.6" in values
+
+
+@pytest.mark.asyncio
+async def test_set_primary_endpoint(client, tmp_path, monkeypatch):
+    """PATCH /api/targets/{name}/addresses/{id} with make_primary=true promotes the address."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    t = tmod.create_target("dc1", "network", "10.0.0.5")
+    t = tmod.add_address(t, "10.0.0.6", kind="ip")
+    second_id = t.addresses[1].id
+
+    r = await client.patch(
+        f"/api/targets/dc1/addresses/{second_id}",
+        headers=HEADERS,
+        json={"make_primary": True},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["primary_address_id"] == second_id
+
+
+@pytest.mark.asyncio
+async def test_retire_address_endpoint(client, tmp_path, monkeypatch):
+    """PATCH /api/targets/{name}/addresses/{id} with retire=true retires the address."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    t = tmod.create_target("dc1", "network", "10.0.0.5")
+    t = tmod.add_address(t, "10.0.0.6", kind="ip", make_primary=True)
+    first_id = t.addresses[0].id
+
+    r = await client.patch(
+        f"/api/targets/dc1/addresses/{first_id}",
+        headers=HEADERS,
+        json={"retire": True},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    retired = next(a for a in body["addresses"] if a["id"] == first_id)
+    assert retired["status"] == "retired"
