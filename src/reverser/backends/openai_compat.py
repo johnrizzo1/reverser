@@ -223,8 +223,13 @@ class OpenAICompatBackend(Backend):
         model: str,
         api_base: str = "http://localhost:11434/v1",
         api_key: str = "not-needed",
+        model_family: str | None = None,
     ):
         self._model = model
+        if model_family is None:
+            self._family = "deepseek" if _is_deepseek_family(model) else "generic"
+        else:
+            self._family = model_family
         self._openai_tools, self._handlers = mcp_tools_to_openai(tools)
         self._tool_names = set(self._handlers.keys())
         self._client = AsyncOpenAI(
@@ -271,6 +276,13 @@ class OpenAICompatBackend(Backend):
         allowed_tools: list[str] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         tools_for_model, tool_names = self._filtered_tools(allowed_tools)
+
+        if self._family == "deepseek" and tools_for_model:
+            system_prompt = (
+                system_prompt
+                + "\n\n"
+                + _build_deepseek_tools_preamble(tools_for_model)
+            )
 
         messages = [
             {"role": "system", "content": system_prompt},

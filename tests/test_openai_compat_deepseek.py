@@ -138,3 +138,142 @@ def test_bare_json_still_matches_when_unwrapped():
     )
     calls = _extract_text_tool_calls(assistant_msg, {"bash"})
     assert len(calls) == 2
+
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+
+def _mk_response(content, tool_calls=None, finish_reason="stop"):
+    msg = MagicMock()
+    msg.content = content
+    msg.tool_calls = tool_calls
+    msg.role = "assistant"
+    msg.model_dump = lambda: {"reasoning": None}
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=msg, finish_reason=finish_reason)]
+    )
+
+
+@pytest.mark.asyncio
+async def test_deepseek_preamble_is_appended_to_system_prompt(monkeypatch):
+    """When family is deepseek and tools are present, the preamble is
+    appended to the system prompt sent on the chat-completions request.
+    """
+    from reverser.backends.openai_compat import OpenAICompatBackend
+
+    backend = OpenAICompatBackend(
+        tools=[], model="deepseek-coder-v2-lite-instruct", api_key="x",
+    )
+    backend._handlers = {"bash": AsyncMock(return_value=("ok", False))}
+    backend._tool_names = {"bash"}
+    backend._openai_tools = [{
+        "type": "function",
+        "function": {
+            "name": "bash",
+            "description": "Run a shell command",
+            "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}},
+        },
+    }]
+
+    create_mock = AsyncMock(return_value=_mk_response("done"))
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock))
+    )
+
+    async for _ in backend.run(prompt="hi", system_prompt="be helpful", max_turns=1):
+        pass
+
+    create_mock.assert_called_once()
+    sent_messages = create_mock.call_args.kwargs["messages"]
+    system_msg = sent_messages[0]
+    assert system_msg["role"] == "system"
+    assert system_msg["content"].startswith("be helpful")
+    assert "<tool_call>" in system_msg["content"]
+    assert "bash" in system_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_generic_family_does_not_get_preamble(monkeypatch):
+    """A non-DeepSeek model must not get the preamble (no regression for
+    Qwen3/Gemma/etc., which have their own paths).
+    """
+    from reverser.backends.openai_compat import OpenAICompatBackend
+
+    backend = OpenAICompatBackend(tools=[], model="qwen3-coder", api_key="x")
+    backend._handlers = {"bash": AsyncMock(return_value=("ok", False))}
+    backend._tool_names = {"bash"}
+    backend._openai_tools = [{
+        "type": "function",
+        "function": {"name": "bash", "description": "x", "parameters": {}},
+    }]
+
+    create_mock = AsyncMock(return_value=_mk_response("done"))
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock))
+    )
+
+    async for _ in backend.run(prompt="hi", system_prompt="be helpful", max_turns=1):
+        pass
+
+    sent_messages = create_mock.call_args.kwargs["messages"]
+    assert sent_messages[0]["content"] == "be helpful"
+    assert "<tool_call>" not in sent_messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_model_family_override_forces_deepseek(monkeypatch):
+    """model_family='deepseek' forces preamble even when the model name
+    doesn't say 'deepseek'.
+    """
+    from reverser.backends.openai_compat import OpenAICompatBackend
+
+    backend = OpenAICompatBackend(
+        tools=[], model="custom-finetune-tag", api_key="x",
+        model_family="deepseek",
+    )
+    backend._handlers = {"bash": AsyncMock(return_value=("ok", False))}
+    backend._tool_names = {"bash"}
+    backend._openai_tools = [{
+        "type": "function",
+        "function": {"name": "bash", "description": "x", "parameters": {}},
+    }]
+
+    create_mock = AsyncMock(return_value=_mk_response("done"))
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock))
+    )
+
+    async for _ in backend.run(prompt="hi", system_prompt="be helpful", max_turns=1):
+        pass
+
+    assert "<tool_call>" in create_mock.call_args.kwargs["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_model_family_override_forces_generic(monkeypatch):
+    """And model_family='generic' suppresses the preamble even on
+    deepseek-named models.
+    """
+    from reverser.backends.openai_compat import OpenAICompatBackend
+
+    backend = OpenAICompatBackend(
+        tools=[], model="deepseek-coder-v2-lite-instruct", api_key="x",
+        model_family="generic",
+    )
+    backend._handlers = {"bash": AsyncMock(return_value=("ok", False))}
+    backend._tool_names = {"bash"}
+    backend._openai_tools = [{
+        "type": "function",
+        "function": {"name": "bash", "description": "x", "parameters": {}},
+    }]
+
+    create_mock = AsyncMock(return_value=_mk_response("done"))
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock))
+    )
+
+    async for _ in backend.run(prompt="hi", system_prompt="be helpful", max_turns=1):
+        pass
+
+    assert "<tool_call>" not in create_mock.call_args.kwargs["messages"][0]["content"]
