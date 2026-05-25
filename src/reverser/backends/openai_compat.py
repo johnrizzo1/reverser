@@ -84,6 +84,47 @@ def _is_deepseek_family(model: str | None) -> bool:
     return "deepseek" in (model or "").lower()
 
 
+def _build_deepseek_tools_preamble(openai_tools: list[dict]) -> str:
+    """Render a system-prompt tools preamble for DeepSeek-family models.
+
+    DeepSeek-Coder-V2-Lite-Instruct has no native tool-call format in its
+    chat template, so LM Studio can't translate the OpenAI ``tools`` array
+    into anything the model sees. We bridge that by listing the tools in
+    the system prompt and telling the model to emit calls as::
+
+        <tool_call>{"name": "TOOL_NAME", "arguments": {...}}</tool_call>
+
+    The existing ``_JSON_TOOL_PATTERNS[1]`` parser already matches this
+    format, and the existing ``display_content`` scrub already strips it
+    from the chat UI, so no additional parsing or scrubbing is required.
+    """
+    if not openai_tools:
+        return ""
+
+    lines: list[str] = [
+        "You have access to the following tools. When you need to act, "
+        "call a tool — do not describe what you would do, do it.",
+        "",
+        "Available tools:",
+    ]
+    for t in openai_tools:
+        fn = t.get("function", {})
+        name = fn.get("name", "")
+        description = fn.get("description", "")
+        params = fn.get("parameters", {})
+        lines.append(f"- {name}: {description}")
+        lines.append(f"  parameters: {json.dumps(params)}")
+    lines.extend([
+        "",
+        "Wire format. Emit each tool call exactly as:",
+        '  <tool_call>{"name": "TOOL_NAME", "arguments": {"arg": "value"}}</tool_call>',
+        "",
+        "Use only the tools listed above. After a tool result is returned, "
+        "continue with another tool call or a final answer.",
+    ])
+    return "\n".join(lines)
+
+
 def _parse_qwen3_xml_calls(text: str, known_tools: set[str]) -> list[tuple[str, str]]:
     """Extract tool calls from Qwen3's native XML format."""
     results = []
