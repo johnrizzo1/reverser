@@ -57,7 +57,8 @@ async def test_list_targets_model_empty(client):
 
 @pytest.mark.asyncio
 async def test_list_targets_model_after_create(client, tmp_path, monkeypatch):
-    """After creating a Target on disk, GET /api/targets includes its summary."""
+    """After creating a Target on disk, GET /api/targets includes its summary with
+    all Target-model fields populated."""
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
     from reverser import paths, targets as tmod
     paths._reset_caches_for_tests()
@@ -66,8 +67,63 @@ async def test_list_targets_model_after_create(client, tmp_path, monkeypatch):
 
     r = await client.get("/api/targets", headers=HEADERS)
     assert r.status_code == 200
-    names = [t["name"] for t in r.json()["targets"]]
+    payload = r.json()
+    names = [t["name"] for t in payload["targets"]]
     assert "dc1" in names
+
+    entry = next(t for t in payload["targets"] if t["name"] == "dc1")
+    assert entry["kind"] == "network"
+    assert entry["primary_address"] == "10.0.0.5"
+    assert entry["address_count"] == 1
+    assert isinstance(entry["updated_at"], str) and entry["updated_at"]
+
+
+@pytest.mark.asyncio
+async def test_list_targets_model_multi_address(client, tmp_path, monkeypatch):
+    """address_count reflects the total number of addresses on the target."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    t = tmod.create_target("dc1", "network", "10.0.0.5")
+    tmod.add_address(t, "10.0.0.6", kind="ip")
+
+    r = await client.get("/api/targets", headers=HEADERS)
+    assert r.status_code == 200
+    entry = next(t for t in r.json()["targets"] if t["name"] == "dc1")
+    assert entry["address_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_list_targets_legacy_dir_without_target_json(client, tmp_path, monkeypatch):
+    """A directory in targets/ without a target.json is included in the list
+    with Target-model fields set to null/0 but legacy fields still present."""
+    targets_dir = tmp_path / "targets"
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(targets_dir))
+    from reverser import paths
+    paths._reset_caches_for_tests()
+
+    # Simulate a legacy target directory with no target.json.
+    legacy_dir = targets_dir / "old-legacy"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+
+    r = await client.get("/api/targets", headers=HEADERS)
+    assert r.status_code == 200
+    payload = r.json()
+    names = [t["name"] for t in payload["targets"]]
+    assert "old-legacy" in names
+
+    entry = next(t for t in payload["targets"] if t["name"] == "old-legacy")
+    # Legacy fields must be present.
+    assert "has_kb" in entry
+    assert "has_scope" in entry
+    assert "archived" in entry
+    assert entry["archived"] is False
+    # Target-model fields default to null/0 when target.json is absent.
+    assert entry["kind"] is None
+    assert entry["primary_address"] is None
+    assert entry["address_count"] == 0
+    assert entry["updated_at"] is None
 
 
 @pytest.mark.asyncio

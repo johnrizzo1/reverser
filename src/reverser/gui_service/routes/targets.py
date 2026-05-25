@@ -128,6 +128,7 @@ def list_targets() -> dict:
     root = _targets_root()
     if not root.is_dir():
         return {"targets": []}
+    tmod = _targets_mod()
     targets = []
     for child in sorted(root.iterdir()):
         if not child.is_dir():
@@ -135,12 +136,25 @@ def list_targets() -> dict:
         # Skip hidden / non-canonical directories ("." prefix, etc.)
         if child.name.startswith("."):
             continue
-        targets.append({
+        entry: dict = {
             "name": child.name,
             "has_kb": (child / "state.db").is_file(),
             "has_scope": (child / "scope.toml").is_file(),
             "archived": (child / ".archived").is_file(),
-        })
+        }
+        # Augment with Target-model fields when target.json exists.
+        try:
+            t = tmod.load_target(child.name)
+            entry["kind"] = t.kind
+            entry["primary_address"] = t.primary_address.value
+            entry["address_count"] = len(t.addresses)
+            entry["updated_at"] = t.updated_at
+        except Exception:
+            entry["kind"] = None
+            entry["primary_address"] = None
+            entry["address_count"] = 0
+            entry["updated_at"] = None
+        targets.append(entry)
     return {"targets": targets}
 
 
