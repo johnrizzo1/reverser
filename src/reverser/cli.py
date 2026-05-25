@@ -102,6 +102,11 @@ def main():
         action="store_true",
         help="With --resume: take over a session whose process is still running.",
     )
+    interactive_parser.add_argument(
+        "--address",
+        default=None,
+        help="Override the target's primary address for this session",
+    )
     add_backend_args(interactive_parser)
 
     # Target management subcommand group
@@ -366,25 +371,54 @@ def _run_interactive(args):
 
     is_web_profile = profile_key in _WEB_PROFILES
 
+    # resolved_target_obj is set when we go through resolve_target so that
+    # run_tui can use AgentSession.from_target (populates target_name +
+    # active_address_id on the session snapshot).
+    resolved_target_obj = None
+
     if target and resume_snap is None:
-        # Only validate target on fresh sessions (resume targets came from snapshot)
+        # Only validate/resolve target on fresh sessions (resume targets came from snapshot)
         if is_url(target):
-            pass
-        else:
-            target = os.path.abspath(target)
-            if not os.path.isfile(target):
-                print(f"Error: file not found: {target}", file=sys.stderr)
+            # Web targets: resolve through Target model so the snapshot carries identity
+            from .session_start import resolve_target as _resolve_target
+            override_addr = getattr(args, "address", None)
+            try:
+                resolved_target_obj = _resolve_target(target, override_address=override_addr)
+                target = resolved_target_obj.primary_address.value
+            except Exception as exc:
+                print(f"Error resolving target: {exc}", file=sys.stderr)
                 sys.exit(1)
-            # If it's a zip archive, extract and use the extraction directory
-            extract_dir, members = maybe_extract_archive(target)
-            if extract_dir:
-                print(f"Extracted zip to: {extract_dir}", file=sys.stderr)
-                for m in members:
-                    print(f"  {os.path.relpath(m, extract_dir)}", file=sys.stderr)
-                if len(members) == 1:
-                    target = members[0]
-                else:
-                    target = extract_dir
+        else:
+            # Could be a named target, a file path, or a raw network address.
+            # Try resolve_target first (handles named targets + raw IPs/hostnames).
+            # Fall back to legacy file-path logic if it looks like a file.
+            from .session_start import resolve_target as _resolve_target
+            override_addr = getattr(args, "address", None)
+            # If it looks like an existing file path, use legacy extraction then resolve.
+            abs_path = os.path.abspath(target)
+            if os.path.isfile(abs_path):
+                # Zip extraction before Target resolution
+                extract_dir, members = maybe_extract_archive(abs_path)
+                if extract_dir:
+                    print(f"Extracted zip to: {extract_dir}", file=sys.stderr)
+                    for m in members:
+                        print(f"  {os.path.relpath(m, extract_dir)}", file=sys.stderr)
+                    abs_path = members[0] if len(members) == 1 else extract_dir
+                target = abs_path
+                try:
+                    resolved_target_obj = _resolve_target(target, override_address=override_addr)
+                    target = resolved_target_obj.primary_address.value
+                except Exception as exc:
+                    print(f"Error resolving target: {exc}", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                # Named target or raw network address — resolve_target handles all cases
+                try:
+                    resolved_target_obj = _resolve_target(target, override_address=override_addr)
+                    target = resolved_target_obj.primary_address.value
+                except Exception as exc:
+                    print(f"Error resolving target: {exc}", file=sys.stderr)
+                    sys.exit(1)
 
     from .tui.app import run_tui
     run_tui(
@@ -396,6 +430,7 @@ def _run_interactive(args):
         model=args.model,
         api_base=args.api_base,
         resume_from=resume_snap,
+        target_obj=resolved_target_obj,
     )
 
 

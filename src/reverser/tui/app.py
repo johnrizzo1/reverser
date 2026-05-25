@@ -433,6 +433,7 @@ class ReverserApp(App):
         model: str | None = None,
         api_base: str | None = None,
         resume_from=None,  # SessionSnapshot | None
+        target_obj=None,   # Target | None — when set, AgentSession.from_target is used
     ):
         super().__init__()
         self.binary_path = binary_path
@@ -446,6 +447,7 @@ class ReverserApp(App):
         self.session: AgentSession | None = None
         self._resume_from = resume_from
         self._was_resumed = resume_from is not None
+        self._target_obj = target_obj  # rich Target object for from_target path
 
     @property
     def _is_web_profile(self) -> bool:
@@ -536,8 +538,7 @@ class ReverserApp(App):
         if self.session:
             self.session.close()
         self.profile = get_profile(self.profile_key)
-        self.session = AgentSession(
-            binary_path=self.binary_path,
+        _session_kwargs = dict(
             profile=self.profile,
             budget=self.budget,
             max_turns=self.max_turns,
@@ -546,6 +547,17 @@ class ReverserApp(App):
             api_base=self.api_base,
             resume_from=self._resume_from,
         )
+        if self._target_obj is not None and self._resume_from is None:
+            # Use rich Target object so the snapshot carries target_name +
+            # active_address_id (from_target back-patches these after construction).
+            self.session = AgentSession.from_target(self._target_obj, **_session_kwargs)
+            # Only use target_obj for the first session; profile switches start fresh.
+            self._target_obj = None
+        else:
+            self.session = AgentSession(
+                binary_path=self.binary_path,
+                **_session_kwargs,
+            )
         # Resume snapshot is consumed; clear it so subsequent _init_session
         # calls (e.g. profile switch) construct a fresh session.
         self._resume_from = None
@@ -1045,6 +1057,7 @@ def run_tui(
     model: str | None = None,
     api_base: str | None = None,
     resume_from=None,  # SessionSnapshot | None
+    target_obj=None,  # Target | None — when set, AgentSession.from_target is used
 ):
     """Launch the interactive TUI."""
     _patch_textual_utf8_decoder()
@@ -1057,5 +1070,6 @@ def run_tui(
         model=model,
         api_base=api_base,
         resume_from=resume_from,
+        target_obj=target_obj,
     )
     app.run()
