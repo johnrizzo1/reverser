@@ -123,6 +123,22 @@ def main():
     p_rename.add_argument("old_name")
     p_rename.add_argument("new_name")
 
+    p_add = target_sub.add_parser("add-address", help="Add an address to a target")
+    p_add.add_argument("name")
+    p_add.add_argument("value")
+    p_add.add_argument("--label", default=None)
+    p_add.add_argument("--primary", action="store_true",
+                       help="Promote the new address to primary")
+
+    p_setp = target_sub.add_parser("set-primary", help="Promote an address to primary")
+    p_setp.add_argument("name")
+    p_setp.add_argument("address",
+                        help="Address id (uuid hex) or address value")
+
+    p_ret = target_sub.add_parser("retire-address", help="Mark an address retired")
+    p_ret.add_argument("name")
+    p_ret.add_argument("address")
+
     # Writeup command
     writeup_parser = subparsers.add_parser("writeup", help="Generate a markdown writeup from a session log")
     writeup_parser.add_argument("log_file", help="Path to the .jsonl session log")
@@ -490,6 +506,31 @@ def _run_target(args):
         from reverser import targets
         t = targets.rename_target(args.old_name, args.new_name)
         print(f"Renamed to {t.name!r}")
+        return
+
+    if args.target_cmd == "add-address":
+        from reverser import targets
+        t = targets.load_target(args.name)
+        kind = targets._infer_address_kind(args.value, t.kind)
+        t = targets.add_address(t, args.value, kind=kind,
+                                label=args.label, make_primary=args.primary)
+        print(f"Added {args.value}; primary is now {t.primary_address.value}")
+        return
+
+    if args.target_cmd == "set-primary":
+        from reverser import targets
+        t = targets.load_target(args.name)
+        addr_id = _resolve_address_id(t, args.address)
+        t = targets.set_primary(t, addr_id)
+        print(f"Primary set to {t.primary_address.value}")
+        return
+
+    if args.target_cmd == "retire-address":
+        from reverser import targets
+        t = targets.load_target(args.name)
+        addr_id = _resolve_address_id(t, args.address)
+        t = targets.retire_address(t, addr_id)
+        print("Address retired")
         return
 
 
