@@ -106,6 +106,9 @@ def _ensure_browser(target: str, viewport: tuple[int, int] = (1280, 800)):
     web_browser_close() before switching.
     """
     if _state["browser"] and _state["browser"].is_connected():
+        # NOTE: The string compared here is the session's currently-resolved address
+        # value (sess.active_address.value), so rebinding the target's primary
+        # address correctly invalidates the cached browser singleton.
         if _state["target"] != target:
             raise RuntimeError(
                 f"Browser is running for target={_state['target']!r}. "
