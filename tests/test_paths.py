@@ -133,10 +133,12 @@ def test_log_resolved_roots_writes_to_stderr_when_no_logging_configured(tmp_path
         "from reverser.paths import log_resolved_roots;"
         "log_resolved_roots()"
     )
+    src_path = str(Path(__file__).resolve().parent.parent / "src")
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONPATH": src_path},
     )
     assert result.returncode == 0, result.stderr
     # Output goes to stderr.
