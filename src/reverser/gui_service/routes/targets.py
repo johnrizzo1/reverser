@@ -7,6 +7,14 @@ empty lists.
 Note: KB method names differ from the plan spec — actual names are:
   get_hosts, get_services, get_credentials, get_findings,
   get_artifacts, get_notes, list_hypotheses
+
+Target-model endpoints (Tasks 26-28):
+  GET  /api/targets                              — Target model summary list
+  GET  /api/targets/{name}                       — Full Target dict
+  POST /api/targets                              — Create a new Target
+  PATCH /api/targets/{name}                      — Rename / update notes
+  POST /api/targets/{name}/addresses             — Add an address
+  PATCH /api/targets/{name}/addresses/{id}       — Set primary / retire
 """
 import ipaddress
 import logging
@@ -17,10 +25,11 @@ from collections import Counter
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, status
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from ...kb import for_target
 from ...sessions import is_session_alive
@@ -452,3 +461,48 @@ def delete_target(target: str) -> Response:
         dest = trash / f"{stamp}-{target}.{suffix}"
     shutil.move(str(target_dir), str(dest))
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Target model CRUD endpoints (Tasks 26-28)
+# ---------------------------------------------------------------------------
+
+# Lazy import to avoid circular dependency at module load time.
+def _targets_mod():
+    from reverser import targets as _tmod
+    return _tmod
+
+
+# --- Helpers ---
+
+def _target_summary(t) -> dict:
+    """Return a concise summary dict for a Target object."""
+    return {
+        "name": t.name,
+        "kind": t.kind,
+        "primary_address": t.primary_address.value,
+        "address_count": len(t.addresses),
+        "updated_at": t.updated_at,
+    }
+
+
+def _target_detail(t) -> dict:
+    """Return the full Target dict."""
+    return t.to_dict()
+
+
+# --- Task 26: Read endpoints ---
+
+@router.get("/api/targets/{name}")
+def get_target_detail(name: str) -> dict:
+    """Return the full Target model dict for a known target.
+
+    NOTE: FastAPI matches more-specific routes first (e.g. /api/targets/{target}/kb)
+    before falling back to this bare-name route.
+    """
+    tmod = _targets_mod()
+    try:
+        t = tmod.load_target(name)
+    except FileNotFoundError:
+        raise HTTPException(404, detail=f"unknown target: {name!r}")
+    return _target_detail(t)
