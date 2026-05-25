@@ -94,7 +94,12 @@ export type SessionRow = {
 export type SessionsResponse = { sessions: SessionRow[] };
 
 export type CreateSessionRequest = {
-  target: string;
+  /** Raw address / path — legacy field; server uses target_name first when provided. */
+  target?: string;
+  /** Logical target name (target/session decoupling). */
+  target_name?: string;
+  /** Per-session address override when using an existing target. */
+  address?: string;
   profile: string;
   backend: string;
   model: string | null;
