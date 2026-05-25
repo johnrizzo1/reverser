@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { useTargetKB, useSessions } from "@/api/queries";
+import { useTarget } from "@/state/targets-store";
 import { getSessionStore, type HypothesisRow } from "@/state/session-store";
 import { cn } from "@/lib/utils";
 
@@ -116,8 +117,16 @@ export function HypothesesPane({ sessionId }: { sessionId: string }) {
   const hypothesesMap = useStore(store, (s) => s.hypotheses);
   const seedHypotheses = useStore(store, (s) => s.seedHypotheses);
   const sessions = useSessions();
-  const target = sessions.data?.sessions.find((s) => s.id === sessionId)?.target ?? null;
-  const kb = useTargetKB(target);
+  const sessionRow = sessions.data?.sessions.find((s) => s.id === sessionId);
+  // Prefer the logical target name (new field); fall back to the raw target string.
+  const targetName = sessionRow?.target_name || sessionRow?.target || null;
+  const targetQuery = useTarget(targetName);
+  const targetDetail = targetQuery.data;
+  // Resolve the primary address value for the KB lookup.
+  const primaryAddressValue = targetDetail
+    ? (targetDetail.addresses.find((a) => a.id === targetDetail.primary_address_id)?.value ?? null)
+    : targetName;
+  const kb = useTargetKB(primaryAddressValue);
 
   useEffect(() => {
     const kbHypotheses = (kb.data?.hypotheses ?? []) as HypothesisRow[];
