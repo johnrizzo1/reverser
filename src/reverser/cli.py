@@ -104,6 +104,16 @@ def main():
     )
     add_backend_args(interactive_parser)
 
+    # Target management subcommand group
+    target_parser = subparsers.add_parser("target", help="Manage targets")
+    target_sub = target_parser.add_subparsers(dest="target_cmd", required=True)
+
+    p_create = target_sub.add_parser("create", help="Create a new target")
+    p_create.add_argument("name")
+    p_create.add_argument("--kind", choices=["network", "binary"], required=True)
+    p_create.add_argument("--address", required=True)
+    p_create.add_argument("--label", default=None)
+
     # Writeup command
     writeup_parser = subparsers.add_parser("writeup", help="Generate a markdown writeup from a session log")
     writeup_parser.add_argument("log_file", help="Path to the .jsonl session log")
@@ -138,7 +148,9 @@ def main():
         parser.print_help(sys.stderr)
         sys.exit(2)
 
-    if args.command == "writeup":
+    if args.command == "target":
+        _run_target(args)
+    elif args.command == "writeup":
         _run_writeup(args)
     elif args.command in ("interactive", "i"):
         _run_interactive(args)
@@ -432,6 +444,25 @@ def _resolve_resume(args, target_arg):
         return None
 
     return snap
+
+
+def _resolve_address_id(target, ident):
+    """Return address.id for the address matching by id or value; raise SystemExit if not found."""
+    for a in target.addresses:
+        if a.id == ident or a.value == ident:
+            return a.id
+    raise SystemExit(f"No address matching {ident!r} on target {target.name!r}")
+
+
+def _run_target(args):
+    if args.target_cmd == "create":
+        from reverser import targets
+        t = targets.create_target(
+            name=args.name, kind=args.kind,
+            initial_address=args.address, label=args.label,
+        )
+        print(f"Created target {t.name!r} with address {t.primary_address.value}")
+        return
 
 
 def _run_writeup(args):
