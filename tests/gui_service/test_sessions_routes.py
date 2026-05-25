@@ -329,3 +329,55 @@ async def test_mark_done_on_historical_snapshot_updates_state(client, tmp_path):
 async def test_mark_done_unknown_session_returns_404(client):
     r = await client.post("/api/sessions/does-not-exist/done", headers=HEADERS)
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Task 29: CreateSession accepts target_name + address override
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_session_with_existing_target_name(client, tmp_path, monkeypatch):
+    """POST /api/sessions with target_name resolves the named target and starts
+    a session using its primary address value."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    # Pre-create a named target so resolve_target finds it by name.
+    tmod.create_target("dc1", "network", "10.0.0.5")
+
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post("/api/sessions", headers=HEADERS, json={
+            "target_name": "dc1",
+            "profile": "general",
+            "backend": "claude",
+        })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "id" in body
+    assert body["state"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_create_session_with_address_override(client, tmp_path, monkeypatch):
+    """POST /api/sessions with target_name + address promotes the address to
+    primary on the target before starting the session."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    t = tmod.create_target("dc1", "network", "10.0.0.5")
+    original_primary = t.primary_address.value
+
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post("/api/sessions", headers=HEADERS, json={
+            "target_name": "dc1",
+            "address": "10.0.0.99",
+            "profile": "general",
+            "backend": "claude",
+        })
+    assert r.status_code == 200, r.text
+
+    # Verify the new address was added and is now primary on disk.
+    reloaded = tmod.load_target("dc1")
+    assert reloaded.primary_address.value == "10.0.0.99"

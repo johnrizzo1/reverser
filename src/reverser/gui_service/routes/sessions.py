@@ -1,9 +1,10 @@
 """POST/GET /api/sessions and its sub-resources."""
 import json
 import os
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from ...session_log import load_session_log
 from ...sessions import SessionNotFoundError, SessionStateError
@@ -24,13 +25,25 @@ _BACKENDS_REQUIRING_MODEL = frozenset(
 
 
 class CreateSession(BaseModel):
-    target: str
+    # Legacy field: raw address / binary path. Optional when target_name is given.
+    target: Optional[str] = None
+    # New fields (Task 29): resolve by named target + optional address override.
+    target_name: Optional[str] = None
+    address: Optional[str] = None
     profile: str
     backend: str
     model: str | None = None
     api_base: str | None = None
     budget: float = 5.0
     max_turns: int = 50
+
+    @model_validator(mode="after")
+    def _require_target_or_name(self) -> "CreateSession":
+        if self.target is None and self.target_name is None:
+            raise ValueError(
+                "Either 'target' or 'target_name' must be provided"
+            )
+        return self
 
 
 class MessageBody(BaseModel):
@@ -69,9 +82,25 @@ def list_sessions(request: Request) -> dict:
 
 @router.post("/api/sessions")
 async def create_session(request: Request, body: CreateSession) -> dict:
+    # Resolve the effective target address string.
+    if body.target_name is not None:
+        # New path: resolve by Target name (with optional address override).
+        from ...session_start import resolve_target
+        try:
+            resolved = resolve_target(body.target_name, override_address=body.address)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"could not resolve target {body.target_name!r}: {exc}",
+            )
+        effective_target = resolved.primary_address.value
+    else:
+        # Legacy path: raw address / binary path.
+        effective_target = body.target  # type: ignore[assignment]
+
     try:
         return await _manager(request).create_session(
-            target=body.target,
+            target=effective_target,
             profile_key=body.profile,
             backend_name=body.backend,
             model=body.model,
