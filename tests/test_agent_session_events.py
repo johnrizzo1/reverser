@@ -216,6 +216,49 @@ def test_build_prompt_advises_kb_on_fresh_session_start(tmp_path, monkeypatch):
     assert "resuming" not in lowered
 
 
+def test_agent_session_resolves_active_address_from_target(tmp_path, monkeypatch):
+    """AgentSession.from_target() stores the Target as target_obj and its primary
+    address as active_address; the legacy self.target string equals the primary
+    address value so all existing code paths still work."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import paths
+    paths._reset_caches_for_tests()
+
+    from reverser import targets
+    target = targets.create_target("dc1", "network", "10.0.0.5")
+
+    from reverser.profiles import get_profile
+    fb = FakeBackend()
+
+    with patch("reverser.agent_session.create_backend", return_value=fb):
+        from reverser.agent_session import AgentSession
+        sess = AgentSession.from_target(target, profile=get_profile("general"))
+
+    # Rich-object fields set by from_target
+    assert sess.target_obj is not None
+    assert sess.target_obj.name == "dc1"
+    assert sess.active_address is not None
+    assert sess.active_address.value == "10.0.0.5"
+    assert sess.active_address.id == target.primary_address_id
+
+    # Legacy string field still works so existing code doesn't break
+    assert "10.0.0.5" in sess.target
+
+    # Snapshot carries the new logical fields too
+    assert sess._snapshot.target_name == "dc1"
+    assert sess._snapshot.active_address_id == target.primary_address_id
+
+
+def test_agent_session_legacy_path_leaves_target_obj_none(tmp_path, monkeypatch):
+    """The legacy binary_path constructor leaves target_obj and active_address as None
+    so existing behaviour is entirely preserved."""
+    fb = FakeBackend()
+    sess = _make_session(tmp_path, monkeypatch, fb)
+
+    assert sess.target_obj is None
+    assert sess.active_address is None
+
+
 def test_build_prompt_kb_advice_is_one_shot_for_fresh_session(tmp_path, monkeypatch):
     """Same one-shot semantics as the resume hint: the kickoff guidance
     appears only on the first prompt; subsequent prompts don't repeat it.

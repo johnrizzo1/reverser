@@ -14,6 +14,10 @@ from .tools._common import is_url
 from .backends import AgentEvent, create_backend
 from .session_log import SessionLog, session_log_path
 
+# Imported lazily in from_target to avoid a circular-import at module level
+# (targets.py imports sessions.py → agent_session.py would be a cycle).
+# from .targets import Target, Address  # ← NOT a top-level import
+
 # Profiles that operate on web targets rather than binary files
 _WEB_PROFILES = {"webpentest", "webapi", "webrecon"}
 
@@ -130,6 +134,30 @@ class AgentSession:
         except Exception:
             pass
 
+    @classmethod
+    def from_target(cls, target: "Target", **kwargs) -> "AgentSession":  # type: ignore[name-defined]
+        """Construct an AgentSession from a Target, pinning the current primary address.
+
+        The primary address value is used as binary_path so the existing init path
+        works unchanged. After construction, target_obj and active_address are set
+        to carry the rich Target/Address objects for callers that need them, and the
+        snapshot is back-patched with the logical identity fields and re-persisted.
+
+        NOTE: self.target (the legacy string field) is set to the primary address
+        value by _init_new. self.target_obj holds the full Target object.
+        """
+        from .sessions import save as save_snapshot
+        primary = target.primary_address
+        inst = cls(binary_path=primary.value, **kwargs)
+        inst.target_obj = target
+        inst.active_address = primary
+        # Back-patch the snapshot with logical-identity fields now that target_obj
+        # is known (they were empty when _init_new minted the snapshot).
+        inst._snapshot.target_name = target.name
+        inst._snapshot.active_address_id = primary.id
+        save_snapshot(inst._snapshot)
+        return inst
+
     def _init_new(
         self, *, binary_path, profile, budget, max_turns,
         log_path, backend_name, model, api_base, session_id=None,
@@ -138,6 +166,10 @@ class AgentSession:
         from .sessions import (
             new_snapshot, save as save_snapshot, SessionConfig,
         )
+
+        # Legacy object references — set to None here; populated only via from_target.
+        self.target_obj = None   # type: Optional["Target"]  # noqa: F821
+        self.active_address = None  # type: Optional["Address"]  # noqa: F821
 
         self._is_web = profile.key in _WEB_PROFILES
         self._is_url_target = is_url(binary_path) if binary_path else False
@@ -199,6 +231,8 @@ class AgentSession:
             log_path=self._log_path,
             config=config,
             session_id=session_id,
+            target_name=self.target_obj.name if self.target_obj is not None else "",
+            active_address_id=self.active_address.id if self.active_address is not None else "",
         )
         save_snapshot(self._snapshot)
 
@@ -208,6 +242,11 @@ class AgentSession:
         """Restore session state from a snapshot."""
         import os
         from .sessions import save as save_snapshot, ConversationEntry
+
+        # Legacy object references — not populated on the resume path (legacy sessions
+        # do not carry a full Target object). from_target is the only path that sets them.
+        self.target_obj = None
+        self.active_address = None
 
         if snap.config.profile != profile.key:
             raise ValueError(
