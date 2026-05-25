@@ -114,6 +114,15 @@ def main():
     p_create.add_argument("--address", required=True)
     p_create.add_argument("--label", default=None)
 
+    target_sub.add_parser("list", help="List all targets")
+
+    p_show = target_sub.add_parser("show", help="Show a target's details")
+    p_show.add_argument("name")
+
+    p_rename = target_sub.add_parser("rename", help="Rename a target")
+    p_rename.add_argument("old_name")
+    p_rename.add_argument("new_name")
+
     # Writeup command
     writeup_parser = subparsers.add_parser("writeup", help="Generate a markdown writeup from a session log")
     writeup_parser.add_argument("log_file", help="Path to the .jsonl session log")
@@ -462,6 +471,25 @@ def _run_target(args):
             initial_address=args.address, label=args.label,
         )
         print(f"Created target {t.name!r} with address {t.primary_address.value}")
+        return
+
+    if args.target_cmd == "list":
+        from reverser import targets
+        for t in targets.list_targets():
+            print(f"{t.name}\t{t.kind}\t{t.primary_address.value}\t({len(t.addresses)} addrs)")
+        return
+
+    if args.target_cmd == "show":
+        from reverser import targets
+        t = targets.load_target(args.name)
+        import json as _json
+        print(_json.dumps(t.to_dict(), indent=2, sort_keys=True))
+        return
+
+    if args.target_cmd == "rename":
+        from reverser import targets
+        t = targets.rename_target(args.old_name, args.new_name)
+        print(f"Renamed to {t.name!r}")
         return
 
 
