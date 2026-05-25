@@ -76,6 +76,8 @@ export type BackendModelsResponse = { models: BackendModel[] };
 export type SessionRow = {
   id: string;
   target: string;
+  /** Logical target name from server snapshot (Task 17 / target-session decoupling). */
+  target_name?: string;
   profile: string;
   state: "active" | "stopped" | "completed" | "abandoned";
   turns: number;

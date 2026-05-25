@@ -214,6 +214,25 @@ describe("appendUserMessage", () => {
   });
 });
 
+describe("setTargetName", () => {
+  it("populates targetName from target_name when server provides it", () => {
+    const store = makeSessionStore();
+    store.getState().setTargetName({ target_name: "dc1", target: "10.0.0.5" });
+    expect(store.getState().targetName).toBe("dc1");
+  });
+
+  it("falls back to target when target_name is absent", () => {
+    const store = makeSessionStore();
+    store.getState().setTargetName({ target: "10.0.0.5" });
+    expect(store.getState().targetName).toBe("10.0.0.5");
+  });
+
+  it("initializes targetName as empty string", () => {
+    const store = makeSessionStore();
+    expect(store.getState().targetName).toBe("");
+  });
+});
+
 describe("seedFromSessionLog", () => {
   it("rebuilds turns from a log", () => {
     const store = makeSessionStore();

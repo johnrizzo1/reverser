@@ -115,6 +115,8 @@ export type SessionState = {
   connBreakerTripped: boolean;
   log: { level: string; msg: string; ts: number }[];
   replayed: boolean;
+  /** Logical target name (from server snapshot target_name field). */
+  targetName: string;
 };
 
 type Actions = {
@@ -124,6 +126,8 @@ type Actions = {
   seedFromSessionLog: (events: LogEventInput[]) => void;
   seedHypotheses: (rows: HypothesisRow[]) => void;
   seedFindings: (rows: FindingRow[]) => void;
+  /** Populate targetName from a server snapshot (target_name preferred, target as fallback). */
+  setTargetName: (snapshot: { target_name?: string; target?: string }) => void;
 };
 
 function _getOrCreateTurn(turns: Map<number, Turn>, turn: number): Turn {
@@ -153,6 +157,7 @@ const _initialState = (): SessionState => ({
   connBreakerTripped: false,
   log: [],
   replayed: false,
+  targetName: "",
 });
 
 export const makeSessionStore = () =>
@@ -386,6 +391,9 @@ export const makeSessionStore = () =>
       for (const r of rows) m.set(r.id, r);
       return { findings: m };
     }),
+    setTargetName: (snapshot) => set(() => ({
+      targetName: snapshot.target_name || snapshot.target || "",
+    })),
   }));
 
 const _stores = new Map<string, ReturnType<typeof makeSessionStore>>();
