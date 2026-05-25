@@ -617,6 +617,72 @@ def test_latest_for_target_excludes_abandoned_by_default(tmp_path, monkeypatch):
     assert latest.session_id == "stopped-1"
 
 
+def test_snapshot_carries_target_name_and_active_address_id(tmp_path, monkeypatch):
+    """new_snapshot() accepts target_name + active_address_id and they round-trip
+    through save/load. Old snapshots that lack these fields default to empty strings."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import sessions
+
+    snap = sessions.new_snapshot(
+        target="10.0.0.5",
+        log_path="/tmp/log.jsonl",
+        config=sessions.SessionConfig(profile="ad", backend="claude",
+                                      max_turns=10, budget=1.0),
+        target_name="dc1",
+        active_address_id="addr-uuid-1",
+    )
+    assert snap.target_name == "dc1"
+    assert snap.active_address_id == "addr-uuid-1"
+
+    # Round-trip persistence via save + load.
+    sessions.save(snap)
+    loaded = sessions.load("10.0.0.5", snap.session_id)
+    assert loaded.target_name == "dc1"
+    assert loaded.active_address_id == "addr-uuid-1"
+
+
+def test_snapshot_target_name_defaults_empty(tmp_path, monkeypatch):
+    """When target_name / active_address_id are omitted, they default to ''."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser import sessions
+
+    snap = sessions.new_snapshot(
+        target="10.0.0.5",
+        log_path="/tmp/log.jsonl",
+        config=sessions.SessionConfig(profile="general"),
+    )
+    assert snap.target_name == ""
+    assert snap.active_address_id == ""
+
+
+def test_load_old_snapshot_without_target_name_defaults_empty(tmp_path, monkeypatch):
+    """Snapshots written before target_name/active_address_id existed load without error,
+    and both fields default to empty strings."""
+    import json
+    from reverser.sessions import load, snapshot_path
+
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    p = snapshot_path("10.10.10.5", "old-no-target-name")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "session_id": "old-no-target-name",
+        "target": "10.10.10.5",
+        "log_path": "logs/old.jsonl",
+        "state": "stopped",
+        "started_at": "2026-05-09T14:23:00",
+        "last_active_at": "2026-05-09T14:23:00",
+        "config": {"profile": "general"},
+        "stats": {"total_cost": 0.0, "turns": 0},
+        "conversation": [],
+        "ui": {},
+        "schema_version": 1,
+    }))
+
+    snap = load("10.10.10.5", "old-no-target-name")
+    assert snap.target_name == ""
+    assert snap.active_address_id == ""
+
+
 def test_abandoned_state_round_trip(tmp_path, monkeypatch):
     """A snapshot with state='abandoned' loads back correctly."""
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))

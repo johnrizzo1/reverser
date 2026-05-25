@@ -112,6 +112,11 @@ class SessionSnapshot:
 
     schema_version: int = SCHEMA_VERSION
 
+    # NEW — preferred logical identity (Target.name); falls back to `target` if empty
+    target_name: str = ""
+    # NEW — address pinned at session start (Address.id)
+    active_address_id: str = ""
+
 
 # ── ContextVar (used by Session-aware tools, e.g. dispatch_specialist) ──
 
@@ -158,6 +163,8 @@ def make_session_id() -> str:
 def new_snapshot(
     *, target: str, log_path: str, config: SessionConfig,
     session_id: str | None = None,
+    target_name: str = "",
+    active_address_id: str = "",
 ) -> SessionSnapshot:
     """Construct a fresh snapshot for a new session.
 
@@ -165,6 +172,9 @@ def new_snapshot(
     `session_id` to override the default ISO-timestamp id (used by the GUI
     service so the snapshot id matches the id the manager hands back to
     the client).
+
+    `target_name` and `active_address_id` are optional logical-identity fields
+    linking the snapshot to a named Target and its pinned Address.
     """
     now = _now_iso()
     return SessionSnapshot(
@@ -176,6 +186,8 @@ def new_snapshot(
         last_active_at=now,
         config=config,
         pid=os.getpid(),
+        target_name=target_name,
+        active_address_id=active_address_id,
     )
 
 
@@ -303,6 +315,8 @@ def _from_dict(d: dict) -> SessionSnapshot:
         in_flight=InFlightDispatch(**in_flight_data) if in_flight_data else None,
         pid=d.get("pid"),
         schema_version=d.get("schema_version", 1),
+        target_name=d.get("target_name", ""),
+        active_address_id=d.get("active_address_id", ""),
     )
 
 
