@@ -161,6 +161,9 @@ reverser i <target>
 # LM Studio (auto-detects http://localhost:1234/v1)
 reverser i <target> -b lmstudio -m qwen3.6-35b-a3b-ud-mlx
 
+# DeepSeek-Coder-V2-Lite in LM Studio (auto-applies tool-call preamble)
+reverser i <target> -b lmstudio -m deepseek-coder-v2-lite-instruct
+
 # Ollama (auto-detects http://localhost:11434/v1)
 reverser i <target> -b ollama -m qwen3.5:35b-a3b-coding-nvfp4
 
@@ -171,10 +174,18 @@ reverser i <target> -b local -m model-name --api-base http://gpu-server:8000/v1
 Flags:
 
 ```
--b, --backend   Backend: claude (default), ollama, lmstudio, or any name for OpenAI-compatible
--m, --model     Model name/tag (required for non-claude backends)
---api-base      API base URL override
+-b, --backend       Backend: claude (default), ollama, lmstudio, or any name for OpenAI-compatible
+-m, --model         Model name/tag (required for non-claude backends)
+--api-base          API base URL override
+--model-family      Force model family: deepseek or generic (default: auto-detect from --model)
 ```
+
+**DeepSeek-Coder-V2-Lite:** This model's chat template has no native
+tool-call format, so the agent automatically appends a tools preamble to
+the system prompt that teaches it the `<tool_call>{...}</tool_call>`
+wire format. Detection is by `deepseek` substring in `--model`. Override
+with `--model-family deepseek` (force on) or `--model-family generic`
+(force off).
 
 ### Common options (all analysis commands)
 
