@@ -80,3 +80,61 @@ def test_preamble_with_empty_tools_returns_empty_string():
     function itself should be lenient and return an empty string for [].
     """
     assert _build_deepseek_tools_preamble([]) == ""
+
+
+from reverser.backends.openai_compat import _extract_text_tool_calls
+
+
+def test_preamble_format_is_parseable_by_existing_extractor():
+    """The wire format in the preamble must match what the existing
+    text-tool-call extractor parses. This pins that invariant.
+    """
+    tools = [_fake_tool("nmap_scan", "Run nmap",
+                        {"type": "object", "properties": {"target": {"type": "string"}}})]
+    preamble = _build_deepseek_tools_preamble(tools)
+    assert '<tool_call>{"name": "TOOL_NAME"' in preamble
+    assistant_msg = (
+        "I'll scan now.\n"
+        '<tool_call>{"name": "nmap_scan", "arguments": {"target": "10.0.0.1"}}</tool_call>\n'
+        "Standing by for results."
+    )
+    calls = _extract_text_tool_calls(assistant_msg, {"nmap_scan"})
+    assert len(calls) == 1
+    name, args_json = calls[0]
+    assert name == "nmap_scan"
+    import json as _json
+    assert _json.loads(args_json) == {"target": "10.0.0.1"}
+
+
+def test_unknown_tool_is_rejected_by_extractor():
+    """Defense in depth — even if the model invents a tool, we don't run it."""
+    assistant_msg = (
+        '<tool_call>{"name": "rm_rf_slash", "arguments": {}}</tool_call>'
+    )
+    calls = _extract_text_tool_calls(assistant_msg, {"nmap_scan"})
+    assert calls == []
+
+
+def test_wrapped_call_does_not_double_fire():
+    """Regression: a <tool_call>{...}</tool_call> block must only produce
+    one tool call, not two (one for the wrapped pattern + one for the bare
+    JSON inside it). Order of _JSON_TOOL_PATTERNS matters.
+    """
+    assistant_msg = (
+        '<tool_call>{"name": "bash", "arguments": {"cmd": "ls"}}</tool_call>'
+    )
+    calls = _extract_text_tool_calls(assistant_msg, {"bash"})
+    assert len(calls) == 1
+
+
+def test_bare_json_still_matches_when_unwrapped():
+    """Make sure the reorder didn't break bare-JSON extraction for models
+    that don't use the wrapper (this is what test_openai_backend_ids.py
+    exercises via the full backend run).
+    """
+    assistant_msg = (
+        '{"name": "bash", "arguments": {"cmd": "ls"}}\n'
+        '{"name": "bash", "arguments": {"cmd": "pwd"}}'
+    )
+    calls = _extract_text_tool_calls(assistant_msg, {"bash"})
+    assert len(calls) == 2

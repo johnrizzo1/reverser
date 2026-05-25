@@ -18,13 +18,11 @@ log = logging.getLogger(__name__)
 # instead of using the structured tool_calls field. This handles multiple
 # formats including Qwen3's native XML.
 
-# JSON-based patterns
+# JSON-based patterns. Ordered most-specific first so we don't double-match:
+# a wrapped <tool_call>{...}</tool_call> would otherwise also be matched by
+# the bare-JSON pattern, executing the call twice. The extractor stops at
+# the first pattern that yields any matches.
 _JSON_TOOL_PATTERNS = [
-    # {"name": "...", "arguments": {...}}
-    re.compile(
-        r'\{\s*"name"\s*:\s*"(?P<name>[^"]+)"\s*,\s*"arguments"\s*:\s*(?P<args>\{[^}]*\})\s*\}',
-        re.DOTALL,
-    ),
     # <tool_call>{"name": "...", "arguments": {...}}</tool_call>
     re.compile(
         r'<tool_call>\s*\{\s*"name"\s*:\s*"(?P<name>[^"]+)"\s*,\s*"arguments"\s*:\s*(?P<args>\{.*?\})\s*\}\s*</tool_call>',
@@ -33,6 +31,11 @@ _JSON_TOOL_PATTERNS = [
     # ```json\n{"name": "...", "arguments": {...}}\n```
     re.compile(
         r'```(?:json)?\s*\{\s*"name"\s*:\s*"(?P<name>[^"]+)"\s*,\s*"arguments"\s*:\s*(?P<args>\{.*?\})\s*\}\s*```',
+        re.DOTALL,
+    ),
+    # {"name": "...", "arguments": {...}}  (least specific, last resort)
+    re.compile(
+        r'\{\s*"name"\s*:\s*"(?P<name>[^"]+)"\s*,\s*"arguments"\s*:\s*(?P<args>\{[^}]*\})\s*\}',
         re.DOTALL,
     ),
 ]
@@ -192,17 +195,22 @@ def _extract_text_tool_calls(text: str, known_tools: set[str]) -> list[tuple[str
     if results:
         return results
 
-    # Fall back to JSON patterns
+    # Fall back to JSON patterns. Stop at the first pattern that yields any
+    # matches — each is a wrapper around the same inner JSON, so trying
+    # multiple patterns would duplicate-match a single call.
     for pattern in _JSON_TOOL_PATTERNS:
+        pattern_results: list[tuple[str, str]] = []
         for m in pattern.finditer(text):
             name = m.group("name")
             args = m.group("args")
             if name in known_tools:
                 try:
                     json.loads(args)  # validate JSON
-                    results.append((name, args))
+                    pattern_results.append((name, args))
                 except json.JSONDecodeError:
                     continue
+        if pattern_results:
+            return pattern_results
     return results
 
 
