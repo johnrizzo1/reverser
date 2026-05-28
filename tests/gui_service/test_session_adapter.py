@@ -190,6 +190,88 @@ async def test_dispatch_events_publish_to_bus(bus, gui_session):
     assert dispatch_frames[2]["content"] == "open ports: 22, 80"
 
 
+@pytest.mark.asyncio
+async def test_dispatch_events_attach_to_at_least_first_turn(bus, gui_session):
+    """Dispatch events can fire while the parent agent is still early in the
+    turn. They must still attach to a visible chat turn, not hidden turn 0.
+    """
+    frames: list[dict] = []
+    gui_session._agent.stats.turns = 0
+    async with bus.subscribe(gui_session.session_id) as q:
+        gui_session._agent.emit_dispatch_event("ad", "abc123", 0, "start", "{}")
+        frames.append(await asyncio.wait_for(q.get(), timeout=1.0))
+
+    assert frames[0]["type"] == "dispatch"
+    assert frames[0]["turn"] == 1
+
+
+@pytest.mark.asyncio
+async def test_send_message_sets_current_session_for_kb_events(bus, tmp_path, monkeypatch):
+    """GUI sends run in request tasks after session construction.
+
+    KB tools use current_session to emit live hypothesis/finding frames, so
+    GUISession.send_message must bind the wrapped AgentSession for the duration
+    of the turn.
+    """
+    from collections.abc import AsyncIterator
+
+    from reverser.backends.base import AgentEvent, Backend
+    from reverser.sessions import current_session
+
+    class KbWritingBackend(Backend):
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run(self, prompt, system_prompt, *, max_turns=50,
+                      max_budget_usd=5.0, allowed_tools=None) -> AsyncIterator[AgentEvent]:
+            from reverser.tools.kb import kb_add_hypothesis
+
+            yield AgentEvent(kind="turn", turns=1)
+            fn = getattr(kb_add_hypothesis, "handler", None) or kb_add_hypothesis
+            await fn({
+                "target": "10.10.10.5",
+                "statement": "SMB signing may be disabled",
+            })
+            yield AgentEvent(kind="result", subtype="success", cost=0.01, turns=1)
+
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    monkeypatch.setattr("reverser.tools.kb._check_auth", lambda: None)
+    profile = get_profile("general")
+    with patch("reverser.agent_session.create_backend", return_value=KbWritingBackend()):
+        gs = GUISession(
+            session_id="kb-event-test",
+            target="10.10.10.5",
+            profile=profile,
+            backend_name="claude",
+            model=None,
+            api_base=None,
+            budget=5.0,
+            max_turns=50,
+            bus=bus,
+        )
+    try:
+        token = current_session.set(None)
+        frames: list[dict] = []
+        try:
+            async with bus.subscribe(gs.session_id) as q:
+                await gs.send_message("create hypothesis")
+                for _ in range(10):
+                    try:
+                        frames.append(await asyncio.wait_for(q.get(), timeout=0.5))
+                    except asyncio.TimeoutError:
+                        break
+        finally:
+            current_session.reset(token)
+    finally:
+        gs.close()
+
+    hypothesis_frames = [f for f in frames if f.get("type") == "hypothesis"]
+    assert hypothesis_frames, f"expected live hypothesis frame, got: {frames}"
+    assert hypothesis_frames[0]["action"] == "create"
+    assert hypothesis_frames[0]["row"]["statement"] == "SMB signing may be disabled"
+
+
 def test_text_frame_has_turn():
     from reverser.backends.base import AgentEvent
     from reverser.gui_service.session_adapter import _event_to_frame

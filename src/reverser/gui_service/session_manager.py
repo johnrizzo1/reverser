@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..profiles import get_profile, is_network_profile
+from ..sessions import is_session_alive
 from ..sessions import list_all as list_all_snapshots
 from .event_bus import EventBus
 from .session_adapter import GUISession
@@ -158,11 +159,21 @@ class SessionManager:
 
         out = []
         for s in snapshots:
+            state = s.state
+            if (
+                state == "active"
+                and (
+                    self.active is None
+                    or self.active.session_id != s.session_id
+                )
+                and not is_session_alive(s)
+            ):
+                state = "stopped"
             out.append({
                 "id": s.session_id,
                 "target": s.target,
                 "profile": s.config.profile,
-                "state": s.state,
+                "state": state,
                 "turns": s.stats.turns,
                 "total_cost": s.stats.total_cost,
                 "stopped_at": s.stopped_at,

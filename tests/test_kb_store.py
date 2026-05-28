@@ -262,6 +262,7 @@ def test_record_finding(tmp_targets_dir):
     assert fid > 0
     findings = kb.get_findings()
     assert len(findings) == 1
+    assert findings[0].id == fid
     assert findings[0].title == "Anonymous SMB share access"
     assert findings[0].severity == "medium"
     assert findings[0].evidence_paths == ["findings/smb_anon.txt"]

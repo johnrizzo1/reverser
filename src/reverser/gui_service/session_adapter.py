@@ -109,7 +109,7 @@ class GUISession:
         frame: dict[str, Any] = {
             "type": "dispatch",
             "dispatch_id": dispatch_id,
-            "turn": self._agent.stats.turns,
+            "turn": max(1, self._agent.stats.turns),
             "phase": kind,
             "specialty": specialty,
         }
@@ -125,9 +125,10 @@ class GUISession:
             frame["content"] = content
 
         try:
-            asyncio.create_task(self._bus.publish(self.session_id, frame))
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass
+            return
+        loop.create_task(self._bus.publish(self.session_id, frame))
 
     def _on_kb_event(self, kind: str, payload: dict) -> None:
         """Publish a KB write to the bus.
@@ -136,9 +137,10 @@ class GUISession:
         """
         frame = {"type": kind, **payload}
         try:
-            asyncio.create_task(self._bus.publish(self.session_id, frame))
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass
+            return
+        loop.create_task(self._bus.publish(self.session_id, frame))
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -180,6 +182,8 @@ class GUISession:
             # in the finally block whether we exit normally or via
             # CancelledError raised by cancel().
             self._current_send_task = asyncio.current_task()
+            from ..sessions import current_session
+            session_token = current_session.set(self._agent)
             try:
                 await self._bus.publish(self.session_id, {"type": "status", "phase": "running"})
                 async for ev in self._agent.send(user_text):
@@ -200,6 +204,7 @@ class GUISession:
                     "phase": "awaiting_input",
                 })
             finally:
+                current_session.reset(session_token)
                 self._current_send_task = None
 
     async def trigger_skill(self, skill_key: str) -> None:

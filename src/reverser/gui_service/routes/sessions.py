@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, model_validator
 
 from ...session_log import load_session_log
-from ...sessions import SessionNotFoundError, SessionStateError
+from ...sessions import SessionNotFoundError, SessionStateError, is_session_alive
 from ...sessions import delete as delete_snapshot
 from ...sessions import load as load_snapshot
 from ...sessions import save as save_snapshot
@@ -127,10 +127,33 @@ async def create_session(request: Request, body: CreateSession) -> dict:
 
 @router.post("/api/sessions/{session_id}/messages", status_code=204)
 async def send_message(request: Request, session_id: str, body: MessageBody) -> Response:
+    mgr = _manager(request)
     try:
-        gs = _manager(request).get_active(session_id)
+        gs = mgr.get_active(session_id)
     except KeyError:
-        raise HTTPException(404)
+        row = next((r for r in mgr.list_sessions() if r["id"] == session_id), None)
+        if row is None:
+            raise HTTPException(404)
+        try:
+            snap = load_snapshot(row["target"], session_id)
+        except SessionNotFoundError:
+            raise HTTPException(404)
+        if snap.state != "active" or is_session_alive(snap):
+            raise HTTPException(404)
+        try:
+            await mgr.resume_session(
+                snapshot_id=session_id,
+                target=row["target"],
+                backend_name=None,
+                model=None,
+                api_base=None,
+            )
+            gs = mgr.get_active(session_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"could not resume stale active session: {exc}",
+            )
     await gs.send_message(body.text)
     return Response(status_code=204)
 

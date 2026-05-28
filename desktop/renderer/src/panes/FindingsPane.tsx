@@ -34,7 +34,7 @@ export function FindingsPane({ sessionId }: { sessionId: string }) {
       <div className="p-2 space-y-2 text-xs">
         {rows.map((f) => (
           <FindingRowComponent
-            key={f.id}
+            key={`finding-${f.id}`}
             target={target}
             finding={{ ...f, severity: f.severity ?? undefined }}
             onClickEvidence={(findingId, startIndex) =>

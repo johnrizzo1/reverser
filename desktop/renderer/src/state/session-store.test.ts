@@ -197,6 +197,16 @@ describe("ingest hypothesis/finding frames", () => {
     });
     expect(store.getState().findings.get(1)?.finding).toBe("open port 22");
   });
+
+  it("seedFindings ignores legacy rows without ids", () => {
+    const store = makeSessionStore();
+    store.getState().seedFindings([
+      { id: 1, target: "ex", title: "open port 22" },
+      { target: "ex", title: "legacy missing id" } as never,
+    ]);
+    expect(store.getState().findings.size).toBe(1);
+    expect(store.getState().findings.get(1)?.title).toBe("open port 22");
+  });
 });
 
 describe("appendUserMessage", () => {

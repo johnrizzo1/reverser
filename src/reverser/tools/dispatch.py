@@ -280,6 +280,10 @@ async def dispatch_specialist(args: dict) -> dict:
                 dispatched_to=specialty,
                 increment_dispatch_count=True,
             )
+            updated = kb.get_hypothesis(hypothesis_id)
+            if updated is not None:
+                from ..gui_service.kb_emitter import emit_hypothesis
+                emit_hypothesis("update", updated)
 
     # Build the scope summary (if a scope.toml exists)
     try:

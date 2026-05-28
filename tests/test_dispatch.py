@@ -1,6 +1,8 @@
 """Tests for the dispatch_specialist tool with mocked SDK."""
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
@@ -180,6 +182,50 @@ def test_dispatch_specialist_increments_dispatch_count(monkeypatch, tmp_path):
     fetched = kb.get_hypothesis(h.id)
     assert fetched.dispatch_count == 1
     assert fetched.dispatched_to == "ad"
+
+
+def test_dispatch_specialist_emits_hypothesis_update(monkeypatch, tmp_path):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+    from reverser.kb.store import KB
+    from reverser.sessions import current_session
+    from reverser.tools.dispatch import dispatch_specialist
+
+    kb = KB("10.10.10.5")
+    h = kb.add_hypothesis(statement="test")
+    sess = SimpleNamespace(
+        _snapshot=SimpleNamespace(
+            config=SimpleNamespace(backend="claude", model=None, api_base=None),
+            in_flight=None,
+        ),
+        _slog=SimpleNamespace(log_dispatch_event=MagicMock()),
+        emit_dispatch_event=MagicMock(),
+        emit_kb_event=MagicMock(),
+    )
+    current_session.set(sess)
+
+    report = "### Hypothesis outcome\nCONFIRMED"
+    with patch("reverser.tools.dispatch.query", _mock_query(report)):
+        _call_tool(dispatch_specialist, {
+            "specialty": "ad",
+            "sub_goal": "x",
+            "target": "10.10.10.5",
+            "hypothesis_id": h.id,
+        })
+
+    hypothesis_calls = [
+        call.args for call in sess.emit_kb_event.call_args_list
+        if call.args and call.args[0] == "hypothesis"
+    ]
+    assert hypothesis_calls
+    _, payload = hypothesis_calls[0]
+    assert payload["action"] == "update"
+    assert payload["row"]["id"] == h.id
+    assert payload["row"]["status"] == "testing"
+    assert payload["row"]["dispatch_count"] == 1
+    assert payload["row"]["dispatched_to"] == "ad"
 
 
 def test_dispatch_specialist_uses_active_local_backend(monkeypatch, tmp_path):

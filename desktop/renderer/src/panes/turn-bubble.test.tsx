@@ -59,4 +59,49 @@ describe("TurnBubble", () => {
     render(<TurnBubble turn={turn} />);
     expect(screen.getByText(/webpentest/)).toBeInTheDocument();
   });
+
+  it("surfaces latest dispatch activity without expanding thinking", () => {
+    const turn = _makeTurn({
+      dispatches: new Map([["d1", {
+        id: "d1",
+        specialty: "ad",
+        subGoal: "test smb",
+        status: "running",
+        subTurns: new Map([[0, {
+          thinkingDeltas: ["Waiting for local backend slot (lmstudio)"],
+          speechDeltas: [],
+          toolCalls: [],
+          toolResults: [],
+        }]]),
+      }]]),
+      ordering: [{ kind: "dispatch", id: "d1" }],
+    });
+    render(<TurnBubble turn={turn} />);
+    expect(screen.getAllByText(/queued on local backend/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Waiting for local backend slot/).length).toBeGreaterThan(0);
+  });
+
+  it("labels specialist activity separately from main agent activity", () => {
+    const turn = _makeTurn({
+      dispatches: new Map([["d1", {
+        id: "d1",
+        specialty: "ad",
+        subGoal: "enumerate smb",
+        status: "running",
+        subTurns: new Map([[1, {
+          thinkingDeltas: ["planning smb enum"],
+          speechDeltas: ["Starting SMB checks"],
+          toolCalls: [{ name: "", content: "nmap_scan {target:10.10.10.5}" }],
+          toolResults: [{ ok: true, content: "445/tcp open smb" }],
+        }]]),
+      }]]),
+      ordering: [{ kind: "dispatch", id: "d1" }],
+    });
+    render(<TurnBubble turn={turn} />);
+
+    expect(screen.getByText(/AD sub-agent/i)).toBeInTheDocument();
+    expect(screen.getByText(/specialist activity/i)).toBeInTheDocument();
+    expect(screen.getByText(/nmap_scan/)).toBeInTheDocument();
+    expect(screen.getAllByText(/445\/tcp open smb/).length).toBeGreaterThan(0);
+  });
 });

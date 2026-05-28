@@ -65,6 +65,7 @@ class FindingFact:
     description: str
     evidence_paths: list[str] = field(default_factory=list)
     cvss: Optional[float] = None
+    id: Optional[int] = None
 
     def __post_init__(self):
         if self.severity not in _VALID_SEVERITY:
@@ -387,7 +388,7 @@ class KB:
 
     def get_findings(self, severity: str | None = None) -> list[FindingFact]:
         sql = (
-            "SELECT title, severity, cvss, description, evidence_paths "
+            "SELECT id, title, severity, cvss, description, evidence_paths "
             "FROM findings WHERE target_id = ?"
         )
         params: list = [self.target_id]
@@ -399,8 +400,9 @@ class KB:
             cursor = conn.execute(sql, params)
             return [
                 FindingFact(
-                    title=r[0], severity=r[1], cvss=r[2], description=r[3] or "",
-                    evidence_paths=json.loads(r[4]) if r[4] else [],
+                    id=r[0], title=r[1], severity=r[2], cvss=r[3],
+                    description=r[4] or "",
+                    evidence_paths=json.loads(r[5]) if r[5] else [],
                 )
                 for r in cursor.fetchall()
             ]

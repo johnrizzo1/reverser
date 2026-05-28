@@ -72,8 +72,11 @@ export type FindingRow = {
   id: number;
   target?: string;
   finding?: string;
+  title?: string;
+  description?: string;
   severity?: string | null;
   evidence?: string | null;
+  evidence_paths?: string[] | null;
   refs?: unknown[] | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -388,7 +391,9 @@ export const makeSessionStore = () =>
     }),
     seedFindings: (rows) => set(() => {
       const m = new Map<number, FindingRow>();
-      for (const r of rows) m.set(r.id, r);
+      for (const r of rows) {
+        if (typeof r.id === "number") m.set(r.id, r);
+      }
       return { findings: m };
     }),
     setTargetName: (snapshot) => set(() => ({

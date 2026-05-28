@@ -156,6 +156,70 @@ async def test_stop_disk_only_for_stale_active_snapshot(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_list_sessions_reports_stale_active_snapshot_as_stopped(client, tmp_path):
+    """A snapshot can be "active" on disk after a backend/app restart, but if
+    there is no live GUISession in this process then chat POSTs cannot work.
+    The UI should see it as stopped and offer Resume instead of rendering a
+    writable chat box that 404s on /messages.
+    """
+    from reverser.sessions import (
+        SessionConfig, new_snapshot, save as save_snapshot,
+    )
+
+    target = str(tmp_path / "bin")
+    snap = new_snapshot(
+        target=target,
+        log_path=str(tmp_path / "log.jsonl"),
+        config=SessionConfig(
+            profile="general", backend="claude",
+            model=None, api_base=None, budget=5.0, max_turns=50,
+        ),
+        session_id="orphan-list-1",
+    )
+    snap.state = "active"
+    snap.pid = 99999
+    save_snapshot(snap)
+
+    r = await client.get("/api/sessions", headers=HEADERS)
+    assert r.status_code == 200
+    row = next(row for row in r.json()["sessions"] if row["id"] == "orphan-list-1")
+    assert row["state"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_send_message_auto_resumes_stale_active_snapshot(client, tmp_path):
+    """If the renderer has a cached active row from before a backend restart,
+    its first chat POST should not 404. The backend can safely resume stale
+    active snapshots because the old pid is dead.
+    """
+    from reverser.sessions import (
+        SessionConfig, new_snapshot, save as save_snapshot,
+    )
+
+    target = str(tmp_path / "bin")
+    snap = new_snapshot(
+        target=target,
+        log_path=str(tmp_path / "log.jsonl"),
+        config=SessionConfig(
+            profile="general", backend="claude",
+            model=None, api_base=None, budget=5.0, max_turns=50,
+        ),
+        session_id="orphan-message-1",
+    )
+    snap.state = "active"
+    snap.pid = 99999
+    save_snapshot(snap)
+
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post(
+            "/api/sessions/orphan-message-1/messages",
+            headers=HEADERS,
+            json={"text": "hello"},
+        )
+    assert r.status_code == 204, r.text
+
+
+@pytest.mark.asyncio
 async def test_stop_unknown_session_returns_404(client):
     r = await client.post("/api/sessions/no-such-id/stop", headers=HEADERS)
     assert r.status_code == 404

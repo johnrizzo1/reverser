@@ -44,3 +44,21 @@ async def test_read_kb_returns_keyed_lists(client):
                 "hypotheses", "artifacts", "notes"):
         assert key in body, f"missing key {key}"
         assert isinstance(body[key], list)
+
+
+@pytest.mark.asyncio
+async def test_read_kb_findings_include_ids(client):
+    from reverser.kb import FindingFact, for_target
+
+    kb = for_target("10.10.10.5")
+    fid = kb.record_finding(FindingFact(
+        title="Anonymous SMB share access",
+        severity="medium",
+        description="IPC$ allows anonymous enumeration.",
+    ))
+
+    r = await client.get("/api/targets/10.10.10.5/kb", headers=HEADERS)
+    assert r.status_code == 200
+    findings = r.json()["findings"]
+    assert len(findings) == 1
+    assert findings[0]["id"] == fid
