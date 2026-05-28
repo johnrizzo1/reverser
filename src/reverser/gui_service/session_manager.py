@@ -10,15 +10,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..profiles import get_profile
+from ..profiles import get_profile, is_network_profile
 from ..sessions import list_all as list_all_snapshots
 from .event_bus import EventBus
 from .session_adapter import GUISession
-
-
-_NETWORK_PROFILES = {
-    "pentest", "webpentest", "webapi", "webrecon", "ad", "manager", "exploit",
-}
 
 
 def _require_pentest_auth(profile_key: str) -> None:
@@ -27,7 +22,7 @@ def _require_pentest_auth(profile_key: str) -> None:
     Raises PermissionError if the profile touches the network but the user
     hasn't acknowledged authorization via env var or marker file.
     """
-    if profile_key not in _NETWORK_PROFILES:
+    if not is_network_profile(profile_key):
         return
     if os.environ.get("REVERSER_PENTEST_AUTHORIZED") == "1":
         return

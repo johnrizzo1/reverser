@@ -165,10 +165,10 @@ class HistoryInput(Input):
 
 from rich.markup import escape as markup_escape
 
-from ..profiles import Profile, Skill, get_profile, list_profiles
+from ..profiles import Profile, Skill, get_profile, is_web_profile, list_profiles
 from ..backends import AgentEvent
 from ..tools._common import is_url
-from ..agent_session import AgentSession, _WEB_PROFILES
+from ..agent_session import AgentSession
 
 
 # ── Modal screens ───────────────────────────────────────────────────
@@ -451,7 +451,7 @@ class ReverserApp(App):
 
     @property
     def _is_web_profile(self) -> bool:
-        return self.profile_key in _WEB_PROFILES
+        return is_web_profile(self.profile_key)
 
     @property
     def _is_web_target(self) -> bool:

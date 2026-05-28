@@ -191,6 +191,18 @@ def test_manager_addendum_mentions_post_dispatch_checklist():
     assert "kb_update_hypothesis" in addendum
 
 
+def test_manager_addendum_requires_exact_seeded_target_for_dispatch():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+
+    assert "Seeded target discipline" in addendum
+    assert "kb_show" in addendum
+    assert "primary_address" in addendum
+    assert "target_subset" in addendum
+    assert "Do not pass the logical engagement name" in addendum
+
+
 def test_manager_addendum_mentions_connection_failure_breaker():
     from reverser.profiles import get_profile
     p = get_profile("manager")

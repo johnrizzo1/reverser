@@ -37,6 +37,26 @@ def test_compose_dispatch_context_includes_all_fields():
     assert "### Suggested follow-up" in block
 
 
+def test_compose_dispatch_context_requires_exact_target_for_tool_calls():
+    block = compose_dispatch_context(
+        target="10.10.10.5",
+        sub_goal="Enumerate SMB shares",
+        target_subset=["10.10.10.5"],
+        hypothesis_id=42,
+        hypothesis_statement="SMB exposure exists",
+        rationale="Initial KB seed identified this host",
+        scope_summary=None,
+        max_turns=15,
+        budget_usd=0.50,
+        extra_context=None,
+    )
+
+    assert "Use the engagement target exactly as provided" in block
+    assert "10.10.10.5" in block
+    assert "Target subset is the active scope for this dispatch" in block
+    assert "Do not substitute the logical engagement name" in block
+
+
 def test_compose_dispatch_context_handles_missing_optional_fields():
     block = compose_dispatch_context(
         target="x",

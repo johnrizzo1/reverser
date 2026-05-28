@@ -16,6 +16,7 @@ PROFILE_WEBAPI = _register(Profile(
     name="Web API Pentest",
     key="webapi",
     description="REST/GraphQL API penetration testing — auth bypass, BOLA, injection",
+    domain="web",
     system_addendum="""\
 
 ## Profile: API Penetration Testing

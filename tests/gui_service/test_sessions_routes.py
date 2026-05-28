@@ -381,3 +381,76 @@ async def test_create_session_with_address_override(client, tmp_path, monkeypatc
     # Verify the new address was added and is now primary on disk.
     reloaded = tmod.load_target("dc1")
     assert reloaded.primary_address.value == "10.0.0.99"
+
+
+@pytest.mark.asyncio
+async def test_create_session_new_named_target_uses_target_as_initial_address(
+    client, tmp_path, monkeypatch,
+):
+    """New Engagement sends target_name for the display name and target for the
+    address. The service must preserve the address as the primary target input
+    and seed it into the KB so the agent has an obvious host to target."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    from reverser.kb import for_target
+    paths._reset_caches_for_tests()
+
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post("/api/sessions", headers=HEADERS, json={
+            "target_name": "reactor",
+            "target": "10.10.10.5",
+            "profile": "manager",
+            "backend": "claude",
+        })
+    assert r.status_code == 200, r.text
+
+    reloaded = tmod.load_target("reactor")
+    assert reloaded.primary_address.value == "10.10.10.5"
+    assert [a.value for a in reloaded.addresses] == ["10.10.10.5"]
+    assert [h.ip for h in for_target("10.10.10.5").get_hosts()] == ["10.10.10.5"]
+
+
+@pytest.mark.asyncio
+async def test_create_session_target_only_seeds_network_target_kb(
+    client, tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths
+    from reverser.kb import for_target
+    paths._reset_caches_for_tests()
+
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": "10.10.10.77",
+            "profile": "manager",
+            "backend": "claude",
+        })
+    assert r.status_code == 200, r.text
+    assert [h.ip for h in for_target("10.10.10.77").get_hosts()] == ["10.10.10.77"]
+
+
+@pytest.mark.asyncio
+async def test_create_session_target_only_seeds_binary_target_kb(
+    client, tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths
+    from reverser.kb import for_target
+    paths._reset_caches_for_tests()
+
+    binary = tmp_path / "inputs" / "sample.bin"
+    binary.parent.mkdir()
+    binary.write_bytes(b"\x7fELF")
+
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": str(binary),
+            "profile": "general",
+            "backend": "claude",
+        })
+    assert r.status_code == 200, r.text
+
+    artifacts = for_target("sample.bin").get_artifacts()
+    assert len(artifacts) == 1
+    assert artifacts[0].kind == "target_binary"
+    assert artifacts[0].path == str(binary)

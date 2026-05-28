@@ -25,6 +25,7 @@ class Profile:
     system_addendum: str
     skills: list[Skill] = field(default_factory=list)
     tools_allowlist: list[str] | None = None  # None = all tools available
+    domain: str = "binary"
 
 
 PROFILES: dict[str, Profile] = {}
@@ -48,6 +49,27 @@ def get_profile(key: str) -> Profile:
 def list_profiles() -> list[Profile]:
     """Return all registered profiles, sorted by key."""
     return [PROFILES[k] for k in sorted(PROFILES.keys())]
+
+
+def profile_domain(key: str, *, registry: dict[str, Profile] | None = None) -> str:
+    """Return a profile's domain classification.
+
+    Domains are intentionally coarse: "binary", "web", or "network".
+    Unknown domains fall back to "binary" to preserve legacy behavior for
+    profiles that have not been annotated yet.
+    """
+    profiles = PROFILES if registry is None else registry
+    return profiles[key].domain or "binary"
+
+
+def is_web_profile(key: str, *, registry: dict[str, Profile] | None = None) -> bool:
+    """True when a profile is specifically for web applications."""
+    return profile_domain(key, registry=registry) == "web"
+
+
+def is_network_profile(key: str, *, registry: dict[str, Profile] | None = None) -> bool:
+    """True when a profile touches network targets, including web profiles."""
+    return profile_domain(key, registry=registry) in {"web", "network"}
 
 
 # ── Profile module imports (each registers itself on import) ────────

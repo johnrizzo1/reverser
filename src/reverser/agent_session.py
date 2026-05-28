@@ -7,8 +7,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .prompts import SYSTEM_PROMPT, WEB_SYSTEM_PROMPT, NETWORK_SYSTEM_PROMPT  # noqa: F401
-from .profiles import Profile
+from .prompts import (
+    OBJECTIVE_ALIGNMENT_PROMPT,
+    PROFILE_OPERATING_CONTRACT,
+    SYSTEM_PROMPT,
+    WEB_SYSTEM_PROMPT,
+    NETWORK_SYSTEM_PROMPT,
+)  # noqa: F401
+from .profiles import Profile, is_web_profile
 from .tools import ALL_TOOLS
 from .tools._common import is_url
 from .backends import AgentEvent, create_backend
@@ -18,15 +24,8 @@ from .session_log import SessionLog, session_log_path
 # (targets.py imports sessions.py → agent_session.py would be a cycle).
 # from .targets import Target, Address  # ← NOT a top-level import
 
-# Profiles that operate on web targets rather than binary files
-_WEB_PROFILES = {"webpentest", "webapi", "webrecon"}
-# Non-web network profiles. Targets are hosts/services, not binaries.
-_NETWORK_PROFILES = {"pentest", "ad", "manager", "exploit"}
-
-
-def _is_network_profile(profile_key: str) -> bool:
-    """True for any profile whose target is a network host/service (web or not)."""
-    return profile_key in _WEB_PROFILES or profile_key in _NETWORK_PROFILES
+def _is_http_url(target: str) -> bool:
+    return target.startswith(("http://", "https://")) if target else False
 
 
 def _now_iso_session() -> str:
@@ -66,7 +65,7 @@ class TurnStats:
 
     @property
     def is_web(self) -> bool:
-        return self.profile_key in _WEB_PROFILES
+        return is_web_profile(self.profile_key)
 
 
 class AgentSession:
@@ -178,11 +177,18 @@ class AgentSession:
         self.target_obj = None   # type: Optional["Target"]  # noqa: F821
         self.active_address = None  # type: Optional["Address"]  # noqa: F821
 
-        self._is_web = profile.key in _WEB_PROFILES
-        self._is_network = profile.key in _NETWORK_PROFILES
+        self._is_web = is_web_profile(profile.key)
+        self._is_network = profile.domain == "network"
         self._is_url_target = is_url(binary_path) if binary_path else False
+        self._is_web_target = _is_http_url(binary_path)
+        self._is_network_target = self._is_url_target and not self._is_web_target
 
-        if binary_path and not self._is_url_target and not self._is_web and not self._is_network:
+        if (
+            binary_path
+            and not self._is_url_target
+            and not self._is_web
+            and not self._is_network
+        ):
             self.target = str(Path(binary_path).resolve())
         else:
             self.target = binary_path  # URL, network host, or empty
@@ -267,8 +273,10 @@ class AgentSession:
         self.target = snap.target
         self.binary_path = self.target
         self._is_url_target = is_url(self.target) if self.target else False
-        self._is_web = profile.key in _WEB_PROFILES
-        self._is_network = profile.key in _NETWORK_PROFILES
+        self._is_web = is_web_profile(profile.key)
+        self._is_network = profile.domain == "network"
+        self._is_web_target = _is_http_url(self.target)
+        self._is_network_target = self._is_url_target and not self._is_web_target
 
         self.profile = profile
         self.budget = snap.config.budget
@@ -346,20 +354,22 @@ class AgentSession:
         # heuristics: a manager/pentest/ad/exploit session with an IP target
         # must get NETWORK_SYSTEM_PROMPT even though is_url() returns True
         # for dotted addresses.
-        if self._is_web:
+        if self._is_web or (self._is_web_target and not self._is_network):
             base = WEB_SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
-        elif self._is_network:
+        elif self._is_network or self._is_network_target:
             base = NETWORK_SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
-        elif self._is_url_target:
-            base = WEB_SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
         else:
             base = SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
+
+        if "## Objective Alignment" not in base:
+            base += "\n" + OBJECTIVE_ALIGNMENT_PROMPT
+        base += "\n" + PROFILE_OPERATING_CONTRACT
 
         addendum = self.profile.system_addendum
         if addendum:
             base += "\n" + addendum
 
-        if self._is_web or (self._is_url_target and not self._is_network):
+        if self._is_web or (self._is_web_target and not self._is_network):
             base += f"""
 
 ## Interactive Mode
@@ -389,7 +399,7 @@ you MUST use the `write_file` tool to create the file.
 
 When you respond, present your findings clearly with relevant details.
 """
-        elif self._is_network:
+        elif self._is_network or self._is_network_target:
             base += f"""
 
 ## Interactive Mode
@@ -577,9 +587,9 @@ When you respond, present your findings clearly with relevant details.
 
         parts.append(user_message)
 
-        if self._is_web:
+        if self._is_web or self._is_web_target:
             parts.append(f"\n\n[IMPORTANT: The target is exactly: {self.target} — use this for all tool calls]")
-        elif self._is_network:
+        elif self._is_network or self._is_network_target:
             parts.append(f"\n\n[IMPORTANT: The target host/service is exactly: {self.target} — pass it as the `target` argument to network tools; do NOT treat it as a file path]")
         elif self._is_url_target:
             parts.append(f"\n\n[IMPORTANT: The target is exactly: {self.target} — use this for all tool calls]")

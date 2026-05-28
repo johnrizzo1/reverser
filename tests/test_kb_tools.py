@@ -38,6 +38,36 @@ def test_kb_show_with_explicit_target(tmp_targets_dir):
     assert "high" in text
 
 
+def test_kb_show_surfaces_seeded_target_context(tmp_targets_dir):
+    from reverser.kb import ArtifactFact
+    from reverser.tools.kb import kb_show
+
+    kb = for_target("10.10.10.5")
+    kb.record_host(HostFact(ip="10.10.10.5"))
+    kb.record_artifact(
+        ArtifactFact(
+            kind="target_binary",
+            path="/tmp/reverser-sample",
+            sha256="a" * 64,
+            source_tool="session_start",
+        )
+    )
+    kb.record_note(
+        "[session-start] Initial engagement target: "
+        "name=reactor; kind=network; primary_address=10.10.10.5; address_kind=ip"
+    )
+
+    result = _call_tool(kb_show, {"target": "10.10.10.5"})
+    text = result["content"][0]["text"]
+
+    assert "Recorded hosts:" in text
+    assert "10.10.10.5" in text
+    assert "Artifacts: 1" in text
+    assert "target_binary" in text
+    assert "Initial engagement target" in text
+    assert "reactor" in text
+
+
 def test_kb_show_defaults_to_sole_target(tmp_targets_dir):
     from reverser.tools.kb import kb_show
     for_target("10.10.10.5")

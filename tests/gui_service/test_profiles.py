@@ -25,7 +25,7 @@ async def test_profiles_list_shape(client):
 
     # Each item has the documented shape
     one = body["profiles"][0]
-    for key in ("key", "name", "description", "skills", "tools_allowlist"):
+    for key in ("key", "name", "description", "domain", "skills", "tools_allowlist"):
         assert key in one
 
 
@@ -49,3 +49,12 @@ async def test_profile_skill_shape(client):
             assert key in s
         # We do NOT expose the skill prompt over the API (it is internal model context).
         assert "prompt" not in s
+
+
+@pytest.mark.asyncio
+async def test_profiles_expose_domain_for_launcher_guidance(client):
+    resp = await client.get("/api/profiles", headers={"Authorization": "Bearer t"})
+    profiles = {p["key"]: p for p in resp.json()["profiles"]}
+    assert profiles["general"]["domain"] == "binary"
+    assert profiles["webpentest"]["domain"] == "web"
+    assert profiles["manager"]["domain"] == "network"
