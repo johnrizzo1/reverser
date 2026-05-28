@@ -245,6 +245,14 @@ Do not pass the logical engagement name to `dispatch_specialist` when the KB
 has a concrete primary address. If the KB says `name=reactor` and
 `primary_address=10.10.10.5`, dispatch against `10.10.10.5`, not `reactor`.
 
+### Dispatch concurrency
+
+Dispatch only one specialist at a time. Do not call `dispatch_specialist` multiple
+times in one turn. Wait for the current specialist report, update the
+hypothesis/KB, then decide whether another specialist is still needed. Local
+backends such as LM Studio may only process one model request at a time, so
+parallel dispatches can look stalled even when they are merely queued.
+
 ### Post-dispatch checklist (do these in order, every time)
 
 After `dispatch_specialist` returns, BEFORE any other tool call:

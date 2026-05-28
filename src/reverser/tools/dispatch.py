@@ -7,7 +7,10 @@ helpers around an SDK Task call (see Task 13).
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 import re
+import threading
 
 
 # ── Pure helpers ────────────────────────────────────────────────────
@@ -174,9 +177,34 @@ from claude_agent_sdk import (  # noqa: E402  # imports here to keep helpers imp
 )
 
 from .kb import _check_auth, format_tool_result  # reuse existing helpers
+from ..backends import create_backend  # noqa: E402
 from ..profiles import get_profile  # noqa: E402
 from ..kb.store import KB  # noqa: E402
 from ..kb.scope import load_scope  # noqa: E402
+
+
+_LOCAL_BACKEND_NAMES = {"lmstudio", "ollama", "local"}
+_LOCAL_DISPATCH_THREAD_LOCK = threading.Lock()
+
+
+@asynccontextmanager
+async def _local_dispatch_slot():
+    """Serialize local-model specialist dispatches.
+
+    LM Studio and similar local OpenAI-compatible servers often run one model
+    request at a time. If a manager emits multiple dispatch_specialist calls in
+    the same turn, this keeps those sub-agent calls from overlapping.
+    """
+    await asyncio.to_thread(_LOCAL_DISPATCH_THREAD_LOCK.acquire)
+    try:
+        yield
+    finally:
+        _LOCAL_DISPATCH_THREAD_LOCK.release()
+
+
+@asynccontextmanager
+async def _unserialized_dispatch_slot():
+    yield
 
 
 _DISPATCHABLE_SPECIALTIES = (
@@ -405,48 +433,114 @@ async def dispatch_specialist(args: dict) -> dict:
 
     _emit_start()
     try:
-        async for message in query(prompt=sub_goal, options=options):
-            if isinstance(message, AssistantMessage):
-                _sub_turn[0] += 1
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        report_text = block.text
-                        if block.text.strip():
-                            _emit("text", block.text)
-                    elif isinstance(block, ThinkingBlock):
-                        thinking_text = getattr(block, "thinking", "") or ""
-                        if thinking_text.strip():
-                            _emit("thinking", thinking_text)
-                    elif isinstance(block, ToolUseBlock):
-                        tool_name = getattr(block, "name", "?")
-                        tool_input = getattr(block, "input", {})
+        cfg = sess._snapshot.config if sess is not None else None
+        use_session_backend = cfg is not None and cfg.backend != "claude"
+
+        if use_session_backend:
+            if cfg.backend in _LOCAL_BACKEND_NAMES:
+                _emit("thinking", f"Waiting for local backend slot ({cfg.backend})")
+                slot = _local_dispatch_slot()
+            else:
+                slot = _unserialized_dispatch_slot()
+
+            async with slot:
+                if cfg.backend in _LOCAL_BACKEND_NAMES:
+                    _emit("thinking", f"Acquired local backend slot ({cfg.backend})")
+                backend = create_backend(
+                    cfg.backend,
+                    ALL_TOOLS,
+                    model=cfg.model,
+                    api_base=cfg.api_base,
+                )
+                async for event in backend.run(
+                    prompt=sub_goal,
+                    system_prompt=full_system_prompt,
+                    max_turns=max_turns,
+                    max_budget_usd=budget_usd,
+                    allowed_tools=sub_allowed_tools,
+                ):
+                    if event.kind == "turn":
+                        _sub_turn[0] = event.turn or event.turns or _sub_turn[0] + 1
+                    elif event.kind == "text":
+                        report_text = event.content
+                        if event.content.strip():
+                            _emit("text", event.content)
+                    elif event.kind == "thinking":
+                        if event.content.strip():
+                            _emit("thinking", event.content)
+                    elif event.kind == "tool_call":
                         _emit(
                             "tool_call",
-                            f"{tool_name} {_summarize_tool_input(tool_input)}",
+                            f"{event.tool_name} "
+                            f"{_summarize_tool_input(event.tool_input)}",
                         )
-            elif isinstance(message, UserMessage):
-                content = getattr(message, "content", None)
-                if isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, ToolResultBlock):
-                            kind = "tool_error" if getattr(block, "is_error", False) else "tool_result"
-                            _emit(kind, _summarize_tool_result(getattr(block, "content", "")))
-            elif isinstance(message, ResultMessage):
-                cost_usd = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
-                turns_consumed = int(getattr(message, "num_turns", 0) or 0)
-                if message.subtype != "success":
-                    subtype_str = str(message.subtype).lower()
-                    if "budget" in subtype_str:
-                        status = "budget_exhausted"
-                    elif "turn" in subtype_str:
-                        status = "turn_limit"
-                    else:
+                    elif event.kind == "tool_result":
+                        kind = "tool_error" if event.is_error else "tool_result"
+                        _emit(kind, _summarize_tool_result(event.content))
+                    elif event.kind == "error":
                         status = "error"
-                    if not report_text:
-                        report_text = (
-                            f"(specialist did not produce a report; "
-                            f"subtype={message.subtype})"
-                        )
+                        error_msg = event.content
+                    elif event.kind == "result":
+                        cost_usd = float(event.cost or 0.0)
+                        turns_consumed = int(event.turns or _sub_turn[0] or 0)
+                        if event.subtype != "success":
+                            subtype_str = str(event.subtype).lower()
+                            if "budget" in subtype_str:
+                                status = "budget_exhausted"
+                            elif "turn" in subtype_str or "max_turn" in subtype_str:
+                                status = "turn_limit"
+                            else:
+                                status = "error"
+                            if not report_text:
+                                report_text = event.content or (
+                                    f"(specialist did not produce a report; "
+                                    f"subtype={event.subtype})"
+                                )
+                        elif event.content and not report_text:
+                            report_text = event.content
+        else:
+            async for message in query(prompt=sub_goal, options=options):
+                if isinstance(message, AssistantMessage):
+                    _sub_turn[0] += 1
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            report_text = block.text
+                            if block.text.strip():
+                                _emit("text", block.text)
+                        elif isinstance(block, ThinkingBlock):
+                            thinking_text = getattr(block, "thinking", "") or ""
+                            if thinking_text.strip():
+                                _emit("thinking", thinking_text)
+                        elif isinstance(block, ToolUseBlock):
+                            tool_name = getattr(block, "name", "?")
+                            tool_input = getattr(block, "input", {})
+                            _emit(
+                                "tool_call",
+                                f"{tool_name} {_summarize_tool_input(tool_input)}",
+                            )
+                elif isinstance(message, UserMessage):
+                    content = getattr(message, "content", None)
+                    if isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, ToolResultBlock):
+                                kind = "tool_error" if getattr(block, "is_error", False) else "tool_result"
+                                _emit(kind, _summarize_tool_result(getattr(block, "content", "")))
+                elif isinstance(message, ResultMessage):
+                    cost_usd = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
+                    turns_consumed = int(getattr(message, "num_turns", 0) or 0)
+                    if message.subtype != "success":
+                        subtype_str = str(message.subtype).lower()
+                        if "budget" in subtype_str:
+                            status = "budget_exhausted"
+                        elif "turn" in subtype_str:
+                            status = "turn_limit"
+                        else:
+                            status = "error"
+                        if not report_text:
+                            report_text = (
+                                f"(specialist did not produce a report; "
+                                f"subtype={message.subtype})"
+                            )
     except Exception as e:
         status = "error"
         error_msg = f"{type(e).__name__}: {e}"

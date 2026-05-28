@@ -203,6 +203,17 @@ def test_manager_addendum_requires_exact_seeded_target_for_dispatch():
     assert "Do not pass the logical engagement name" in addendum
 
 
+def test_manager_addendum_forbids_parallel_specialist_dispatches():
+    from reverser.profiles import get_profile
+    p = get_profile("manager")
+    addendum = p.system_addendum
+
+    assert "Dispatch only one specialist at a time" in addendum
+    assert "Do not call `dispatch_specialist`" in addendum
+    assert "multiple" in addendum
+    assert "one turn" in addendum
+
+
 def test_manager_addendum_mentions_connection_failure_breaker():
     from reverser.profiles import get_profile
     p = get_profile("manager")

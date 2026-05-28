@@ -3,6 +3,20 @@
 import asyncio
 from unittest.mock import patch
 
+import pytest
+
+from reverser.backends.base import AgentEvent
+
+
+@pytest.fixture(autouse=True)
+def reset_current_session():
+    from reverser.sessions import current_session
+    token = current_session.set(None)
+    try:
+        yield
+    finally:
+        current_session.reset(token)
+
 
 def _call_tool(tool_obj, args):
     """Invoke an SDK tool object's underlying coroutine handler."""
@@ -166,6 +180,108 @@ def test_dispatch_specialist_increments_dispatch_count(monkeypatch, tmp_path):
     fetched = kb.get_hypothesis(h.id)
     assert fetched.dispatch_count == 1
     assert fetched.dispatched_to == "ad"
+
+
+def test_dispatch_specialist_uses_active_local_backend(monkeypatch, tmp_path):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+
+    from reverser.profiles import get_profile
+    from reverser.tui.session import AgentSession
+    from reverser.sessions import current_session
+    from reverser.tools.dispatch import dispatch_specialist
+
+    sess = AgentSession(
+        binary_path="10.10.10.5",
+        profile=get_profile("manager"),
+        backend_name="lmstudio",
+        model="local-model",
+        api_base="http://127.0.0.1:1234/v1",
+    )
+    current_session.set(sess)
+
+    captured = {}
+
+    class FakeBackend:
+        async def run(self, prompt, system_prompt, **kwargs):
+            captured["prompt"] = prompt
+            captured["system_prompt"] = system_prompt
+            captured["kwargs"] = kwargs
+            yield AgentEvent(kind="turn", turns=1, turn=1)
+            yield AgentEvent(kind="text", content="### Hypothesis outcome\nCONFIRMED")
+            yield AgentEvent(kind="result", subtype="success", turns=1)
+
+    def fake_create_backend(name, tools, **kwargs):
+        captured["backend_name"] = name
+        captured["backend_kwargs"] = kwargs
+        return FakeBackend()
+
+    with patch("reverser.tools.dispatch.create_backend", fake_create_backend), \
+         patch("reverser.tools.dispatch.query") as claude_query:
+        result = _call_tool(dispatch_specialist, {
+            "specialty": "ad",
+            "sub_goal": "Verify SMB signing",
+            "target": "10.10.10.5",
+        })
+
+    assert captured["backend_name"] == "lmstudio"
+    assert captured["backend_kwargs"]["model"] == "local-model"
+    assert captured["backend_kwargs"]["api_base"] == "http://127.0.0.1:1234/v1"
+    assert "Dispatch context" in captured["system_prompt"]
+    assert captured["kwargs"]["allowed_tools"]
+    assert "mcp__re__dispatch_specialist" not in captured["kwargs"]["allowed_tools"]
+    claude_query.assert_not_called()
+    assert "CONFIRMED" in result["content"][0]["text"]
+
+
+def test_dispatch_specialist_serializes_local_backend_calls(monkeypatch, tmp_path):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+
+    from reverser.profiles import get_profile
+    from reverser.tui.session import AgentSession
+    from reverser.sessions import current_session
+    from reverser.tools.dispatch import dispatch_specialist
+
+    sess = AgentSession(
+        binary_path="10.10.10.5",
+        profile=get_profile("manager"),
+        backend_name="lmstudio",
+        model="local-model",
+    )
+    current_session.set(sess)
+
+    counters = {"active": 0, "max_active": 0}
+
+    class SlowBackend:
+        async def run(self, prompt, system_prompt, **kwargs):
+            counters["active"] += 1
+            counters["max_active"] = max(counters["max_active"], counters["active"])
+            try:
+                await asyncio.sleep(0.02)
+                yield AgentEvent(kind="turn", turns=1, turn=1)
+                yield AgentEvent(kind="text", content="### Hypothesis outcome\nINCONCLUSIVE")
+                yield AgentEvent(kind="result", subtype="success", turns=1)
+            finally:
+                counters["active"] -= 1
+
+    async def run_two_dispatches():
+        fn = getattr(dispatch_specialist, "handler", None) or dispatch_specialist
+        await asyncio.gather(
+            fn({"specialty": "ad", "sub_goal": "one", "target": "10.10.10.5"}),
+            fn({"specialty": "pentest", "sub_goal": "two", "target": "10.10.10.5"}),
+        )
+
+    with patch("reverser.tools.dispatch.create_backend", return_value=SlowBackend()), \
+         patch("reverser.tools.dispatch.query") as claude_query:
+        asyncio.new_event_loop().run_until_complete(run_two_dispatches())
+
+    assert counters["max_active"] == 1
+    claude_query.assert_not_called()
 
 
 def test_exploit_in_dispatchable_specialties():
