@@ -14,6 +14,7 @@ PROFILE_WEBRECON = _register(Profile(
     name="Web Recon",
     key="webrecon",
     description="Non-intrusive web reconnaissance only — no active exploitation",
+    domain="web",
     system_addendum="""\
 
 ## Profile: Web Reconnaissance (Non-Intrusive)

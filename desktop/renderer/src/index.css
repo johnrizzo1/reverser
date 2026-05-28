@@ -5,10 +5,26 @@
 @layer base {
   :root {
     color-scheme: dark;
+    --rv-bg: 10 10 12;
+    --rv-panel: 18 19 22;
+    --rv-panel-strong: 25 27 31;
+    --rv-border: 48 52 60;
+    --rv-text: 245 246 248;
+    --rv-muted: 150 157 170;
+    --rv-accent: 20 184 166;
+    --rv-accent-2: 125 211 252;
+    --rv-danger: 239 68 68;
+    --rv-warning: 245 158 11;
+    --rv-success: 34 197 94;
   }
   body {
     -webkit-font-smoothing: antialiased;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
       sans-serif;
+    background: rgb(var(--rv-bg));
+  }
+
+  * {
+    scrollbar-color: rgb(var(--rv-border)) transparent;
   }
 }

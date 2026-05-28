@@ -75,6 +75,12 @@ You are operating as a sub-agent of the engagement lead.
 - Rationale from lead: {rationale_line}
 - Extra context: {extra_line}
 
+## Target discipline
+Use the engagement target exactly as provided for tool calls unless the
+target subset narrows it. Target subset is the active scope for this dispatch:
+{subset_line}. Do not substitute the logical engagement name, a remembered
+nickname, or a different host from prior context.
+
 ## Scope envelope (do not exceed)
 {scope_line}
 

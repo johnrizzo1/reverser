@@ -86,8 +86,11 @@ async def create_session(request: Request, body: CreateSession) -> dict:
     if body.target_name is not None:
         # New path: resolve by Target name (with optional address override).
         from ...session_start import resolve_target
+        override = body.address
+        if override is None and body.target is not None and body.target != body.target_name:
+            override = body.target
         try:
-            resolved = resolve_target(body.target_name, override_address=body.address)
+            resolved = resolve_target(body.target_name, override_address=override)
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -96,7 +99,15 @@ async def create_session(request: Request, body: CreateSession) -> dict:
         effective_target = resolved.primary_address.value
     else:
         # Legacy path: raw address / binary path.
-        effective_target = body.target  # type: ignore[assignment]
+        from ...session_start import resolve_target
+        try:
+            resolved = resolve_target(body.target or "")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"could not resolve target {body.target!r}: {exc}",
+            )
+        effective_target = resolved.primary_address.value
 
     try:
         return await _manager(request).create_session(

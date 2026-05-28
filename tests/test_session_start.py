@@ -78,6 +78,50 @@ def test_address_override_adds_and_promotes_on_existing_target(env):
     assert any(a.value == "10.0.0.5" for a in t.addresses)
 
 
+def test_address_override_used_as_initial_address_for_new_named_target(env):
+    from reverser.session_start import resolve_target
+
+    t = resolve_target("reactor", override_address="10.10.10.5")
+    assert t.name == "reactor"
+    assert t.primary_address.value == "10.10.10.5"
+    assert [a.value for a in t.addresses] == ["10.10.10.5"]
+
+
+def test_resolve_network_target_seeds_primary_address_in_kb(env):
+    from reverser.kb import for_target, list_targets
+    from reverser.session_start import resolve_target
+
+    resolve_target("reactor", override_address="10.10.10.5")
+
+    assert list_targets() == ["10.10.10.5"]
+    hosts = for_target("10.10.10.5").get_hosts()
+    assert [h.ip for h in hosts] == ["10.10.10.5"]
+    notes = for_target("10.10.10.5").get_notes()
+    assert any("Initial engagement target" in n and "reactor" in n for n in notes)
+
+
+def test_resolve_binary_target_seeds_artifact_in_kb(env, tmp_path):
+    from reverser.kb import for_target, list_targets
+    from reverser.session_start import resolve_target
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    binary = inputs / "sample.bin"
+    binary.write_bytes(b"\x7fELF")
+
+    t = resolve_target(str(binary))
+
+    assert t.kind == "binary"
+    assert list_targets() == ["sample.bin"]
+    artifacts = for_target("sample.bin").get_artifacts()
+    assert len(artifacts) == 1
+    assert artifacts[0].kind == "target_binary"
+    assert artifacts[0].path == str(binary)
+    assert artifacts[0].sha256
+    notes = for_target("sample.bin").get_notes()
+    assert any("Initial engagement target" in n and str(binary) in n for n in notes)
+
+
 def test_address_override_idempotent_when_address_already_primary(env):
     from reverser import targets
     from reverser.session_start import resolve_target

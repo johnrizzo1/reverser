@@ -52,6 +52,7 @@ export type Profile = {
   key: string;
   name: string;
   description: string;
+  domain: "binary" | "web" | "network" | string;
   skills: { name: string; key: string; description: string }[];
   tools_allowlist: string[] | null;
 };

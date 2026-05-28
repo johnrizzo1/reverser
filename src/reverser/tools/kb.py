@@ -81,6 +81,8 @@ async def kb_show(args: dict) -> dict:
     creds = kb.get_credentials()
     valid_creds = [c for c in creds if c.status == "valid"]
     findings = kb.get_findings()
+    artifacts = kb.get_artifacts()
+    notes = kb.get_notes()
 
     port_counter = Counter(s.port for s in services)
     top_ports = port_counter.most_common(10)
@@ -94,6 +96,22 @@ async def kb_show(args: dict) -> dict:
     ]
     for os_name, n in os_counter.most_common():
         lines.append(f"  - {os_name}: {n}")
+    if hosts:
+        lines.append("Recorded hosts:")
+        for h in hosts[:10]:
+            details = []
+            if h.hostname:
+                details.append(f"hostname={h.hostname}")
+            if h.domain:
+                details.append(f"domain={h.domain}")
+            if h.os:
+                details.append(f"os={h.os}")
+            if h.is_dc:
+                details.append("dc=yes")
+            suffix = f" ({', '.join(details)})" if details else ""
+            lines.append(f"  - {h.ip}{suffix}")
+        if len(hosts) > 10:
+            lines.append(f"  - ... {len(hosts) - 10} more")
     lines.append("")
     lines.append(f"Services: {len(services)}")
     if top_ports:
@@ -113,6 +131,22 @@ async def kb_show(args: dict) -> dict:
     for sev in ("critical", "high", "medium", "low", "info"):
         if sev_counter.get(sev):
             lines.append(f"  - {sev}: {sev_counter[sev]}")
+
+    lines.append("")
+    lines.append(f"Artifacts: {len(artifacts)}")
+    for artifact in artifacts[:5]:
+        sha = f" sha256={artifact.sha256[:12]}..." if artifact.sha256 else ""
+        source = f" source={artifact.source_tool}" if artifact.source_tool else ""
+        lines.append(f"  - {artifact.kind}: {artifact.path}{sha}{source}")
+    if len(artifacts) > 5:
+        lines.append(f"  - ... {len(artifacts) - 5} more")
+
+    if notes:
+        lines.append("")
+        lines.append("Recent notes:")
+        for note in notes[-3:]:
+            one_line = " ".join(note.split())
+            lines.append(f"  - {one_line[:240]}")
 
     return format_tool_result("\n".join(lines))
 

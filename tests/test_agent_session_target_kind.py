@@ -110,3 +110,69 @@ def test_binary_profile_still_resolves_to_filesystem_path(tmp_path):
     assert sess._is_network is False
     sysp = sess._build_system_prompt()
     assert "expert reverse engineer" in sysp
+
+
+@pytest.mark.parametrize("target", [
+    "10.129.245.123",
+    "dc1.corp.local",
+    "https://example.com",
+])
+def test_general_profile_with_network_like_target_does_not_get_binary_prompt(
+    target, tmp_path,
+):
+    """General profile should not force binary analysis for obvious network targets."""
+    sess = AgentSession(
+        binary_path=target,
+        profile=get_profile("general"),
+        budget=5.0, max_turns=10,
+        backend_name="lmstudio", model="x",
+        log_path=str(tmp_path / "log.jsonl"),
+    )
+    sysp = sess._build_system_prompt()
+    assert "binary being analyzed" not in sysp
+    assert "expert reverse engineer and binary analyst" not in sysp[:300]
+    assert "user's current objective is authoritative" in sysp
+
+
+@pytest.mark.parametrize("target", [
+    "10.129.245.123",
+    "dc1.corp.local",
+])
+def test_general_profile_with_bare_host_uses_network_prompt(target, tmp_path):
+    sess = AgentSession(
+        binary_path=target,
+        profile=get_profile("general"),
+        budget=5.0, max_turns=10,
+        backend_name="lmstudio", model="x",
+        log_path=str(tmp_path / "log.jsonl"),
+    )
+    assert "expert network red-team operator" in sess._build_system_prompt()
+    assert "host/service" in sess._build_prompt("status")
+
+
+def test_general_profile_with_http_url_uses_web_prompt(tmp_path):
+    sess = AgentSession(
+        binary_path="https://example.com",
+        profile=get_profile("general"),
+        budget=5.0, max_turns=10,
+        backend_name="lmstudio", model="x",
+        log_path=str(tmp_path / "log.jsonl"),
+    )
+    assert "expert web application penetration tester" in sess._build_system_prompt()
+
+
+def test_general_profile_with_existing_file_keeps_binary_prompt(tmp_path):
+    binary = tmp_path / "sample.bin"
+    binary.write_bytes(b"\x7fELF")
+    sess = AgentSession(
+        binary_path=str(binary),
+        profile=get_profile("general"),
+        budget=5.0, max_turns=10,
+        backend_name="lmstudio", model="x",
+        log_path=str(tmp_path / "log.jsonl"),
+    )
+    sysp = sess._build_system_prompt()
+    assert "expert reverse engineer" in sysp
+    assert "binary being analyzed" in sysp
+    assert "Profile Operating Contract" in sysp
+    assert "Specialists dispatched by a manager must report" in sysp

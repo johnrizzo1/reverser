@@ -47,6 +47,10 @@ export function SessionRow({
   const t = _formatTime(session.stopped_at ?? null);
   const archived = session.archived_at !== null;
   const liveActive = session.state === "active";
+  const displayTarget = session.target_name || session.target;
+  const displayAddress = session.target_name && session.target_name !== session.target
+    ? session.target
+    : "";
 
   const archiveMutation = useArchiveSession();
   const unarchiveMutation = useUnarchiveSession();
@@ -72,8 +76,13 @@ export function SessionRow({
           <span className={STATE_DOT[session.state]}>
             {archived ? "■" : STATE_GLYPH[session.state]}
           </span>
-          <span className="text-neutral-200 truncate">{session.target}</span>
+          <span className="truncate font-medium text-neutral-100">{displayTarget}</span>
         </div>
+        {displayAddress && (
+          <div className="mt-0.5 truncate font-mono text-[10px] text-neutral-500">
+            {displayAddress}
+          </div>
+        )}
         <div className="text-[10px] text-neutral-500 font-mono mt-0.5 flex gap-2">
           <span>{session.profile}</span>
           <span>·</span>

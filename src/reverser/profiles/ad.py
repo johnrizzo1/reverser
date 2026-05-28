@@ -144,6 +144,7 @@ PROFILE_AD = _register(Profile(
     name="Active Directory",
     key="ad",
     description="Internal AD engagement — assumed-breach methodology with NetExec, BloodHound, and KB",
+    domain="network",
     system_addendum="""\
 
 ## Profile: Active Directory Penetration Testing

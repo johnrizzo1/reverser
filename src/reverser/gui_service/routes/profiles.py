@@ -20,6 +20,7 @@ def _serialize_profile(p) -> dict:
         "key": p.key,
         "name": p.name,
         "description": p.description,
+        "domain": p.domain,
         "skills": [_serialize_skill(s) for s in p.skills],
         "tools_allowlist": p.tools_allowlist,  # None means "all tools"
     }

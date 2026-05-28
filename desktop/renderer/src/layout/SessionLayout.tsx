@@ -45,10 +45,6 @@ export function SessionLayout() {
   useEffect(() => {
     if (!isActive) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "F1") { e.preventDefault(); setSkillOpen(true); }
-      if (e.key === "F2") { e.preventDefault(); setProfileOpen(true); }
-      if (e.key === "F4") { e.preventDefault(); setSudoOpen(true); }
-      if (e.key === "F6") { e.preventDefault(); setStopOpen(true); }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
         e.preventDefault(); setDoneOpen(true);
       }
@@ -114,10 +110,10 @@ export function SessionLayout() {
 
       {isActive ? (
         <div className="h-9 border-t border-neutral-800 bg-neutral-950/80 px-3 flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={() => setSkillOpen(true)}>Skills (F1)</Button>
-          <Button size="sm" variant="ghost" onClick={() => setProfileOpen(true)}>Profile (F2)</Button>
-          <Button size="sm" variant="ghost" onClick={() => setSudoOpen(true)}>Sudo (F4)</Button>
-          <Button size="sm" variant="ghost" onClick={() => setStopOpen(true)}>Stop (F6)</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSkillOpen(true)}>Skills</Button>
+          <Button size="sm" variant="ghost" onClick={() => setProfileOpen(true)}>Profile</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSudoOpen(true)}>Sudo</Button>
+          <Button size="sm" variant="ghost" onClick={() => setStopOpen(true)}>Stop</Button>
           <Button size="sm" variant="ghost" onClick={() => setDoneOpen(true)}>Mark done</Button>
         </div>
       ) : (

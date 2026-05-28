@@ -7,9 +7,6 @@ import sys
 
 from .tools._common import is_url, maybe_extract_archive
 
-# Profiles that operate on web targets rather than binary files
-_WEB_PROFILES = {"webpentest", "webapi", "webrecon"}
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -368,8 +365,6 @@ def _run_interactive(args):
     else:
         budget = args.budget
         max_turns = args.max_turns
-
-    is_web_profile = profile_key in _WEB_PROFILES
 
     # resolved_target_obj is set when we go through resolve_target so that
     # run_tui can use AgentSession.from_target (populates target_name +

@@ -16,6 +16,12 @@ import { ModelSelector } from "@/components/ModelSelector";
 import { AuthGateModal } from "@/modals/AuthGateModal";
 import { ApiError } from "@/api/client";
 import { cn } from "@/lib/utils";
+import {
+  classifyTargetIntent,
+  intentLabel,
+  profileMatchesIntent,
+  recommendedProfileForIntent,
+} from "@/lib/targetIntent";
 
 const NETWORK_PROFILES = new Set([
   "pentest", "webpentest", "webapi", "webrecon", "ad", "manager", "exploit",
@@ -47,6 +53,9 @@ export function NewEngagement() {
   const { data: selectedDetail } = useTarget(
     targetMode === "existing" ? selectedTargetName || null : null,
   );
+  const selectedPrimaryAddress = selectedDetail?.addresses.find(
+    (a) => a.id === selectedDetail.primary_address_id,
+  )?.value ?? "";
 
   // ----- session config -----
   const [profile, setProfile] = useState("general");
@@ -67,6 +76,17 @@ export function NewEngagement() {
   const canSubmit = targetMode === "new"
     ? !!target
     : !!selectedTargetName;
+
+  const targetValueForIntent = targetMode === "new"
+    ? target
+    : useOverride && overrideAddress
+      ? overrideAddress
+      : selectedPrimaryAddress;
+  const inferredIntent = classifyTargetIntent(targetValueForIntent);
+  const recommendedProfile = recommendedProfileForIntent(inferredIntent);
+  const selectedProfile = profiles.data?.profiles.find((p) => p.key === profile);
+  const profileMismatch = !!targetValueForIntent
+    && !profileMatchesIntent(profile, inferredIntent, selectedProfile?.domain);
 
   async function submit() {
     setPendingSubmit(false);
@@ -106,14 +126,46 @@ export function NewEngagement() {
   }
 
   return (
-    <div className="p-6 max-w-2xl">
-      <h2 className="text-base font-medium mb-4">New engagement</h2>
+    <div className="h-full overflow-auto bg-[radial-gradient(circle_at_top_left,rgba(20,184,166,0.10),transparent_34rem)]">
+      <div className="mx-auto max-w-5xl p-6">
+        <div className="mb-5 flex items-end justify-between gap-4">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-cyan-300/80">
+              launcher
+            </p>
+            <h2 className="text-2xl font-semibold text-neutral-50">New engagement</h2>
+          </div>
+          <div className="hidden rounded border border-neutral-800 bg-neutral-900/70 px-3 py-2 text-xs text-neutral-400 sm:block">
+            Pick the target first. Reverser will warn when the profile does not
+            match the target type.
+          </div>
+        </div>
 
-      <Card className="mb-4">
-        <CardHeader>
-          <CardTitle>Target</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        {profileMismatch && (
+          <div className="mb-4 rounded border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <div className="flex flex-wrap items-center gap-3">
+              <span>
+                This looks like a {intentLabel(inferredIntent)}, but the selected
+                profile is <span className="font-mono">{profile}</span>.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-400/50 text-amber-100 hover:bg-amber-500/20"
+                onClick={() => setProfile(recommendedProfile)}
+              >
+                Use {recommendedProfile}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+          <Card className="mb-4 border-neutral-700/70 bg-neutral-900/70 shadow-2xl shadow-black/20">
+            <CardHeader>
+              <CardTitle>Target</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
           {/* Mode toggle */}
           <div className="flex gap-4 text-xs">
             {(["new", "existing"] as TargetMode[]).map((m) => (
@@ -239,14 +291,14 @@ export function NewEngagement() {
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Session config</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+          <Card className="border-neutral-700/70 bg-neutral-900/70 shadow-2xl shadow-black/20">
+            <CardHeader>
+              <CardTitle>Session config</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-neutral-500 mb-1">Profile</label>
@@ -322,13 +374,14 @@ export function NewEngagement() {
           </Button>
 
           {NETWORK_PROFILES.has(profile) && (
-            <p className="text-[11px] text-amber-400 mt-2">
+            <p className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
               This profile touches the network. You must have written authorization to test
               the target.
             </p>
           )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </div>
 
       <AuthGateModal
         open={authGateOpen}
@@ -337,6 +390,7 @@ export function NewEngagement() {
           if (pendingSubmit) submit();
         }}
       />
+      </div>
     </div>
   );
 }

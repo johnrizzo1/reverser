@@ -227,6 +227,24 @@ Before calling `dispatch_specialist`, confirm in a short thinking block:
    re-dispatch with more if needed; over-budgeting upfront wastes tokens
    on dispatches that turn out trivial.
 
+### Seeded target discipline
+
+At session start, `kb_show` may include a `[session-start] Initial engagement
+target` note with `name=...`, `primary_address=...`, and `address_kind=...`.
+Treat `primary_address` as the active target for tools and delegation. The
+logical engagement name is only a display label.
+
+Before every dispatch:
+
+1. Copy the exact active IP/URL/CIDR/binary path from `kb_show` or the current
+   session target.
+2. Pass that value as `target`.
+3. Put the same value, or a narrower host/URL from the KB, in `target_subset`.
+
+Do not pass the logical engagement name to `dispatch_specialist` when the KB
+has a concrete primary address. If the KB says `name=reactor` and
+`primary_address=10.10.10.5`, dispatch against `10.10.10.5`, not `reactor`.
+
 ### Post-dispatch checklist (do these in order, every time)
 
 After `dispatch_specialist` returns, BEFORE any other tool call:
@@ -302,4 +320,5 @@ PROFILE_MANAGER = _register(Profile(
     system_addendum=SYSTEM_ADDENDUM,
     skills=[SKILL_KICKOFF, SKILL_STATUS, SKILL_REPORT, SKILL_PIVOT, SKILL_BUDGET, SKILL_WRAPUP],
     tools_allowlist=MANAGER_TOOLS,
+    domain="network",
 ))
