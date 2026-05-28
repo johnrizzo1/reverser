@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .prompts import SYSTEM_PROMPT, WEB_SYSTEM_PROMPT  # noqa: F401
+from .prompts import SYSTEM_PROMPT, WEB_SYSTEM_PROMPT, NETWORK_SYSTEM_PROMPT  # noqa: F401
 from .profiles import Profile
 from .tools import ALL_TOOLS
 from .tools._common import is_url
@@ -20,6 +20,13 @@ from .session_log import SessionLog, session_log_path
 
 # Profiles that operate on web targets rather than binary files
 _WEB_PROFILES = {"webpentest", "webapi", "webrecon"}
+# Non-web network profiles. Targets are hosts/services, not binaries.
+_NETWORK_PROFILES = {"pentest", "ad", "manager", "exploit"}
+
+
+def _is_network_profile(profile_key: str) -> bool:
+    """True for any profile whose target is a network host/service (web or not)."""
+    return profile_key in _WEB_PROFILES or profile_key in _NETWORK_PROFILES
 
 
 def _now_iso_session() -> str:
@@ -172,12 +179,13 @@ class AgentSession:
         self.active_address = None  # type: Optional["Address"]  # noqa: F821
 
         self._is_web = profile.key in _WEB_PROFILES
+        self._is_network = profile.key in _NETWORK_PROFILES
         self._is_url_target = is_url(binary_path) if binary_path else False
 
-        if binary_path and not self._is_url_target:
+        if binary_path and not self._is_url_target and not self._is_web and not self._is_network:
             self.target = str(Path(binary_path).resolve())
         else:
-            self.target = binary_path  # URL or empty
+            self.target = binary_path  # URL, network host, or empty
 
         # Keep binary_path for backward compat
         self.binary_path = self.target
@@ -260,6 +268,7 @@ class AgentSession:
         self.binary_path = self.target
         self._is_url_target = is_url(self.target) if self.target else False
         self._is_web = profile.key in _WEB_PROFILES
+        self._is_network = profile.key in _NETWORK_PROFILES
 
         self.profile = profile
         self.budget = snap.config.budget
@@ -333,7 +342,15 @@ class AgentSession:
         return self._running
 
     def _build_system_prompt(self) -> str:
-        if self._is_web or self._is_url_target:
+        # Profile-based classification takes precedence over target-shape
+        # heuristics: a manager/pentest/ad/exploit session with an IP target
+        # must get NETWORK_SYSTEM_PROMPT even though is_url() returns True
+        # for dotted addresses.
+        if self._is_web:
+            base = WEB_SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
+        elif self._is_network:
+            base = NETWORK_SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
+        elif self._is_url_target:
             base = WEB_SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
         else:
             base = SYSTEM_PROMPT.format(budget=self.budget, max_turns=self.max_turns)
@@ -342,7 +359,7 @@ class AgentSession:
         if addendum:
             base += "\n" + addendum
 
-        if self._is_web or self._is_url_target:
+        if self._is_web or (self._is_url_target and not self._is_network):
             base += f"""
 
 ## Interactive Mode
@@ -371,6 +388,29 @@ When the user asks you to write a report, document findings, or save output to a
 you MUST use the `write_file` tool to create the file.
 
 When you respond, present your findings clearly with relevant details.
+"""
+        elif self._is_network:
+            base += f"""
+
+## Interactive Mode
+
+You are in interactive mode. The user will send you messages and you should respond helpfully.
+
+**CRITICAL: The target being engaged is a network host/service:**
+**{self.target}**
+
+This is NOT a file path. Do not pass it to disassemblers, decompilers, or any binary
+analysis tool. Pass it as the `target` argument to network tools (nmap_scan, dns_recon,
+whatweb_scan, etc.) and to `dispatch_specialist` when delegating.
+
+Follow the methodology in your profile addendum. Honor the scope envelope in `scope.toml`.
+
+**IMPORTANT: Complete all your analysis before giving your final response.** Keep making
+tool calls until you have gathered enough information to fully answer the user's request.
+Only give your text response after all tool calls are done.
+
+When the user asks you to write a report, document findings, or save output to a file,
+you MUST use the `write_file` tool to create the file.
 """
         elif os.path.isdir(self.target):
             # Multi-file target (e.g. extracted zip archive)
@@ -537,7 +577,11 @@ When you respond, present your findings clearly with relevant details.
 
         parts.append(user_message)
 
-        if self._is_web or self._is_url_target:
+        if self._is_web:
+            parts.append(f"\n\n[IMPORTANT: The target is exactly: {self.target} — use this for all tool calls]")
+        elif self._is_network:
+            parts.append(f"\n\n[IMPORTANT: The target host/service is exactly: {self.target} — pass it as the `target` argument to network tools; do NOT treat it as a file path]")
+        elif self._is_url_target:
             parts.append(f"\n\n[IMPORTANT: The target is exactly: {self.target} — use this for all tool calls]")
         elif os.path.isdir(self.target):
             parts.append(f"\n\n[IMPORTANT: The target directory is: {self.target} — analyze ALL files within it]")
@@ -655,10 +699,26 @@ When you respond, present your findings clearly with relevant details.
                     if self._cancel:
                         break
 
+                    # Backends use a per-`run()` local turn counter that
+                    # restarts at 1 on every send_message. The renderer
+                    # buckets events by `frame.turn`, so without remapping
+                    # the second message's events collide with Turn 1/2
+                    # from the first message and disappear from view.
+                    # Rewrite every non-turn event to carry the cumulative
+                    # turn number that `self.stats.turns` tracks — the same
+                    # value the yielded "turn" event reports as
+                    # `turns=...`. Logs become consistent too.
+                    if event.kind != "turn":
+                        event.turn = self.stats.turns
+
                     if event.kind == "turn":
                         self.stats.turns += 1
                         self._slog.log_turn(self.stats.turns)
-                        yield AgentEvent(kind="turn", turns=self.stats.turns)
+                        yield AgentEvent(
+                            kind="turn",
+                            turns=self.stats.turns,
+                            turn=self.stats.turns,
+                        )
 
                     elif event.kind == "thinking":
                         self._slog.log_thinking(event.content, turn=event.turn or None)

@@ -277,3 +277,161 @@ async def test_model_family_override_forces_generic(monkeypatch):
         pass
 
     assert "<tool_call>" not in create_mock.call_args.kwargs["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_json_fence_tool_call_is_stripped_from_visible_text():
+    """Regression: DeepSeek-Coder-V2 emits tool calls as ```json {...}```
+    fences (despite the preamble asking for <tool_call>...</tool_call>).
+    The extractor executes them, but the scrubber must also remove them
+    from the text the user sees — otherwise the raw JSON leaks into chat.
+    """
+    from reverser.backends.openai_compat import OpenAICompatBackend
+
+    backend = OpenAICompatBackend(
+        tools=[], model="deepseek-coder-v2-lite-instruct", api_key="x",
+    )
+    backend._handlers = {"nmap_scan": AsyncMock(return_value={
+        "content": [{"type": "text", "text": "Host up"}], "is_error": False,
+    })}
+    backend._tool_names = {"nmap_scan"}
+    backend._openai_tools = [{
+        "type": "function",
+        "function": {"name": "nmap_scan", "description": "scan",
+                     "parameters": {"type": "object",
+                                    "properties": {"target": {"type": "string"}}}},
+    }]
+
+    fenced = (
+        "First, let's perform a basic reconnaissance scan:\n\n"
+        "```json\n"
+        '{\n  "name": "nmap_scan",\n  "arguments": {\n    "target": "10.0.0.1"\n  }\n}\n'
+        "```"
+    )
+    # Two responses: turn 1 emits the fenced call; turn 2 emits a plain final.
+    create_mock = AsyncMock(side_effect=[_mk_response(fenced), _mk_response("done")])
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock))
+    )
+
+    events = []
+    async for ev in backend.run(prompt="hi", system_prompt="be helpful", max_turns=2):
+        events.append(ev)
+
+    text_events = [e for e in events if e.kind == "text"]
+    tool_calls = [e for e in events if e.kind == "tool_call"]
+
+    # Tool was executed
+    assert len(tool_calls) == 1
+    assert tool_calls[0].tool_name == "nmap_scan"
+
+    # No emitted text event contains the raw JSON fence
+    for ev in text_events:
+        assert "```json" not in ev.content, (
+            f"JSON fence leaked into visible text: {ev.content!r}"
+        )
+        assert '"name": "nmap_scan"' not in ev.content, (
+            f"Tool-call JSON leaked into visible text: {ev.content!r}"
+        )
+
+    # The natural-language reasoning before the fence is preserved
+    reasoning_events = [e for e in text_events
+                        if "reconnaissance scan" in e.content]
+    assert reasoning_events, (
+        f"Reasoning prose was stripped along with the fence; text events: "
+        f"{[e.content for e in text_events]!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_json_array_fence_tool_calls_are_stripped_from_visible_text():
+    """Regression: DeepSeek-Coder-V2 batches parallel tool calls inside a
+    ```json [ {...}, {...} ] ``` array. The bare-JSON extractor finds each
+    inner object and executes them; the scrubber must remove the entire
+    fence so the array doesn't leak into chat. Without this, every
+    multi-tool turn dumps raw JSON to the user.
+    """
+    from reverser.backends.openai_compat import OpenAICompatBackend
+
+    backend = OpenAICompatBackend(
+        tools=[], model="deepseek-coder-v2-lite-instruct", api_key="x",
+    )
+    backend._handlers = {
+        "nmap_scan": AsyncMock(return_value={
+            "content": [{"type": "text", "text": "no hosts up"}], "is_error": False,
+        }),
+        "whatweb_scan": AsyncMock(return_value={
+            "content": [{"type": "text", "text": "nothing"}], "is_error": False,
+        }),
+    }
+    backend._tool_names = {"nmap_scan", "whatweb_scan"}
+    backend._openai_tools = [
+        {"type": "function", "function": {"name": "nmap_scan", "description": "x",
+            "parameters": {"type": "object",
+                           "properties": {"target": {"type": "string"}}}}},
+        {"type": "function", "function": {"name": "whatweb_scan", "description": "x",
+            "parameters": {"type": "object",
+                           "properties": {"target": {"type": "string"}}}}},
+    ]
+
+    # The exact shape DeepSeek emits when batching parallel calls
+    fenced_array = (
+        "```json\n"
+        "[\n"
+        "  {\n"
+        '    "name": "nmap_scan",\n'
+        '    "arguments": {"target": "DevArea"}\n'
+        "  },\n"
+        "  {\n"
+        '    "name": "whatweb_scan",\n'
+        '    "arguments": {"target": "DevArea"}\n'
+        "  }\n"
+        "]\n"
+        "```"
+    )
+    create_mock = AsyncMock(side_effect=[
+        _mk_response(fenced_array),
+        _mk_response("done"),
+    ])
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock))
+    )
+
+    events = []
+    async for ev in backend.run(prompt="hi", system_prompt="be helpful", max_turns=2):
+        events.append(ev)
+
+    text_events = [e for e in events if e.kind == "text"]
+    tool_calls = [e for e in events if e.kind == "tool_call"]
+
+    # Both tools in the array were executed
+    assert {tc.tool_name for tc in tool_calls} == {"nmap_scan", "whatweb_scan"}, [
+        tc.tool_name for tc in tool_calls
+    ]
+
+    # No emitted text event leaks the JSON array, the array brackets, or
+    # the raw tool-call JSON
+    for ev in text_events:
+        assert "```json" not in ev.content, (
+            f"JSON fence leaked into visible text: {ev.content!r}"
+        )
+        assert '"name":' not in ev.content, (
+            f"Tool-call JSON leaked into visible text: {ev.content!r}"
+        )
+
+
+def test_scrubber_preserves_unrelated_json_in_code_fences():
+    """The scrubber must only strip fences carrying tool-call shape.
+    A config example or schema dump in a ```json``` block must survive.
+    """
+    from reverser.backends.openai_compat import _TOOL_CALL_FENCE_SCRUB
+
+    config = (
+        "Here is the DB config:\n\n"
+        "```json\n"
+        '{"host": "localhost", "port": 5432}\n'
+        "```"
+    )
+    scrubbed = _TOOL_CALL_FENCE_SCRUB.sub("", config).strip()
+    assert "```json" in scrubbed, scrubbed
+    assert '"host"' in scrubbed, scrubbed

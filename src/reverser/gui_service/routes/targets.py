@@ -540,12 +540,32 @@ def get_target_detail(name: str) -> dict:
 
     NOTE: FastAPI matches more-specific routes first (e.g. /api/targets/{target}/kb)
     before falling back to this bare-name route.
+
+    Lazy migration: if `target.json` is missing but a legacy directory exists
+    (created by the pre-Target-model session_start path), infer kind from the
+    name and persist a Target so subsequent reads succeed.
     """
     tmod = _targets_mod()
     try:
         t = tmod.load_target(name)
     except FileNotFoundError:
-        raise HTTPException(404, detail=f"unknown target: {name!r}")
+        from ...session_start import _infer_target_kind
+        legacy_dir = _targets_root() / target_key(name)
+        if not legacy_dir.is_dir():
+            raise HTTPException(404, detail=f"unknown target: {name!r}")
+        try:
+            t = tmod.create_target(
+                name=name,
+                kind=_infer_target_kind(name),  # type: ignore[arg-type]
+                initial_address=name,
+            )
+        except ValueError:
+            # Race: target.json appeared between checks. Reload, or 404 if it
+            # somehow vanished again.
+            try:
+                t = tmod.load_target(name)
+            except FileNotFoundError:
+                raise HTTPException(404, detail=f"unknown target: {name!r}")
     return _target_detail(t)
 
 

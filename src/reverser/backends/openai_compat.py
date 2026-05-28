@@ -40,6 +40,19 @@ _JSON_TOOL_PATTERNS = [
     ),
 ]
 
+# Scrubber for ```json ... ``` fences that wrap tool-call JSON. Matches
+# both a single {"name": ..., "arguments": ...} object and a JSON array
+# of such objects (which is what DeepSeek-Coder-V2 emits when it batches
+# parallel calls). The `[^`]*?` body forbids backticks inside the fence
+# so we never match across multiple fences. Only fences whose body
+# contains the "name"/"arguments" shape are stripped — unrelated JSON in
+# code blocks is preserved.
+_TOOL_CALL_FENCE_SCRUB = re.compile(
+    r'```(?:json)?\s*[^`]*?"name"\s*:\s*"[^"]+"[^`]*?"arguments"[^`]*?```',
+    re.DOTALL,
+)
+
+
 # Qwen3/Qwen3.5 native XML format:
 # <tool_call>
 # <function=function_name>
@@ -361,6 +374,14 @@ class OpenAICompatBackend(Backend):
             visible_text = re.sub(r'<tool_call>.*?</tool_call>', '', display_content, flags=re.DOTALL).strip()
             # Also strip Gemma tool call markers
             visible_text = re.sub(r'<\|tool_call>.*?<tool_call\|>', '', visible_text, flags=re.DOTALL).strip()
+            # Also strip ```json ...``` fences that the JSON extractor will
+            # execute as tool calls. DeepSeek-Coder-V2 emits these in two
+            # shapes — a bare object or a JSON array of objects — and may
+            # batch multiple calls per fence. Match any fence whose body
+            # carries a "name": "..." / "arguments": ... shape and remove
+            # the whole fence (single regex covers both shapes). A "no
+            # backticks inside" body keeps the match anchored to one fence.
+            visible_text = _TOOL_CALL_FENCE_SCRUB.sub('', visible_text).strip()
             if visible_text:
                 yield AgentEvent(kind="text", content=visible_text, turn=turn)
 
