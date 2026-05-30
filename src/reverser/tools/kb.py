@@ -15,6 +15,8 @@ from ..kb import (
     require_pentest_auth,
 )
 from ._common import format_error, format_tool_result
+from ..schemas.models import FindingModel
+from ..schemas.validation import validate_args, tool_input_schema
 
 
 def _resolve_target(target: str | None):
@@ -289,57 +291,55 @@ async def kb_list_creds(args: dict) -> dict:
 TOOLS.append(kb_list_creds)
 
 
+def _finding_tool_schema() -> dict:
+    """Build the @tool input schema for kb_add_finding by prepending `target`
+    to the FindingModel-derived schema."""
+    base = tool_input_schema(FindingModel)
+    props = {"target": {"type": "string", "description": "Normalized target identifier."}}
+    props.update(base["properties"])
+    return {
+        "type": "object",
+        "properties": props,
+        "required": ["target", *base["required"]],
+    }
+
+
 @tool(
     "kb_add_finding",
-    "Record a new finding in the KB. Severity: info|low|medium|high|critical. "
-    "Optional `evidence_paths` (list of relative paths under findings/ or loot/) "
-    "and `cvss` numeric score.",
-    {
-        "type": "object",
-        "properties": {
-            "target": {"type": "string", "description": "Normalized target identifier."},
-            "title": {"type": "string", "description": "Short finding title."},
-            "severity": {
-                "type": "string",
-                "description": "Severity level.",
-                "enum": ["info", "low", "medium", "high", "critical"],
-            },
-            "description": {"type": "string", "description": "Finding details."},
-            "evidence_paths": {
-                "type": "array",
-                "description": "Optional list of evidence file paths (relative to target dir).",
-                "items": {"type": "string"},
-                "default": [],
-            },
-            "cvss": {
-                "type": "number",
-                "description": "Optional numeric CVSS score (0.0-10.0).",
-                "default": 0,
-            },
-        },
-        "required": ["target", "title", "severity", "description"],
-    },
+    "Record a new finding in the KB. Requires evidence_paths (>=1) OR an "
+    "evidence_blocker explaining why none exist, plus reproduction, confidence "
+    "(0-100), and reachability (demonstrated|likely|theoretical|unknown).",
+    _finding_tool_schema(),
 )
 async def kb_add_finding(args: dict) -> dict:
     auth_err = _check_auth()
     if auth_err:
         return auth_err
-    target = args["target"]
-    cvss = args.get("cvss", 0) or None
-    try:
-        finding = FindingFact(
-            title=args["title"],
-            severity=args["severity"],
-            description=args["description"],
-            evidence_paths=args.get("evidence_paths", []) or [],
-            cvss=cvss,
-        )
-    except ValueError as e:
-        return format_error(str(e))
+    target = args.get("target")
+    if not target:
+        return format_error("target is required.")
+    model_args = {k: v for k, v in args.items() if k != "target"}
+    outcome = validate_args(FindingModel, model_args)
+    if not outcome.ok:
+        return format_error(outcome.error_text)
+    m = outcome.value
+    finding = FindingFact(
+        title=m.title,
+        severity=m.severity.value,
+        description=m.description,
+        evidence_paths=m.evidence_paths,
+        cvss=m.cvss,
+        reproduction=m.reproduction,
+        reachability=m.reachability.value,
+        confidence=m.confidence,
+        evidence_blocker=m.evidence_blocker,
+        validated=m.validated,
+    )
     fid = for_target(target).record_finding(finding)
     from ..gui_service.kb_emitter import emit_recorded_finding
     emit_recorded_finding("create", fid, finding)
-    return format_tool_result(f"Finding added: id={fid} title={finding.title!r}")
+    suffix = "" if m.validated else " (stored UNVALIDATED — evidence_blocker set)"
+    return format_tool_result(f"Finding added: id={fid} title={finding.title!r}{suffix}")
 
 
 TOOLS.append(kb_add_finding)

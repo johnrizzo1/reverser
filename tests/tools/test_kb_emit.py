@@ -170,6 +170,10 @@ async def test_kb_add_finding_emits_frame(session_with_spy, tmp_path, monkeypatc
         "title": "SMB signing not required",
         "severity": "medium",
         "description": "Allows relay.",
+        "evidence_paths": ["findings/smb.txt"],
+        "reproduction": "Run responder.",
+        "confidence": 80,
+        "reachability": "demonstrated",
     })
 
     session_with_spy.on_kb_event.assert_called()
