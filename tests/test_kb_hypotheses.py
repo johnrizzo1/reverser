@@ -9,9 +9,10 @@ import pytest
 from reverser.kb.schema import apply_schema, get_schema_version, SCHEMA_VERSION
 
 
-def test_schema_version_is_2():
-    """Bumping the schema for the hypotheses table."""
-    assert SCHEMA_VERSION == 2
+def test_schema_version_is_3():
+    """v3 adds the validated-output finding columns (reproduction, reachability,
+    confidence, evidence_blocker, validated)."""
+    assert SCHEMA_VERSION == 3
 
 
 def test_apply_schema_creates_hypotheses_table():
@@ -76,8 +77,8 @@ def test_apply_schema_migrates_existing_v1_db():
             "SELECT name FROM sqlite_master WHERE type='table' AND name='hypotheses'"
         )
         assert cur.fetchone() is not None
-        # Schema version is now 2
-        assert get_schema_version(conn) == 2
+        # Schema version is now 3
+        assert get_schema_version(conn) == SCHEMA_VERSION
 
 
 import json
