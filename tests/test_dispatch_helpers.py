@@ -4,7 +4,6 @@ import pytest
 
 from reverser.tools.dispatch import (
     compose_dispatch_context,
-    parse_hypothesis_outcome,
 )
 
 
@@ -73,46 +72,6 @@ def test_compose_dispatch_context_handles_missing_optional_fields():
     # Should not crash; placeholders for missing fields
     assert "y" in block
     assert "entire target scope" in block.lower() or "no subset" in block.lower()
-
-
-def test_parse_hypothesis_outcome_confirmed():
-    report = """### TL;DR
-Found it.
-
-### Hypothesis outcome
-CONFIRMED — credentials work via SMB to the DC.
-
-### KB writes
-- Added cred #5 (status=valid)
-"""
-    outcome = parse_hypothesis_outcome(report)
-    assert outcome == "confirmed"
-
-
-def test_parse_hypothesis_outcome_refuted():
-    report = "### Hypothesis outcome\nREFUTED — anonymous LDAP rejected with 0x80070005.\n"
-    assert parse_hypothesis_outcome(report) == "refuted"
-
-
-def test_parse_hypothesis_outcome_inconclusive():
-    report = "### Hypothesis outcome\nINCONCLUSIVE — service was unreachable.\n"
-    assert parse_hypothesis_outcome(report) == "inconclusive"
-
-
-def test_parse_hypothesis_outcome_missing_section_returns_none():
-    report = "### TL;DR\nDid stuff.\n"
-    assert parse_hypothesis_outcome(report) is None
-
-
-def test_parse_hypothesis_outcome_unparseable_value_returns_inconclusive():
-    """When the section exists but value is gibberish, default to inconclusive."""
-    report = "### Hypothesis outcome\n¯\\_(ツ)_/¯ no clear answer\n"
-    assert parse_hypothesis_outcome(report) == "inconclusive"
-
-
-def test_parse_hypothesis_outcome_case_insensitive():
-    report = "### Hypothesis outcome\nconfirmed — works.\n"
-    assert parse_hypothesis_outcome(report) == "confirmed"
 
 
 def test_parse_dispatch_report_from_json_block():

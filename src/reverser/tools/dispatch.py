@@ -1,6 +1,6 @@
 """Manager-profile dispatch tool: spawn specialist sub-agents via the SDK.
 
-Pure helpers (compose_dispatch_context, parse_hypothesis_outcome) are
+Pure helpers (compose_dispatch_context, parse_dispatch_report) are
 unit-tested in isolation. The dispatch_specialist tool itself wraps these
 helpers around an SDK Task call (see Task 13).
 """
@@ -18,8 +18,10 @@ import threading
 
 
 _RETURN_CONTRACT = """## Return contract
-When you finish, your final assistant message MUST be a markdown report
-with these sections:
+When you finish, your final assistant message MUST contain (1) a human-readable
+markdown report with the sections below, and (2) as the VERY LAST thing in the
+message, a fenced ```json block restating the report. The JSON block is parsed
+by the lead and is MANDATORY.
 
 ### TL;DR
 One sentence.
@@ -35,8 +37,19 @@ Short list of what you persisted (creds added, findings added, hypotheses
 spawned). The lead reads this to know what changed.
 
 ### Suggested follow-up
-What you would test next if you had more budget. The lead decides whether
-to act on it.
+What you would test next if you had more budget.
+
+### Machine-readable summary (MANDATORY — emit exactly this, as the last thing)
+```json
+{
+  "tldr": "one sentence",
+  "findings": ["..."],
+  "hypothesis_outcome": "confirmed | refuted | inconclusive",
+  "kb_writes": ["..."],
+  "follow_up": ["..."],
+  "status": "success | partial | error"
+}
+```
 """
 
 
@@ -96,72 +109,6 @@ nickname, or a different host from prior context.
 """
 
 
-_OUTCOME_KEYWORDS = {
-    "confirmed": "confirmed",
-    "refuted": "refuted",
-    "inconclusive": "inconclusive",
-}
-
-
-# ── Status: partial heuristic (per spec D4) ──────────────────────────
-
-
-_PARTIAL_HEURISTIC_PATTERN = re.compile(
-    r"###\s+(Findings|Suggested follow-up|Hypothesis outcome)\s*\n((?:(?!###).)*)",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _has_actionable_findings(report: str) -> bool:
-    """Return True if the report body contains at least one return-contract
-    section with non-trivial content (>=20 chars).
-
-    Used by dispatch_specialist to promote Status: error → Status: partial
-    when a subprocess errored but the specialist still produced useful intel.
-    Heuristic matches against the section headers from `_RETURN_CONTRACT`:
-    Findings, Suggested follow-up, Hypothesis outcome.
-
-    See docs/superpowers/specs/2026-05-12-manager-reliability-design.md §7.
-    """
-    if not report:
-        return False
-    for match in _PARTIAL_HEURISTIC_PATTERN.finditer(report):
-        body = match.group(2).strip()
-        if len(body) >= 20:
-            return True
-    return False
-
-
-def parse_hypothesis_outcome(report: str) -> str | None:
-    """Extract the outcome word from the '### Hypothesis outcome' section.
-
-    Returns one of {'confirmed', 'refuted', 'inconclusive'}, or None if the
-    section is missing entirely. If the section exists but the value is
-    unparseable, returns 'inconclusive' (defensive — the lead can re-dispatch).
-    """
-    # Find the section header (case-insensitive, allow extra whitespace)
-    pattern = re.compile(
-        r"###\s+Hypothesis\s+outcome\s*\n(.+?)(?=\n###|\Z)",
-        re.IGNORECASE | re.DOTALL,
-    )
-    match = pattern.search(report)
-    if not match:
-        return None
-
-    body = match.group(1).strip()
-    if not body:
-        return "inconclusive"
-
-    # Look for the first matching outcome keyword in the body
-    body_lower = body.lower()
-    for keyword in _OUTCOME_KEYWORDS:
-        if keyword in body_lower:
-            return _OUTCOME_KEYWORDS[keyword]
-
-    # Section present but no keyword recognized
-    return "inconclusive"
-
-
 # ── Schema-validated dispatch report helpers ────────────────────────
 
 from ..schemas.models import DispatchReportModel  # noqa: E402
@@ -198,6 +145,16 @@ def parse_dispatch_report(text: str):
         return "inconclusive", None, outcome.error_text
     m = outcome.value
     return m.hypothesis_outcome.value, m, None
+
+
+def _promote_status(subprocess_status: str, report_model) -> str:
+    """If the subprocess errored but the specialist still produced a structured
+    report with actionable content, promote to 'partial' so the lead reads it."""
+    if subprocess_status == "error" and report_model is not None and (
+        report_model.findings or report_model.follow_up or report_model.kb_writes
+    ):
+        return "partial"
+    return subprocess_status
 
 
 # ── dispatch_specialist tool ────────────────────────────────────────
@@ -598,14 +555,13 @@ async def dispatch_specialist(args: dict) -> dict:
             except Exception:
                 pass
 
-    outcome = parse_hypothesis_outcome(report_text)
+    outcome, report_model, _parse_errors = parse_dispatch_report(report_text)
 
     # ── Status: partial promotion (per spec D4) ──────────────────────
-    # If subprocess errored but the report body has return-contract sections
-    # with actionable content, promote status so the manager doesn't dismiss
-    # the report based on the Status header alone.
-    if status == "error" and _has_actionable_findings(report_text):
-        status = "partial"
+    # If subprocess errored but the validated JSON report carries actionable
+    # content, promote status so the manager doesn't dismiss the report based
+    # on the Status header alone.
+    status = _promote_status(status, report_model)
 
     summary_lines = [
         f"# Dispatch result — {specialty}",
