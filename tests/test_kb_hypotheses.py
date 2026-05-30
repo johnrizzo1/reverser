@@ -9,9 +9,10 @@ import pytest
 from reverser.kb.schema import apply_schema, get_schema_version, SCHEMA_VERSION
 
 
-def test_schema_version_is_2():
-    """Bumping the schema for the hypotheses table."""
-    assert SCHEMA_VERSION == 2
+def test_schema_version_is_3():
+    """v3 adds the validated-output finding columns (reproduction, reachability,
+    confidence, evidence_blocker, validated)."""
+    assert SCHEMA_VERSION == 3
 
 
 def test_apply_schema_creates_hypotheses_table():
@@ -76,8 +77,8 @@ def test_apply_schema_migrates_existing_v1_db():
             "SELECT name FROM sqlite_master WHERE type='table' AND name='hypotheses'"
         )
         assert cur.fetchone() is not None
-        # Schema version is now 2
-        assert get_schema_version(conn) == 2
+        # Schema version is now 3
+        assert get_schema_version(conn) == SCHEMA_VERSION
 
 
 import json
@@ -295,7 +296,14 @@ def test_kb_update_hypothesis_tool_changes_status(tmp_path, monkeypatch):
     from reverser.tools.kb import kb_update_hypothesis
 
     kb = _fresh_kb(tmp_path, monkeypatch, target="10.10.10.5")
-    h = kb.add_hypothesis(statement="x")
+    h = kb.add_hypothesis(statement="x", rationale="because", confidence=50)
+    # proposed -> testing (valid transition)
+    _call_tool(kb_update_hypothesis, {
+        "target": "10.10.10.5",
+        "id": h.id,
+        "status": "testing",
+    })
+    # testing -> confirmed with evidence (valid transition)
     result = _call_tool(kb_update_hypothesis, {
         "target": "10.10.10.5",
         "id": h.id,
@@ -360,7 +368,10 @@ def test_kb_export_report_includes_attack_tree(tmp_path, monkeypatch):
     kb.update_hypothesis(parent.id, status="confirmed")
     kb.add_hypothesis(statement="NTLM relay viable", parent_id=parent.id)
 
-    result = _call_tool(kb_export_report, {"target": "10.10.10.5"})
+    result = _call_tool(kb_export_report, {
+        "target": "10.10.10.5",
+        "executive_summary": "Attack tree test engagement.",
+    })
     text = result["content"][0]["text"]
     assert "## Attack tree" in text
     assert "DC SMB signing off" in text
@@ -373,6 +384,76 @@ def test_kb_export_report_omits_attack_tree_when_empty(tmp_path, monkeypatch):
     from reverser.tools.kb import kb_export_report
 
     _fresh_kb(tmp_path, monkeypatch, target="10.10.10.6")  # empty
-    result = _call_tool(kb_export_report, {"target": "10.10.10.6"})
+    result = _call_tool(kb_export_report, {
+        "target": "10.10.10.6",
+        "executive_summary": "Empty KB test engagement.",
+    })
     text = result["content"][0]["text"]
     assert "## Attack tree" not in text
+
+
+# ---------------------------------------------------------------------------
+# Async tests for kb_add_hypothesis / kb_update_hypothesis validation
+# (Task 8: hypothesis tools use HypothesisModel + HypothesisUpdateModel)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def authorized_target(tmp_path, monkeypatch):
+    """Return a target name string, with auth and TARGETS_DIR set."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+    return "10.10.10.5"
+
+
+def _get_handler(tool_obj):
+    return getattr(tool_obj, "handler", None) or getattr(tool_obj, "fn", None) or tool_obj
+
+
+@pytest.mark.asyncio
+async def test_add_hypothesis_requires_rationale_and_confidence(authorized_target):
+    from reverser.tools.kb import kb_add_hypothesis
+    res = await _get_handler(kb_add_hypothesis)({
+        "target": authorized_target, "statement": "x",
+        # rationale + confidence missing
+    })
+    assert res.get("is_error") is True
+    assert "rationale" in res["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_illegal_transition(authorized_target):
+    from reverser.tools.kb import kb_add_hypothesis, kb_update_hypothesis
+    add = await _get_handler(kb_add_hypothesis)({
+        "target": authorized_target, "statement": "y",
+        "rationale": "because", "confidence": 40,
+    })
+    # Success message: "Hypothesis #<id> added (status=..., confidence=...): y"
+    hid = int(add["content"][0]["text"].split("#")[1].split(" ")[0])
+    res = await _get_handler(kb_update_hypothesis)({
+        "target": authorized_target, "id": hid,
+        "status": "confirmed",   # proposed -> confirmed is illegal
+        "evidence_refs": [{"kind": "finding", "id": 1}],
+    })
+    assert res.get("is_error") is True
+    assert "illegal transition" in res["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_update_confirmed_requires_evidence(authorized_target):
+    from reverser.tools.kb import kb_add_hypothesis, kb_update_hypothesis
+    add = await _get_handler(kb_add_hypothesis)({
+        "target": authorized_target, "statement": "z",
+        "rationale": "because", "confidence": 40,
+    })
+    # Success message: "Hypothesis #<id> added (status=..., confidence=...): z"
+    hid = int(add["content"][0]["text"].split("#")[1].split(" ")[0])
+    # proposed -> testing (valid)
+    await _get_handler(kb_update_hypothesis)({"target": authorized_target, "id": hid, "status": "testing"})
+    # testing -> confirmed with empty evidence_refs (invalid)
+    res = await _get_handler(kb_update_hypothesis)({
+        "target": authorized_target, "id": hid, "status": "confirmed", "evidence_refs": [],
+    })
+    assert res.get("is_error") is True
+    assert "evidence_refs" in res["content"][0]["text"]

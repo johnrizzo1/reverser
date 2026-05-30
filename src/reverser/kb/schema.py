@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _DDL = [
     """
@@ -89,14 +89,19 @@ _DDL = [
     """,
     """
     CREATE TABLE IF NOT EXISTS findings (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        target_id      TEXT NOT NULL REFERENCES targets(id),
-        title          TEXT NOT NULL,
-        severity       TEXT NOT NULL,
-        cvss           REAL,
-        description    TEXT,
-        evidence_paths TEXT,
-        created_at     TEXT NOT NULL
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_id       TEXT NOT NULL REFERENCES targets(id),
+        title           TEXT NOT NULL,
+        severity        TEXT NOT NULL,
+        cvss            REAL,
+        description     TEXT,
+        evidence_paths  TEXT,
+        reproduction    TEXT,
+        reachability    TEXT,
+        confidence      INTEGER,
+        evidence_blocker TEXT,
+        validated       INTEGER NOT NULL DEFAULT 1,
+        created_at      TEXT NOT NULL
     )
     """,
     """
@@ -145,12 +150,32 @@ _DDL = [
 ]
 
 
+_FINDING_ADDED_COLUMNS = [
+    ("reproduction", "TEXT"),
+    ("reachability", "TEXT"),
+    ("confidence", "INTEGER"),
+    ("evidence_blocker", "TEXT"),
+    ("validated", "INTEGER NOT NULL DEFAULT 1"),
+]
+
+
+def _migrate_findings_columns(conn: sqlite3.Connection) -> None:
+    """Add new finding columns to a pre-v3 table. Idempotent."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(findings)")}
+    if not existing:
+        return  # table will be created by _DDL
+    for name, decl in _FINDING_ADDED_COLUMNS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE findings ADD COLUMN {name} {decl}")
+
+
 def apply_schema(conn: sqlite3.Connection) -> None:
-    """Create all tables if missing and stamp the schema version."""
+    """Create all tables if missing, run additive migrations, stamp the version."""
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     for stmt in _DDL:
         conn.execute(stmt)
+    _migrate_findings_columns(conn)
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
         (str(SCHEMA_VERSION),),

@@ -418,3 +418,37 @@ def test_append_finding_evidence_preserves_order(tmp_targets_dir):
 
     findings = kb.get_findings()
     assert findings[0].evidence_paths == ["a.png", "b.png", "c.png"]
+
+
+def test_record_and_read_finding_with_new_fields(kb):
+    fid = kb.record_finding(FindingFact(
+        title="rce",
+        severity="critical",
+        description="d",
+        evidence_paths=["findings/x.txt"],
+        reproduction="curl ...",
+        reachability="demonstrated",
+        confidence=90,
+        validated=True,
+    ))
+    assert fid > 0
+    f = next(x for x in kb.get_findings() if x.id == fid)
+    assert f.reproduction == "curl ..."
+    assert f.reachability == "demonstrated"
+    assert f.confidence == 90
+    assert f.validated is True
+
+
+def test_get_findings_tolerates_legacy_rows(kb):
+    with kb._connect() as conn:
+        conn.execute(
+            "INSERT INTO findings (target_id, title, severity, description, evidence_paths, created_at) "
+            "VALUES (?, 'legacy', 'low', 'd', '[]', '2026-01-01T00:00:00')",
+            (kb.target_id,),
+        )
+        conn.commit()
+    out = [f for f in kb.get_findings() if f.title == "legacy"]
+    assert len(out) == 1
+    assert out[0].reachability is None
+    assert out[0].confidence is None
+    assert out[0].validated is True

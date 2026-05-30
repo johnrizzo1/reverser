@@ -6,6 +6,57 @@ import pytest
 from reverser.kb import for_target, HostFact, ServiceFact, CredentialFact, FindingFact
 
 
+# ---------------------------------------------------------------------------
+# Async tests for kb_add_finding FindingModel validation (Task 7)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_kb_add_finding_rejects_missing_reproduction(tmp_targets_dir, authorize):
+    from reverser.tools.kb import kb_add_finding
+    handler = getattr(kb_add_finding, "handler", None) or getattr(kb_add_finding, "fn", None) or kb_add_finding
+    for_target("10.10.10.5")
+    res = await handler({
+        "target": "10.10.10.5",
+        "title": "x", "severity": "high", "description": "d",
+        "evidence_paths": ["findings/x.txt"], "confidence": 50,
+        "reachability": "likely",
+        # reproduction missing
+    })
+    assert res.get("is_error") is True
+    assert "reproduction" in res["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_kb_add_finding_accepts_valid(tmp_targets_dir, authorize):
+    from reverser.tools.kb import kb_add_finding
+    handler = getattr(kb_add_finding, "handler", None) or getattr(kb_add_finding, "fn", None) or kb_add_finding
+    for_target("10.10.10.5")
+    res = await handler({
+        "target": "10.10.10.5",
+        "title": "x", "severity": "high", "description": "d",
+        "evidence_paths": ["findings/x.txt"], "reproduction": "curl",
+        "confidence": 50, "reachability": "likely",
+    })
+    assert res.get("is_error") is not True
+    assert "Finding added" in res["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_kb_add_finding_blocker_path_stores_degraded(tmp_targets_dir, authorize):
+    from reverser.tools.kb import kb_add_finding
+    handler = getattr(kb_add_finding, "handler", None) or getattr(kb_add_finding, "fn", None) or kb_add_finding
+    for_target("10.10.10.5")
+    res = await handler({
+        "target": "10.10.10.5",
+        "title": "x", "severity": "high", "description": "d",
+        "evidence_paths": [], "reproduction": "n/a", "confidence": 30,
+        "reachability": "demonstrated",
+        "evidence_blocker": "target offline",
+    })
+    assert res.get("is_error") is not True
+    assert "unvalidated" in res["content"][0]["text"].lower()
+
+
 @pytest.fixture(autouse=True)
 def authorize(monkeypatch):
     monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
@@ -202,6 +253,10 @@ def test_kb_add_finding_basic(tmp_targets_dir):
         "title": "SMB signing not required",
         "severity": "medium",
         "description": "Allows NTLM relay attacks.",
+        "evidence_paths": ["findings/smb.txt"],
+        "reproduction": "Run responder then trigger auth.",
+        "confidence": 80,
+        "reachability": "demonstrated",
     })
     text = result["content"][0]["text"]
     assert "added" in text.lower() or "id=" in text.lower()
@@ -219,6 +274,9 @@ def test_kb_add_finding_with_evidence_and_cvss(tmp_targets_dir):
         "severity": "critical",
         "description": "CVE-2020-1472",
         "evidence_paths": ["findings/zerologon.txt"],
+        "reproduction": "Run zerologon.py against DC.",
+        "confidence": 95,
+        "reachability": "demonstrated",
         "cvss": 10.0,
     })
     assert not result.get("is_error")
@@ -235,6 +293,10 @@ def test_kb_add_finding_invalid_severity(tmp_targets_dir):
         "title": "x",
         "severity": "emergency",
         "description": "x",
+        "evidence_paths": ["findings/x.txt"],
+        "reproduction": "test",
+        "confidence": 50,
+        "reachability": "likely",
     })
     assert result.get("is_error")
 
@@ -266,7 +328,10 @@ def test_kb_export_report_default_path(tmp_targets_dir):
         title="SMB signing missing", severity="medium",
         description="Allows NTLM relay.",
     ))
-    result = _call_tool(kb_export_report, {"target": "10.10.10.5"})
+    result = _call_tool(kb_export_report, {
+        "target": "10.10.10.5",
+        "executive_summary": "Test engagement summary for default path test.",
+    })
     text = result["content"][0]["text"]
     assert "Report written" in text or "report" in text.lower()
     expected_path = tmp_targets_dir / "10.10.10.5" / "report.md"
@@ -284,8 +349,39 @@ def test_kb_export_report_custom_path(tmp_targets_dir, tmp_path):
     out = tmp_path / "out.md"
     result = _call_tool(kb_export_report, {
         "target": "10.10.10.5",
+        "executive_summary": "Minimal engagement; no critical findings.",
         "output_path": str(out),
     })
     assert not result.get("is_error")
     assert out.exists()
     assert "10.10.10.5" in out.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Task 10: kb_export_report requires a validated executive_summary
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_export_report_requires_executive_summary(tmp_targets_dir, authorize):
+    from reverser.tools.kb import kb_export_report
+    handler = getattr(kb_export_report, "handler", None) or getattr(kb_export_report, "fn", None) or kb_export_report
+    for_target("10.10.10.5")
+    res = await handler({"target": "10.10.10.5"})
+    assert res.get("is_error") is True
+    assert "executive_summary" in res["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_export_report_writes_with_summary(tmp_targets_dir, authorize, tmp_path):
+    from reverser.tools.kb import kb_export_report
+    handler = getattr(kb_export_report, "handler", None) or getattr(kb_export_report, "fn", None) or kb_export_report
+    for_target("10.10.10.5")
+    out = tmp_path / "report.md"
+    res = await handler({
+        "target": "10.10.10.5",
+        "executive_summary": "Two findings; DC vulnerable to SMB relay.",
+        "output_path": str(out),
+    })
+    assert res.get("is_error") is not True
+    assert out.exists()
+    assert "SMB relay" in out.read_text()

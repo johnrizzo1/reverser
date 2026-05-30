@@ -10,6 +10,27 @@
 
 **Spec:** [docs/superpowers/specs/2026-05-30-schema-validated-outputs-design.md](../specs/2026-05-30-schema-validated-outputs-design.md)
 
+> **REVISION (2026-05-30, during execution): Task 9 scope correction.**
+> Reading the real `dispatch.py` revealed the dispatch return contract is markdown-based
+> (`_RETURN_CONTRACT`: `### TL;DR / Findings / Hypothesis outcome / KB writes / Suggested
+> follow-up`) and is load-bearing: `parse_hypothesis_outcome` and `_has_actionable_findings`
+> are exercised by ~13 existing tests (`test_dispatch_helpers.py`, `test_manager_discipline.py`),
+> and `dispatch_specialist` has TWO streaming paths (local-backend `backend.run(...)` events and
+> Claude `query(...)`). Also, specialist dispatches are ONE-SHOT calls (`prompt=sub_goal`), not
+> resumable sessions. Decision (user-approved): proceed with the full JSON switch, decomposed into:
+> - **Task 9a** — additive: `DispatchReportModel`, `ReportModel`, `HypothesisOutcome`,
+>   `DispatchStatus` in models.py/`__init__.py`; `parse_dispatch_report(text) -> (outcome, model|None,
+>   errors|None)` in dispatch.py (extracts a fenced ```json block, validates). No behavior change;
+>   existing tests stay green.
+> - **Task 9b** — switch `_RETURN_CONTRACT` so specialists keep the human-readable markdown AND
+>   append an authoritative ```json block; wire `dispatch_specialist` to source `outcome`/`status`
+>   from `parse_dispatch_report`; remove `parse_hypothesis_outcome`/`_has_actionable_findings`;
+>   migrate the ~13 affected tests to the new contract.
+> - **Task 9c** — bounded emit+repair: extract the streaming body into `_run_specialist(prompt)`
+>   (covers both backend paths, accumulates cost/turns); on missing/invalid JSON re-prompt ONCE-OR-
+>   TWICE with the already-produced report embedded ("reformat into the JSON block", cheap — no
+>   re-investigation); on exhaustion degrade to `status="partial"`, `outcome="inconclusive"`.
+
 ---
 
 ## File Structure

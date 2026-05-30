@@ -15,6 +15,13 @@ from ..kb import (
     require_pentest_auth,
 )
 from ._common import format_error, format_tool_result
+from ..schemas.models import (
+    FindingModel,
+    HypothesisModel,
+    HypothesisUpdateModel,
+    ReportModel,
+)
+from ..schemas.validation import validate_args, tool_input_schema
 
 
 def _resolve_target(target: str | None):
@@ -289,57 +296,55 @@ async def kb_list_creds(args: dict) -> dict:
 TOOLS.append(kb_list_creds)
 
 
+def _finding_tool_schema() -> dict:
+    """Build the @tool input schema for kb_add_finding by prepending `target`
+    to the FindingModel-derived schema."""
+    base = tool_input_schema(FindingModel)
+    props = {"target": {"type": "string", "description": "Normalized target identifier."}}
+    props.update(base["properties"])
+    return {
+        "type": "object",
+        "properties": props,
+        "required": ["target", *base["required"]],
+    }
+
+
 @tool(
     "kb_add_finding",
-    "Record a new finding in the KB. Severity: info|low|medium|high|critical. "
-    "Optional `evidence_paths` (list of relative paths under findings/ or loot/) "
-    "and `cvss` numeric score.",
-    {
-        "type": "object",
-        "properties": {
-            "target": {"type": "string", "description": "Normalized target identifier."},
-            "title": {"type": "string", "description": "Short finding title."},
-            "severity": {
-                "type": "string",
-                "description": "Severity level.",
-                "enum": ["info", "low", "medium", "high", "critical"],
-            },
-            "description": {"type": "string", "description": "Finding details."},
-            "evidence_paths": {
-                "type": "array",
-                "description": "Optional list of evidence file paths (relative to target dir).",
-                "items": {"type": "string"},
-                "default": [],
-            },
-            "cvss": {
-                "type": "number",
-                "description": "Optional numeric CVSS score (0.0-10.0).",
-                "default": 0,
-            },
-        },
-        "required": ["target", "title", "severity", "description"],
-    },
+    "Record a new finding in the KB. Requires evidence_paths (>=1) OR an "
+    "evidence_blocker explaining why none exist, plus reproduction, confidence "
+    "(0-100), and reachability (demonstrated|likely|theoretical|unknown).",
+    _finding_tool_schema(),
 )
 async def kb_add_finding(args: dict) -> dict:
     auth_err = _check_auth()
     if auth_err:
         return auth_err
-    target = args["target"]
-    cvss = args.get("cvss", 0) or None
-    try:
-        finding = FindingFact(
-            title=args["title"],
-            severity=args["severity"],
-            description=args["description"],
-            evidence_paths=args.get("evidence_paths", []) or [],
-            cvss=cvss,
-        )
-    except ValueError as e:
-        return format_error(str(e))
+    target = args.get("target")
+    if not target:
+        return format_error("target is required.")
+    model_args = {k: v for k, v in args.items() if k != "target"}
+    outcome = validate_args(FindingModel, model_args)
+    if not outcome.ok:
+        return format_error(outcome.error_text)
+    m = outcome.value
+    finding = FindingFact(
+        title=m.title,
+        severity=m.severity.value,
+        description=m.description,
+        evidence_paths=m.evidence_paths,
+        cvss=m.cvss,
+        reproduction=m.reproduction,
+        reachability=m.reachability.value,
+        confidence=m.confidence,
+        evidence_blocker=m.evidence_blocker,
+        validated=m.validated,
+    )
     fid = for_target(target).record_finding(finding)
     from ..gui_service.kb_emitter import emit_recorded_finding
     emit_recorded_finding("create", fid, finding)
-    return format_tool_result(f"Finding added: id={fid} title={finding.title!r}")
+    suffix = "" if m.validated else " (stored UNVALIDATED — evidence_blocker set)"
+    return format_tool_result(f"Finding added: id={fid} title={finding.title!r}{suffix}")
 
 
 TOOLS.append(kb_add_finding)
@@ -384,19 +389,24 @@ TOOLS.append(kb_add_note)
             "confidence": {"type": "integer", "description": "0-100 confidence."},
             "tags": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["target", "statement"],
+        "required": ["target", "statement", "rationale", "confidence"],
     },
 )
 async def kb_add_hypothesis(args: dict) -> dict:
     auth_err = _check_auth()
     if auth_err:
         return auth_err
+    model_args = {k: v for k, v in args.items() if k != "target"}
+    outcome = validate_args(HypothesisModel, model_args)
+    if not outcome.ok:
+        return format_error(outcome.error_text)
+    m = outcome.value
     h = for_target(args["target"]).add_hypothesis(
-        statement=args["statement"],
-        parent_id=args.get("parent_id"),
-        rationale=args.get("rationale"),
-        confidence=args.get("confidence"),
-        tags=args.get("tags"),
+        statement=m.statement,
+        parent_id=m.parent_id,
+        rationale=m.rationale,
+        confidence=m.confidence,
+        tags=m.tags,
     )
     from ..gui_service.kb_emitter import emit_hypothesis
     if h is not None:
@@ -459,7 +469,8 @@ TOOLS.append(kb_get_hypothesis)
     "kb_update_hypothesis",
     "Update fields on an existing hypothesis. Pass only the fields you want to "
     "change. Common transitions: status='testing' when dispatching, "
-    "status='confirmed'/'refuted'/'inconclusive' when a dispatch returns. "
+    "status='confirmed'/'refuted' when a dispatch returns (or 'abandoned' to "
+    "drop a line of inquiry, 'blocked' when you cannot proceed). "
     "evidence_refs is a list of {kind, id} dicts pointing into the KB.",
     {
         "type": "object",
@@ -488,8 +499,19 @@ async def kb_update_hypothesis(args: dict) -> dict:
     if auth_err:
         return auth_err
     kb = for_target(args["target"])
-    if kb.get_hypothesis(args["id"]) is None:
-        return format_tool_result(f"No hypothesis with id={args['id']}.")
+    current = kb.get_hypothesis(args["id"])
+    if current is None:
+        return format_error(f"No hypothesis with id={args['id']}.")
+    new_status = args.get("status", current.status)
+    outcome = validate_args(HypothesisUpdateModel, {
+        "from_status": current.status,
+        "to_status": new_status,
+        "rationale": args.get("rationale", "") or "",
+        "confidence": args.get("confidence"),
+        "evidence_refs": args.get("evidence_refs", []) or [],
+    })
+    if not outcome.ok:
+        return format_error(outcome.error_text)
     update_kwargs = {
         k: args[k]
         for k in ("status", "rationale", "confidence", "dispatched_to",
@@ -587,7 +609,7 @@ def _render_hypothesis_tree(kb) -> str:
     return "\n".join(lines)
 
 
-def _render_report(kb) -> str:
+def _render_report(kb, executive_summary: str = "") -> str:
     """Render a markdown report from KB contents in the project house style."""
     hosts = kb.get_hosts()
     services = kb.get_services()
@@ -602,7 +624,16 @@ def _render_report(kb) -> str:
         f"**Generated by:** kb_export_report",
         f"**Target:** {kb.target_id}",
         "",
-        "## Executive Summary",
+    ]
+
+    if executive_summary:
+        lines.append("## Executive Summary")
+        lines.append("")
+        lines.append(executive_summary)
+        lines.append("")
+
+    lines += [
+        "## Engagement Statistics",
         "",
         f"Recorded {len(hosts)} host(s), {len(services)} service(s), "
         f"{len(creds)} credential(s) ("
@@ -712,11 +743,16 @@ def _render_report(kb) -> str:
 @tool(
     "kb_export_report",
     "Render the KB for `target` as a markdown report. Default output path "
-    "is `targets/<target>/report.md`. Returns the absolute output path.",
+    "is `targets/<target>/report.md`. Returns the absolute output path. "
+    "Requires executive_summary: a 1-3 sentence engagement summary.",
     {
         "type": "object",
         "properties": {
             "target": {"type": "string", "description": "Normalized target identifier."},
+            "executive_summary": {
+                "type": "string",
+                "description": "1-3 sentence engagement summary prepended to the report.",
+            },
             "output_path": {
                 "type": "string",
                 "description": "Optional override path. Defaults to "
@@ -724,7 +760,7 @@ def _render_report(kb) -> str:
                 "default": "",
             },
         },
-        "required": ["target"],
+        "required": ["target", "executive_summary"],
     },
 )
 async def kb_export_report(args: dict) -> dict:
@@ -732,8 +768,19 @@ async def kb_export_report(args: dict) -> dict:
     if auth_err:
         return auth_err
     target = args["target"]
+    # Validate the report boundary via ReportModel (single source of truth).
+    # Strip first so a whitespace-only summary is rejected by min_length. We do
+    # NOT route KB findings through FindingModel here — the report is rendered
+    # deterministically from KB rows so legacy findings (pre-v3) stay readable.
+    report_outcome = validate_args(ReportModel, {
+        "target": target,
+        "executive_summary": (args.get("executive_summary") or "").strip(),
+    })
+    if not report_outcome.ok:
+        return format_error(report_outcome.error_text)
+    summary = report_outcome.value.executive_summary
     kb = for_target(target)
-    body = _render_report(kb)
+    body = _render_report(kb, executive_summary=summary)
     out_path = args.get("output_path") or str(kb.root / "report.md")
     out_p = Path(out_path)
     out_p.parent.mkdir(parents=True, exist_ok=True)

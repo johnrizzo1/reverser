@@ -372,6 +372,8 @@ async def test_send_message_sets_current_session_for_kb_events(bus, tmp_path, mo
             await fn({
                 "target": "10.10.10.5",
                 "statement": "SMB signing may be disabled",
+                "rationale": "observed in scan output",
+                "confidence": 60,
             })
             yield AgentEvent(kind="result", subtype="success", cost=0.01, turns=1)
 
