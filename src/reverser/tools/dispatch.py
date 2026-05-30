@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import json as _json
 import re
 import threading
 
@@ -159,6 +160,44 @@ def parse_hypothesis_outcome(report: str) -> str | None:
 
     # Section present but no keyword recognized
     return "inconclusive"
+
+
+# ── Schema-validated dispatch report helpers ────────────────────────
+
+from ..schemas.models import DispatchReportModel  # noqa: E402
+from ..schemas.validation import validate_args  # noqa: E402
+
+_JSON_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+_BARE_JSON = re.compile(r"(\{(?:[^{}]|\{[^{}]*\})*\})", re.DOTALL)
+
+
+def _extract_json(text: str) -> dict | None:
+    """Find the first JSON object that looks like a dispatch report (has 'tldr')."""
+    for pat in (_JSON_BLOCK, _BARE_JSON):
+        for m in pat.finditer(text or ""):
+            try:
+                obj = _json.loads(m.group(1))
+            except (ValueError, TypeError):
+                continue
+            if isinstance(obj, dict) and "tldr" in obj:
+                return obj
+    return None
+
+
+def parse_dispatch_report(text: str):
+    """Return (outcome, model_or_None, error_text_or_None).
+
+    outcome is the validated hypothesis_outcome string, or 'inconclusive' on any
+    failure (defensive — the lead can re-dispatch).
+    """
+    obj = _extract_json(text)
+    if obj is None:
+        return "inconclusive", None, "No JSON dispatch report block found."
+    outcome = validate_args(DispatchReportModel, obj)
+    if not outcome.ok:
+        return "inconclusive", None, outcome.error_text
+    m = outcome.value
+    return m.hypothesis_outcome.value, m, None
 
 
 # ── dispatch_specialist tool ────────────────────────────────────────

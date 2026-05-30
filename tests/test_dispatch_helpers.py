@@ -113,3 +113,20 @@ def test_parse_hypothesis_outcome_unparseable_value_returns_inconclusive():
 def test_parse_hypothesis_outcome_case_insensitive():
     report = "### Hypothesis outcome\nconfirmed — works.\n"
     assert parse_hypothesis_outcome(report) == "confirmed"
+
+
+def test_parse_dispatch_report_from_json_block():
+    from reverser.tools.dispatch import parse_dispatch_report
+    text = '```json\n{"tldr":"t","hypothesis_outcome":"refuted","status":"success"}\n```'
+    outcome, model, errors = parse_dispatch_report(text)
+    assert errors is None
+    assert outcome == "refuted"
+    assert model.tldr == "t"
+
+
+def test_parse_dispatch_report_invalid_returns_errors():
+    from reverser.tools.dispatch import parse_dispatch_report
+    outcome, model, errors = parse_dispatch_report("no json here")
+    assert model is None
+    assert errors is not None
+    assert outcome == "inconclusive"   # defensive default

@@ -6,6 +6,10 @@ from .models import (
     HypothesisUpdateModel,
     Severity,
     Reachability,
+    DispatchReportModel,
+    ReportModel,
+    HypothesisOutcome,
+    DispatchStatus,
 )
 
 __all__ = [
@@ -14,4 +18,8 @@ __all__ = [
     "HypothesisUpdateModel",
     "Severity",
     "Reachability",
+    "DispatchReportModel",
+    "ReportModel",
+    "HypothesisOutcome",
+    "DispatchStatus",
 ]

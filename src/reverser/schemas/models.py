@@ -152,3 +152,41 @@ class HypothesisUpdateModel(BaseModel):
         if self.to_status == HypothesisStatus.blocked and not (self.rationale and self.rationale.strip()):
             raise ValueError("transition to 'blocked' requires a non-empty rationale")
         return self
+
+
+class HypothesisOutcome(str, Enum):
+    confirmed = "confirmed"
+    refuted = "refuted"
+    inconclusive = "inconclusive"
+
+
+class DispatchStatus(str, Enum):
+    success = "success"
+    partial = "partial"
+    error = "error"
+
+
+class DispatchReportModel(BaseModel):
+    """Structured return contract for a dispatched specialist."""
+
+    model_config = ConfigDict(extra="ignore", use_enum_values=False)
+
+    tldr: str = Field(min_length=1)
+    findings: list[str] = Field(default_factory=list)
+    hypothesis_outcome: HypothesisOutcome = HypothesisOutcome.inconclusive
+    kb_writes: list[str] = Field(default_factory=list)
+    follow_up: list[str] = Field(default_factory=list)
+    status: DispatchStatus = DispatchStatus.success
+
+
+class ReportModel(BaseModel):
+    """Final per-target report assembled from validated KB rows."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str = Field(min_length=1)
+    executive_summary: str = Field(min_length=1)
+    findings: list[FindingModel] = Field(default_factory=list)
+    hosts: int = 0
+    services: int = 0
+    creds: int = 0

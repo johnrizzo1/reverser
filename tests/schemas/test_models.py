@@ -104,3 +104,23 @@ def test_confirmed_requires_evidence():
 def test_blocked_requires_rationale():
     with pytest.raises(ValidationError):
         HypothesisUpdateModel(from_status="testing", to_status="blocked", rationale="", evidence_refs=[])
+
+
+from reverser.schemas.models import DispatchReportModel
+
+
+def test_dispatch_report_valid():
+    m = DispatchReportModel(
+        tldr="Found weak SMB signing.",
+        findings=["SMB signing disabled on DC"],
+        hypothesis_outcome="confirmed",
+        kb_writes=["finding #1"],
+        follow_up=["relay to MSSQL"],
+        status="success",
+    )
+    assert m.hypothesis_outcome == "confirmed"
+
+
+def test_dispatch_report_bad_outcome_rejected():
+    with pytest.raises(ValidationError):
+        DispatchReportModel(tldr="x", hypothesis_outcome="maybe", status="success")
