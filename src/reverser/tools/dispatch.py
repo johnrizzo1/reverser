@@ -157,6 +157,63 @@ def _promote_status(subprocess_status: str, report_model) -> str:
     return subprocess_status
 
 
+# ── Bounded emit+repair for the dispatch JSON contract ──────────────
+
+_MAX_DISPATCH_REPAIR = 2
+
+
+def _repair_prompt(report_text: str, errors: str) -> str:
+    """Build a cheap re-emit prompt that embeds the already-produced report.
+
+    Specialist dispatches are one-shot (not resumable sessions), so the repair
+    prompt embeds the prior report and asks ONLY for the JSON block — it must
+    NOT trigger re-investigation.
+    """
+    return (
+        "Your previous report was missing the mandatory machine-readable "
+        "JSON block (or it was invalid). Do NOT investigate further. "
+        "Here is the report you produced:\n\n"
+        f"{report_text}\n\n"
+        "Re-emit your report, and end your message with EXACTLY one fenced "
+        "```json block matching this schema (no prose after it):\n"
+        '{"tldr": "...", "findings": ["..."], '
+        '"hypothesis_outcome": "confirmed|refuted|inconclusive", '
+        '"kb_writes": ["..."], "follow_up": ["..."], '
+        '"status": "success|partial|error"}\n\n'
+        f"Validation errors from last attempt:\n{errors}"
+    )
+
+
+async def _run_with_repair(
+    run_specialist,
+    sub_goal: str,
+    *,
+    max_repair: int = _MAX_DISPATCH_REPAIR,
+    is_failed_status,
+    on_repair=None,
+):
+    """Run specialist, then re-prompt up to ``max_repair`` times if the JSON
+    block is missing/invalid.
+
+    ``run_specialist`` is an async callable ``(prompt) -> report_text``.
+    ``is_failed_status() -> bool`` tells whether the subprocess status is a hard
+    failure (no point repairing). ``on_repair(attempt)`` is an optional callback
+    invoked before each repair attempt (e.g. to emit a TUI event).
+
+    Returns ``(report_text, outcome, report_model, repaired: int)``.
+    """
+    report_text = await run_specialist(sub_goal)
+    outcome, model, errors = parse_dispatch_report(report_text)
+    attempts = 0
+    while errors is not None and attempts < max_repair and not is_failed_status():
+        attempts += 1
+        if on_repair is not None:
+            on_repair(attempts)
+        report_text = await run_specialist(_repair_prompt(report_text, errors))
+        outcome, model, errors = parse_dispatch_report(report_text)
+    return report_text, outcome, model, attempts
+
+
 # ── dispatch_specialist tool ────────────────────────────────────────
 
 from claude_agent_sdk import (  # noqa: E402  # imports here to keep helpers import-light
@@ -431,10 +488,19 @@ async def dispatch_specialist(args: dict) -> dict:
         text = text.strip()
         return text if len(text) <= 400 else text[:400] + "…"
 
-    _emit_start()
-    try:
-        cfg = sess._snapshot.config if sess is not None else None
-        use_session_backend = cfg is not None and cfg.backend != "claude"
+    cfg = sess._snapshot.config if sess is not None else None
+    use_session_backend = cfg is not None and cfg.backend != "claude"
+
+    async def _run_specialist(prompt: str) -> str:
+        """Run the specialist ONCE for ``prompt`` and return THIS attempt's
+        report text. Accumulates cost/turns/status/error_msg across attempts
+        via nonlocal (so the first attempt is identical to prior behavior, and
+        repair attempts ADD their cost/turns rather than overwriting)."""
+        # report_text is nonlocal so a mid-stream exception still leaves the
+        # partial report visible to the caller's except path (matches pre-repair
+        # behavior). It is not reset between attempts, so a repair attempt that
+        # produces no text retains the prior attempt's report.
+        nonlocal status, cost_usd, turns_consumed, error_msg, report_text
 
         if use_session_backend:
             if cfg.backend in _LOCAL_BACKEND_NAMES:
@@ -453,7 +519,7 @@ async def dispatch_specialist(args: dict) -> dict:
                     api_base=cfg.api_base,
                 )
                 async for event in backend.run(
-                    prompt=sub_goal,
+                    prompt=prompt,
                     system_prompt=full_system_prompt,
                     max_turns=max_turns,
                     max_budget_usd=budget_usd,
@@ -481,8 +547,8 @@ async def dispatch_specialist(args: dict) -> dict:
                         status = "error"
                         error_msg = event.content
                     elif event.kind == "result":
-                        cost_usd = float(event.cost or 0.0)
-                        turns_consumed = int(event.turns or _sub_turn[0] or 0)
+                        cost_usd += float(event.cost or 0.0)
+                        turns_consumed += int(event.turns or _sub_turn[0] or 0)
                         if event.subtype != "success":
                             subtype_str = str(event.subtype).lower()
                             if "budget" in subtype_str:
@@ -499,7 +565,7 @@ async def dispatch_specialist(args: dict) -> dict:
                         elif event.content and not report_text:
                             report_text = event.content
         else:
-            async for message in query(prompt=sub_goal, options=options):
+            async for message in query(prompt=prompt, options=options):
                 if isinstance(message, AssistantMessage):
                     _sub_turn[0] += 1
                     for block in message.content:
@@ -526,8 +592,8 @@ async def dispatch_specialist(args: dict) -> dict:
                                 kind = "tool_error" if getattr(block, "is_error", False) else "tool_result"
                                 _emit(kind, _summarize_tool_result(getattr(block, "content", "")))
                 elif isinstance(message, ResultMessage):
-                    cost_usd = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
-                    turns_consumed = int(getattr(message, "num_turns", 0) or 0)
+                    cost_usd += float(getattr(message, "total_cost_usd", 0.0) or 0.0)
+                    turns_consumed += int(getattr(message, "num_turns", 0) or 0)
                     if message.subtype != "success":
                         subtype_str = str(message.subtype).lower()
                         if "budget" in subtype_str:
@@ -541,11 +607,52 @@ async def dispatch_specialist(args: dict) -> dict:
                                 f"(specialist did not produce a report; "
                                 f"subtype={message.subtype})"
                             )
+        return report_text
+
+    outcome = "inconclusive"
+    report_model = None
+
+    _emit_start()
+    try:
+        def _on_repair(attempt: int) -> None:
+            _emit(
+                "thinking",
+                f"Specialist report missing/invalid JSON block; requesting "
+                f"reformat (attempt {attempt}/{_MAX_DISPATCH_REPAIR})",
+            )
+
+        report_text, outcome, report_model, _repaired = await _run_with_repair(
+            _run_specialist,
+            sub_goal,
+            max_repair=_MAX_DISPATCH_REPAIR,
+            is_failed_status=lambda: status in (
+                "error", "budget_exhausted", "turn_limit"
+            ),
+            on_repair=_on_repair,
+        )
+        # parse_dispatch_report already ran inside _run_with_repair; re-derive
+        # the final parse errors to decide whether we exhausted repairs.
+        _outcome2, _model2, parse_errors = parse_dispatch_report(report_text)
+        if parse_errors is not None:
+            # Exhausted (or run hard-failed): degrade but keep the
+            # human-readable report so the lead still sees it.
+            outcome = "inconclusive"
+            report_model = None
+            if status not in ("error", "budget_exhausted", "turn_limit"):
+                status = "partial"
+
+        # ── Status: partial promotion (per spec D4) ──────────────────
+        # If subprocess errored but the validated JSON report carries
+        # actionable content, promote status so the manager doesn't dismiss
+        # the report based on the Status header alone.
+        status = _promote_status(status, report_model)
     except Exception as e:
         status = "error"
         error_msg = f"{type(e).__name__}: {e}"
         if not report_text:
             report_text = f"(dispatch failed: {error_msg})"
+        outcome = "inconclusive"
+        report_model = None
     finally:
         _emit_end(status, cost_usd, turns_consumed)
         if sess is not None:
@@ -554,14 +661,6 @@ async def dispatch_specialist(args: dict) -> dict:
                 save_snapshot(sess._snapshot)
             except Exception:
                 pass
-
-    outcome, report_model, _parse_errors = parse_dispatch_report(report_text)
-
-    # ── Status: partial promotion (per spec D4) ──────────────────────
-    # If subprocess errored but the validated JSON report carries actionable
-    # content, promote status so the manager doesn't dismiss the report based
-    # on the Status header alone.
-    status = _promote_status(status, report_model)
 
     summary_lines = [
         f"# Dispatch result — {specialty}",

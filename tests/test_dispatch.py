@@ -65,7 +65,16 @@ CONFIRMED — verified via nxc smb output.
 - Added finding #1
 
 ### Suggested follow-up
-Test NTLM relay viability."""
+Test NTLM relay viability.
+
+```json
+{"tldr": "Confirmed SMB signing is off.",
+ "findings": ["DC at 10.10.10.5 has signing=False"],
+ "hypothesis_outcome": "confirmed",
+ "kb_writes": ["Added finding #1"],
+ "follow_up": ["Test NTLM relay viability"],
+ "status": "success"}
+```"""
 
     with patch("reverser.tools.dispatch.query", _mock_query(report, cost=0.12, turns=4)):
         result = _call_tool(dispatch_specialist, {
