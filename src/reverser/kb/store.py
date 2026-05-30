@@ -73,6 +73,11 @@ class FindingFact:
     description: str
     evidence_paths: list[str] = field(default_factory=list)
     cvss: Optional[float] = None
+    reproduction: Optional[str] = None
+    reachability: Optional[str] = None
+    confidence: Optional[int] = None
+    evidence_blocker: Optional[str] = None
+    validated: bool = True
     id: Optional[int] = None
 
     def __post_init__(self):
@@ -366,11 +371,14 @@ class KB:
         with self._connect() as conn:
             cursor = conn.execute(
                 "INSERT INTO findings "
-                "(target_id, title, severity, cvss, description, evidence_paths, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(target_id, title, severity, cvss, description, evidence_paths, "
+                " reproduction, reachability, confidence, evidence_blocker, validated, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     self.target_id, finding.title, finding.severity, finding.cvss,
-                    finding.description, json.dumps(finding.evidence_paths), _now_iso(),
+                    finding.description, json.dumps(finding.evidence_paths),
+                    finding.reproduction, finding.reachability, finding.confidence,
+                    finding.evidence_blocker, int(finding.validated), _now_iso(),
                 ),
             )
             conn.commit()
@@ -403,7 +411,8 @@ class KB:
 
     def get_findings(self, severity: str | None = None) -> list[FindingFact]:
         sql = (
-            "SELECT id, title, severity, cvss, description, evidence_paths "
+            "SELECT id, title, severity, cvss, description, evidence_paths, "
+            "reproduction, reachability, confidence, evidence_blocker, validated "
             "FROM findings WHERE target_id = ?"
         )
         params: list = [self.target_id]
@@ -418,6 +427,11 @@ class KB:
                     id=r[0], title=r[1], severity=r[2], cvss=r[3],
                     description=r[4] or "",
                     evidence_paths=json.loads(r[5]) if r[5] else [],
+                    reproduction=r[6],
+                    reachability=r[7],
+                    confidence=r[8],
+                    evidence_blocker=r[9],
+                    validated=bool(r[10]) if r[10] is not None else True,
                 )
                 for r in cursor.fetchall()
             ]
