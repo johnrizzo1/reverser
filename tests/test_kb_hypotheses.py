@@ -368,7 +368,10 @@ def test_kb_export_report_includes_attack_tree(tmp_path, monkeypatch):
     kb.update_hypothesis(parent.id, status="confirmed")
     kb.add_hypothesis(statement="NTLM relay viable", parent_id=parent.id)
 
-    result = _call_tool(kb_export_report, {"target": "10.10.10.5"})
+    result = _call_tool(kb_export_report, {
+        "target": "10.10.10.5",
+        "executive_summary": "Attack tree test engagement.",
+    })
     text = result["content"][0]["text"]
     assert "## Attack tree" in text
     assert "DC SMB signing off" in text
@@ -381,7 +384,10 @@ def test_kb_export_report_omits_attack_tree_when_empty(tmp_path, monkeypatch):
     from reverser.tools.kb import kb_export_report
 
     _fresh_kb(tmp_path, monkeypatch, target="10.10.10.6")  # empty
-    result = _call_tool(kb_export_report, {"target": "10.10.10.6"})
+    result = _call_tool(kb_export_report, {
+        "target": "10.10.10.6",
+        "executive_summary": "Empty KB test engagement.",
+    })
     text = result["content"][0]["text"]
     assert "## Attack tree" not in text
 

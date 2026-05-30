@@ -328,7 +328,10 @@ def test_kb_export_report_default_path(tmp_targets_dir):
         title="SMB signing missing", severity="medium",
         description="Allows NTLM relay.",
     ))
-    result = _call_tool(kb_export_report, {"target": "10.10.10.5"})
+    result = _call_tool(kb_export_report, {
+        "target": "10.10.10.5",
+        "executive_summary": "Test engagement summary for default path test.",
+    })
     text = result["content"][0]["text"]
     assert "Report written" in text or "report" in text.lower()
     expected_path = tmp_targets_dir / "10.10.10.5" / "report.md"
@@ -346,8 +349,39 @@ def test_kb_export_report_custom_path(tmp_targets_dir, tmp_path):
     out = tmp_path / "out.md"
     result = _call_tool(kb_export_report, {
         "target": "10.10.10.5",
+        "executive_summary": "Minimal engagement; no critical findings.",
         "output_path": str(out),
     })
     assert not result.get("is_error")
     assert out.exists()
     assert "10.10.10.5" in out.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Task 10: kb_export_report requires a validated executive_summary
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_export_report_requires_executive_summary(tmp_targets_dir, authorize):
+    from reverser.tools.kb import kb_export_report
+    handler = getattr(kb_export_report, "handler", None) or getattr(kb_export_report, "fn", None) or kb_export_report
+    for_target("10.10.10.5")
+    res = await handler({"target": "10.10.10.5"})
+    assert res.get("is_error") is True
+    assert "executive_summary" in res["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_export_report_writes_with_summary(tmp_targets_dir, authorize, tmp_path):
+    from reverser.tools.kb import kb_export_report
+    handler = getattr(kb_export_report, "handler", None) or getattr(kb_export_report, "fn", None) or kb_export_report
+    for_target("10.10.10.5")
+    out = tmp_path / "report.md"
+    res = await handler({
+        "target": "10.10.10.5",
+        "executive_summary": "Two findings; DC vulnerable to SMB relay.",
+        "output_path": str(out),
+    })
+    assert res.get("is_error") is not True
+    assert out.exists()
+    assert "SMB relay" in out.read_text()
