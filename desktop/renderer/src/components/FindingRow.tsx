@@ -33,7 +33,7 @@ export function FindingRow({
   const sev = String(finding.severity ?? "info").toLowerCase();
 
   return (
-    <div className="border border-neutral-800 rounded p-2 bg-neutral-950">
+    <div className="rounded-md border border-neutral-800 bg-neutral-950/80 p-2 shadow-sm">
       <div className="flex items-center gap-2">
         <span className={SEVERITY_COLOR[sev] ?? "text-neutral-500"}>● {sev}</span>
         <span className="text-neutral-200">{String(finding.title ?? "—")}</span>

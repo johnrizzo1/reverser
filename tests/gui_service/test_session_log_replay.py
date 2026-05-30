@@ -48,6 +48,15 @@ def _write_snapshot(tmp_path, target, session_id, log_relpath):
     return Path(tmp_path / log_relpath)
 
 
+def _write_snapshot_with_conversation(tmp_path, target, session_id, log_relpath, conversation):
+    log_path = _write_snapshot(tmp_path, target, session_id, log_relpath)
+    snap_path = tmp_path / "targets" / target / "sessions" / f"{session_id}.json"
+    snap = json.loads(snap_path.read_text())
+    snap["conversation"] = conversation
+    snap_path.write_text(json.dumps(snap))
+    return log_path
+
+
 def _write_log(log_path: Path, entries: list[dict]):
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "w") as f:
@@ -108,6 +117,38 @@ async def test_log_filters_to_allowed_kinds(client, tmp_path):
     e_dispatch = body["events"][5]
     assert e_dispatch["specialty"] == "ad"
     assert e_dispatch["phase"] == "tool_call"
+
+
+@pytest.mark.asyncio
+async def test_log_replay_includes_user_messages_from_snapshot_conversation(client, tmp_path):
+    log_path = _write_snapshot_with_conversation(
+        tmp_path,
+        "t1",
+        "s1",
+        "logs/s1.jsonl",
+        [{
+            "user": "please decode the flag",
+            "agent": "working",
+            "turn": 1,
+            "timestamp": "2026-05-29T10:00:00Z",
+            "cost": 0.0,
+            "events": [],
+        }],
+    )
+    _write_log(log_path, [
+        {"type": "turn", "turn": 1},
+        {"type": "text", "text": "I will decode it."},
+    ])
+
+    r = await client.get("/api/sessions/log/s1?target=t1", headers=HEADERS)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["events"][0] == {
+        "kind": "user",
+        "turn": 1,
+        "content": "please decode the flag",
+        "ts": "2026-05-29T10:00:00Z",
+    }
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { ModelSelector } from "@/components/ModelSelector";
+import { defaultApiBaseFor, ModelSelector } from "@/components/ModelSelector";
 import { AuthGateModal } from "@/modals/AuthGateModal";
 import { ApiError } from "@/api/client";
 import { cn } from "@/lib/utils";
@@ -94,8 +94,8 @@ export function NewEngagement() {
       const shared = {
         profile,
         backend,
-        model: model || null,
-        api_base: apiBase || null,
+        model: model.trim() || null,
+        api_base: apiBase.trim() || null,
         budget,
         max_turns: maxTurns,
       };
@@ -347,7 +347,7 @@ export function NewEngagement() {
               <Input
                 value={apiBase}
                 onChange={(e) => setApiBase(e.target.value)}
-                placeholder="http://localhost:11434/v1"
+                placeholder={defaultApiBaseFor(backend) || "https://host:port/v1"}
               />
             </div>
             <div>

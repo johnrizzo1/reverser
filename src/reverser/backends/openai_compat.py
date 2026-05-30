@@ -3,8 +3,10 @@
 import json
 import logging
 import re
+import time
 import uuid as _uuid
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 from openai import AsyncOpenAI
 
@@ -12,6 +14,16 @@ from .base import AgentEvent, Backend
 from .tools import mcp_tools_to_openai, execute_tool
 
 log = logging.getLogger(__name__)
+
+_STATUS_EMIT_INTERVAL_SEC = 0.5
+
+_STREAM_SUPPRESS_MARKERS = (
+    "<think",
+    "<tool_call",
+    "<|tool_call",
+    "<|channel>thought",
+    "```",
+)
 
 # --- Text-based tool call extraction ---
 # Many local models (especially via Ollama) output tool calls as plain text
@@ -227,6 +239,98 @@ def _extract_text_tool_calls(text: str, known_tools: set[str]) -> list[tuple[str
     return results
 
 
+def _obj_get(obj, key: str, default=None):
+    """Read an SDK object, pydantic model, or dict without depending on shape."""
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    value = getattr(obj, key, default)
+    if value is not default:
+        return value
+    if hasattr(obj, "model_dump"):
+        try:
+            return obj.model_dump().get(key, default)
+        except Exception:
+            return default
+    return default
+
+
+def _status_event(
+    phase: str,
+    *,
+    turn: int,
+    detail: str = "",
+    started_at: float,
+    first_token_at: float | None = None,
+    generated_chars: int | None = None,
+) -> AgentEvent:
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    first_token_ms = (
+        int((first_token_at - started_at) * 1000)
+        if first_token_at is not None else None
+    )
+    rate: float | None = None
+    if generated_chars is not None and first_token_at is not None:
+        gen_elapsed = max(0.001, time.perf_counter() - first_token_at)
+        rate = generated_chars / gen_elapsed
+    return AgentEvent(
+        kind="llm_status",
+        phase=phase,
+        content=detail,
+        turn=turn,
+        elapsed_ms=elapsed_ms,
+        first_token_ms=first_token_ms,
+        generated_chars=generated_chars,
+        rate_chars_per_sec=rate,
+    )
+
+
+def _response_from_stream_parts(
+    *,
+    content: str,
+    reasoning: str,
+    tool_calls_by_index: dict[int, dict],
+    finish_reason: str | None,
+):
+    tool_calls = []
+    for index in sorted(tool_calls_by_index):
+        tc = tool_calls_by_index[index]
+        fn = tc.get("function", {})
+        tool_calls.append(SimpleNamespace(
+            id=tc.get("id") or _uuid.uuid4().hex,
+            function=SimpleNamespace(
+                name=fn.get("name") or "",
+                arguments=fn.get("arguments") or "",
+            ),
+        ))
+
+    msg = SimpleNamespace(
+        content=content,
+        tool_calls=tool_calls or None,
+        role="assistant",
+        model_dump=lambda: {"reasoning": reasoning or None},
+    )
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=msg, finish_reason=finish_reason or "stop")]
+    )
+
+
+def _safe_stream_text_prefix(delta: str) -> str:
+    """Return the part of a streamed delta safe to show before final scrubbing.
+
+    Local models sometimes emit tool calls or thinking blocks in plain text.
+    Once one of those markers appears, the final post-processing path will
+    handle the rest after it can scrub the complete message.
+    """
+    cut = len(delta)
+    for marker in _STREAM_SUPPRESS_MARKERS:
+        idx = delta.find(marker)
+        if idx >= 0:
+            cut = min(cut, idx)
+    return delta[:cut]
+
+
 class OpenAICompatBackend(Backend):
     """Backend that uses an OpenAI-compatible API (Ollama, vLLM, etc.)."""
 
@@ -309,12 +413,21 @@ class OpenAICompatBackend(Backend):
             turn += 1
             yield AgentEvent(kind="turn", turns=turn, turn=turn)
 
+            llm_started_at = time.perf_counter()
+            yield _status_event(
+                "prompt_processing",
+                turn=turn,
+                detail="request submitted to model backend",
+                started_at=llm_started_at,
+            )
+
             try:
                 response = await self._client.chat.completions.create(
                     model=self._model,
                     messages=messages,
                     tools=tools_for_model if tools_for_model else None,
                     extra_body={"think": True},
+                    stream=True,
                 )
             except Exception as e:
                 err = str(e)
@@ -329,6 +442,111 @@ class OpenAICompatBackend(Backend):
                 yield AgentEvent(kind="error", content=err, is_error=True)
                 yield AgentEvent(kind="result", content=f"Error: {err}", subtype="error")
                 return
+
+            if hasattr(response, "__aiter__"):
+                content_parts: list[str] = []
+                reasoning_parts: list[str] = []
+                tool_calls_by_index: dict[int, dict] = {}
+                finish_reason: str | None = None
+                first_token_at: float | None = None
+                last_status_at = llm_started_at
+                generated_chars = 0
+                stream_text_suppressed = False
+                streamed_visible_parts: list[str] = []
+
+                async for chunk in response:
+                    choices = _obj_get(chunk, "choices", []) or []
+                    if not choices:
+                        continue
+                    choice0 = choices[0]
+                    finish_reason = _obj_get(choice0, "finish_reason", finish_reason)
+                    delta = _obj_get(choice0, "delta")
+
+                    content_delta = _obj_get(delta, "content", "") or ""
+                    reasoning_delta = (
+                        _obj_get(delta, "reasoning", None)
+                        or _obj_get(delta, "reasoning_content", None)
+                        or ""
+                    )
+                    tool_deltas = _obj_get(delta, "tool_calls", None) or []
+
+                    if content_delta or reasoning_delta or tool_deltas:
+                        now = time.perf_counter()
+                        if first_token_at is None:
+                            first_token_at = now
+                            yield _status_event(
+                                "generating",
+                                turn=turn,
+                                detail="first model output received",
+                                started_at=llm_started_at,
+                                first_token_at=first_token_at,
+                                generated_chars=generated_chars,
+                            )
+
+                    if content_delta:
+                        content_parts.append(content_delta)
+                        generated_chars += len(content_delta)
+                        if not stream_text_suppressed:
+                            safe_prefix = _safe_stream_text_prefix(content_delta)
+                            if safe_prefix:
+                                streamed_visible_parts.append(safe_prefix)
+                                yield AgentEvent(kind="text", content=safe_prefix, turn=turn)
+                            if len(safe_prefix) < len(content_delta):
+                                stream_text_suppressed = True
+                    if reasoning_delta:
+                        reasoning_parts.append(reasoning_delta)
+                        generated_chars += len(reasoning_delta)
+
+                    for tc_delta in tool_deltas:
+                        index = int(_obj_get(tc_delta, "index", 0) or 0)
+                        acc = tool_calls_by_index.setdefault(
+                            index, {"id": "", "function": {"name": "", "arguments": ""}},
+                        )
+                        tc_id = _obj_get(tc_delta, "id", None)
+                        if tc_id:
+                            acc["id"] = tc_id
+                        fn_delta = _obj_get(tc_delta, "function", None)
+                        if fn_delta is not None:
+                            name_delta = _obj_get(fn_delta, "name", "") or ""
+                            args_delta = _obj_get(fn_delta, "arguments", "") or ""
+                            acc["function"]["name"] += name_delta
+                            acc["function"]["arguments"] += args_delta
+
+                    now = time.perf_counter()
+                    if first_token_at is not None and now - last_status_at >= _STATUS_EMIT_INTERVAL_SEC:
+                        yield _status_event(
+                            "generating",
+                            turn=turn,
+                            detail="model output streaming",
+                            started_at=llm_started_at,
+                            first_token_at=first_token_at,
+                            generated_chars=generated_chars,
+                        )
+                        last_status_at = now
+
+                yield _status_event(
+                    "complete",
+                    turn=turn,
+                    detail="model response complete",
+                    started_at=llm_started_at,
+                    first_token_at=first_token_at,
+                    generated_chars=generated_chars,
+                )
+                response = _response_from_stream_parts(
+                    content="".join(content_parts),
+                    reasoning="".join(reasoning_parts),
+                    tool_calls_by_index=tool_calls_by_index,
+                    finish_reason=finish_reason,
+                )
+                streamed_visible_text = "".join(streamed_visible_parts)
+            else:
+                yield _status_event(
+                    "complete",
+                    turn=turn,
+                    detail="model response complete",
+                    started_at=llm_started_at,
+                )
+                streamed_visible_text = ""
 
             choice = response.choices[0]
             assistant_msg = choice.message
@@ -383,7 +601,14 @@ class OpenAICompatBackend(Backend):
             # backticks inside" body keeps the match anchored to one fence.
             visible_text = _TOOL_CALL_FENCE_SCRUB.sub('', visible_text).strip()
             if visible_text:
-                yield AgentEvent(kind="text", content=visible_text, turn=turn)
+                if streamed_visible_text and visible_text.strip() == streamed_visible_text.strip():
+                    visible_text = ""
+                elif streamed_visible_text and visible_text.startswith(streamed_visible_text):
+                    visible_text = visible_text[len(streamed_visible_text):].lstrip()
+                if not visible_text:
+                    pass
+                else:
+                    yield AgentEvent(kind="text", content=visible_text, turn=turn)
 
             # Check for tool calls
             if not assistant_msg.tool_calls:

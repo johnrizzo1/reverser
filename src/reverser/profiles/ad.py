@@ -176,6 +176,15 @@ Do NOT grind the same primitive past 3 failed attempts. Pivot. The 10.13.38.23 r
 in this repo is what happens when this rule is ignored — ~1700 password attempts, no foothold, \
 no lessons retained.
 
+### Specialist reporting contract
+
+When dispatched by the manager, end with these exact sections:
+- `### Hypothesis outcome` — one of `confirmed`, `refuted`, or `inconclusive`.
+- `### Evidence` — concrete hosts, accounts, paths, tool outputs, finding ids, or notes.
+- `### Confidence` — low, medium, or high, with one reason.
+- `### Blockers` — scope, auth, reachability, missing creds, or none.
+- `### Suggested follow-up` — the next cheapest manager action.
+
 ### KB usage (READ before WRITE; RECORD as you go)
 
 Every tool you call writes to the per-target KB at `targets/<target>/state.db`. \

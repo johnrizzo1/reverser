@@ -90,6 +90,7 @@ class AgentSession:
         # None means "do not surface" — used by CLI-only contexts.
         self.on_dispatch_event = None
         self.on_kb_event = None
+        self.has_pending_user_messages = None
 
         if resume_from is not None:
             self._init_resumed(resume_from, profile, backend_name, model, api_base)
@@ -696,6 +697,7 @@ When you respond, present your findings clearly with relevant details.
         turn_text_parts: list[str] = []
         turn_events: list[dict] = []
         last_turn_cost: float = 0.0
+        turns_seen_this_send = 0
 
         try:
             try:
@@ -722,6 +724,15 @@ When you respond, present your findings clearly with relevant details.
                         event.turn = self.stats.turns
 
                     if event.kind == "turn":
+                        if turns_seen_this_send > 0:
+                            cb = self.has_pending_user_messages
+                            if cb is not None:
+                                try:
+                                    if cb():
+                                        break
+                                except Exception:
+                                    pass
+                        turns_seen_this_send += 1
                         self.stats.turns += 1
                         self._slog.log_turn(self.stats.turns)
                         yield AgentEvent(
@@ -776,6 +787,9 @@ When you respond, present your findings clearly with relevant details.
                             "kind": "text",
                             "content": (event.content or "")[:2000],
                         })
+                        yield event
+
+                    elif event.kind == "llm_status":
                         yield event
 
                     elif event.kind == "result":

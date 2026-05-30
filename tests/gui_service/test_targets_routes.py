@@ -1,6 +1,7 @@
 """GET /api/targets and /api/targets/{t}/kb."""
 import pytest
 from httpx import ASGITransport, AsyncClient
+from urllib.parse import quote
 
 from reverser.gui_service.app import create_app
 from reverser.gui_service.config import ServiceConfig
@@ -62,3 +63,28 @@ async def test_read_kb_findings_include_ids(client):
     findings = r.json()["findings"]
     assert len(findings) == 1
     assert findings[0]["id"] == fid
+
+
+@pytest.mark.asyncio
+async def test_read_kb_accepts_absolute_binary_path(client, tmp_path):
+    from reverser.kb import ArtifactFact, for_target
+
+    binary = tmp_path / "inputs" / "Flag.exe"
+    binary.parent.mkdir()
+    binary.write_bytes(b"MZ")
+    kb = for_target("Flag.exe")
+    kb.record_artifact(ArtifactFact(
+        kind="target_binary",
+        path=str(binary),
+        sha256="abc123",
+        source_tool="test",
+    ))
+
+    r = await client.get(
+        f"/api/targets/{quote(str(binary), safe='')}/kb",
+        headers=HEADERS,
+    )
+    assert r.status_code == 200
+    artifacts = r.json()["artifacts"]
+    assert len(artifacts) == 1
+    assert artifacts[0]["path"] == str(binary)

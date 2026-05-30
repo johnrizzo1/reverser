@@ -4,7 +4,7 @@ import { useBackends, useProfiles, useUpdateSessionConfig } from "@/api/queries"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { ModelSelector } from "@/components/ModelSelector";
+import { defaultApiBaseFor, ModelSelector } from "@/components/ModelSelector";
 
 type FormState = {
   backend: string;
@@ -38,7 +38,7 @@ function _diff(form: FormState, row: SessionRow): {
   if (form.backend !== row.backend) out.backend = form.backend;
   const formModel = form.model.trim() === "" ? null : form.model;
   if (formModel !== row.model) out.model = formModel;
-  const formApiBase = form.api_base.trim() === "" ? null : form.api_base;
+  const formApiBase = form.api_base.trim() === "" ? null : form.api_base.trim();
   if (formApiBase !== row.api_base) out.api_base = formApiBase;
   if (form.profile !== row.profile) out.profile = form.profile;
   const formBudget = parseFloat(form.budget);
@@ -141,7 +141,7 @@ export function SessionConfigPanel({ session }: { session: SessionRow }) {
         <Input
           value={form.api_base}
           onChange={(e) => setForm({ ...form, api_base: e.target.value })}
-          placeholder="(optional)"
+          placeholder={defaultApiBaseFor(form.backend) || "(optional)"}
           className="h-7 text-xs"
         />
       ) : <span className="text-neutral-300 font-mono">{session.api_base ?? "—"}</span>)}

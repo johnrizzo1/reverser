@@ -79,6 +79,7 @@ export type SessionRow = {
   target: string;
   /** Logical target name from server snapshot (Task 17 / target-session decoupling). */
   target_name?: string;
+  active_address_id?: string;
   profile: string;
   state: "active" | "stopped" | "completed" | "abandoned";
   turns: number;
@@ -189,6 +190,9 @@ export type ConversationResponse = {
 // ---- Phase 3a: Session log replay ----
 
 export type LogEvent =
+  | { kind: "turn";        turn: number; ts: string | null }
+  | { kind: "user";        turn: number; content: string; ts: string | null }
+  | { kind: "text";        content: string; ts: string | null }
   | { kind: "thinking";    content: string; ts: string | null }
   | { kind: "tool_call";   name: string; input: string; ts: string | null }
   | { kind: "tool_result"; ok: boolean; preview: string; ts: string | null }

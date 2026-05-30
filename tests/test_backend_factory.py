@@ -24,6 +24,11 @@ def test_lmstudio_default_api_base():
     assert _resolved_api_base("lmstudio") == "http://localhost:1234/v1"
 
 
+def test_lmstudio_blank_api_base_uses_local_default():
+    assert _resolved_api_base("lmstudio", api_base="") == "http://localhost:1234/v1"
+    assert _resolved_api_base("lmstudio", api_base="   ") == "http://localhost:1234/v1"
+
+
 def test_unknown_name_falls_back_to_generic_default():
     """Any name we don't special-case routes to the generic OpenAI default."""
     assert _resolved_api_base("some-other-server") == "http://localhost:8000/v1"
@@ -34,6 +39,7 @@ def test_explicit_api_base_overrides_default():
     custom = "http://192.168.1.50:9999/v1"
     assert _resolved_api_base("ollama", api_base=custom) == custom
     assert _resolved_api_base("lmstudio", api_base=custom) == custom
+    assert _resolved_api_base("lmstudio", api_base=f"  {custom}  ") == custom
 
 
 def test_claude_does_not_require_model_or_api_base():

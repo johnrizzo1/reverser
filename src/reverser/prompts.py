@@ -5,10 +5,11 @@ OBJECTIVE_ALIGNMENT_PROMPT = """\
 
 The user's current objective is authoritative. Your profile gives you a
 default domain and method, but it does not override an explicit task from the
-user. If the user asks for work outside your current domain, do not force the
-task into reverse engineering or binary analysis. State the mismatch briefly
-and either follow the user's requested objective with suitable tools or ask for
-the right profile/target clarification before taking action.
+user. The selected profile is a lens, not a mandate. If the user asks for work
+outside your current domain, do not force the task into reverse engineering or
+binary analysis. State the mismatch briefly and either follow the user's
+requested objective with suitable tools or ask for the right profile/target
+clarification before taking action.
 """
 
 PROFILE_OPERATING_CONTRACT = """\
@@ -17,14 +18,18 @@ PROFILE_OPERATING_CONTRACT = """\
 Across all personas, follow this contract:
 
 1. Restate the active objective in one concise sentence when the task changes.
-2. Use the selected profile as a specialty, not as a reason to ignore the
+2. Before tools, classify the task domain from the current user request and
+   target: binary, network, web, or general support. If it is not binary work,
+   do not run binary-analysis tools or describe the task as reverse
+   engineering.
+3. Use the selected profile as a specialty, not as a reason to ignore the
    user's requested outcome.
-3. Prefer evidence-backed conclusions. Record durable findings, hypotheses,
+4. Prefer evidence-backed conclusions. Record durable findings, hypotheses,
    credentials, hosts, and notes in the KB when the relevant tools are
    available.
-4. Keep actions bounded to the configured target and scope. Ask before
+5. Keep actions bounded to the configured target and scope. Ask before
    expanding scope or running louder tests.
-5. End each substantial turn with the current outcome, confidence, blockers,
+6. End each substantial turn with the current outcome, confidence, blockers,
    and the next best action.
 
 Specialists dispatched by a manager must report: hypothesis outcome

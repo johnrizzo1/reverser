@@ -6,12 +6,16 @@ Schema for frames matches docs/superpowers/specs/2026-05-13-electron-desktop-ui-
 section 3.3.
 """
 import asyncio
-from typing import Any
+import uuid
+from typing import Any, TYPE_CHECKING
 
 from ..agent_session import AgentSession
 from ..backends.base import AgentEvent
 from ..profiles import Profile
 from .event_bus import EventBus
+
+if TYPE_CHECKING:
+    from ..targets import Target
 
 
 def _event_to_frame(ev: AgentEvent) -> dict[str, Any] | None:
@@ -20,6 +24,22 @@ def _event_to_frame(ev: AgentEvent) -> dict[str, Any] | None:
         return {"type": "text", "role": "assistant", "delta": ev.content, "turn": ev.turn}
     if ev.kind == "thinking":
         return {"type": "thinking", "delta": ev.content, "redacted": False, "turn": ev.turn}
+    if ev.kind == "llm_status":
+        frame: dict[str, Any] = {
+            "type": "llm_status",
+            "phase": ev.phase or ev.subtype,
+            "detail": ev.content,
+            "turn": ev.turn,
+        }
+        if ev.elapsed_ms is not None:
+            frame["elapsed_ms"] = ev.elapsed_ms
+        if ev.first_token_ms is not None:
+            frame["first_token_ms"] = ev.first_token_ms
+        if ev.generated_chars is not None:
+            frame["generated_chars"] = ev.generated_chars
+        if ev.rate_chars_per_sec is not None:
+            frame["rate_chars_per_sec"] = ev.rate_chars_per_sec
+        return frame
     if ev.kind == "tool_call":
         return {
             "type": "tool_call",
@@ -62,20 +82,31 @@ class GUISession:
         max_turns: int,
         bus: EventBus,
         resume_from=None,
+        target_obj: "Target | None" = None,
     ) -> None:
         self.session_id = session_id
         self._bus = bus
-        self._agent = AgentSession(
-            binary_path=target,
-            profile=profile,
-            budget=budget,
-            max_turns=max_turns,
-            backend_name=backend_name,
-            model=model,
-            api_base=api_base,
-            resume_from=resume_from,
-            session_id=session_id if resume_from is None else None,
-        )
+        agent_kwargs = {
+            "profile": profile,
+            "budget": budget,
+            "max_turns": max_turns,
+            "backend_name": backend_name,
+            "model": model,
+            "api_base": api_base,
+        }
+        if resume_from is None and target_obj is not None:
+            self._agent = AgentSession.from_target(
+                target_obj,
+                **agent_kwargs,
+                session_id=session_id,
+            )
+        else:
+            self._agent = AgentSession(
+                binary_path=target,
+                **agent_kwargs,
+                resume_from=resume_from,
+                session_id=session_id if resume_from is None else None,
+            )
         self._send_lock = asyncio.Lock()
         self._sudo_password: str | None = None
         # Track the asyncio.Task running send_message so cancel() can
@@ -84,6 +115,7 @@ class GUISession:
         # checked between events — useless while the backend is awaiting
         # a slow tool.
         self._current_send_task: asyncio.Task | None = None
+        self._pending_messages: list[dict[str, str]] = []
 
         # Bridge dispatch_specialist sub-agent events (thinking, tool_call,
         # tool_result, text) to the WebSocket so the renderer can show what
@@ -91,6 +123,85 @@ class GUISession:
         # the same callback at tui/app.py for the same purpose.
         self._agent.on_dispatch_event = self._on_dispatch_event
         self._agent.on_kb_event = self._on_kb_event
+        self._agent.has_pending_user_messages = self._has_pending_messages
+
+    def _has_pending_messages(self) -> bool:
+        return bool(self._pending_messages)
+
+    async def queue_message(self, text: str) -> dict[str, str]:
+        """Queue analyst input to be consumed after the current run finishes."""
+        msg = {"id": uuid.uuid4().hex, "text": text}
+        self._pending_messages.append(msg)
+        await self._bus.publish(self.session_id, {
+            "type": "pending_message",
+            "action": "create",
+            "message": msg,
+        })
+        return msg
+
+    async def delete_pending_message(self, message_id: str) -> bool:
+        """Delete an unconsumed queued message."""
+        for i, msg in enumerate(self._pending_messages):
+            if msg["id"] == message_id:
+                self._pending_messages.pop(i)
+                await self._bus.publish(self.session_id, {
+                    "type": "pending_message",
+                    "action": "delete",
+                    "id": message_id,
+                })
+                return True
+        return False
+
+    def _consume_pending_messages(self) -> list[dict[str, str]]:
+        messages = self._pending_messages
+        self._pending_messages = []
+        return messages
+
+    async def _publish_consumed_pending_messages(self, messages: list[dict[str, str]]) -> None:
+        for msg in messages:
+            await self._bus.publish(self.session_id, {
+                "type": "pending_message",
+                "action": "consumed",
+                "id": msg["id"],
+            })
+
+    @staticmethod
+    def _pending_messages_prompt(messages: list[dict[str, str]]) -> str:
+        lines = [
+            "The analyst sent these updates while you were working.",
+            "Before continuing, revise your plan and next action based on them:",
+            "",
+        ]
+        for i, msg in enumerate(messages, start=1):
+            lines.append(f"{i}. {msg['text']}")
+        return "\n".join(lines)
+
+    async def _run_agent_message(self, user_text: str) -> None:
+        from ..sessions import current_session
+        self._current_send_task = asyncio.current_task()
+        session_token = current_session.set(self._agent)
+        try:
+            await self._bus.publish(self.session_id, {"type": "status", "phase": "running"})
+            async for ev in self._agent.send(user_text):
+                frame = _event_to_frame(ev)
+                if frame is not None:
+                    await self._bus.publish(self.session_id, frame)
+                # Emit a budget frame after every result event
+                if ev.kind == "result" and ev.cost is not None:
+                    spent = self._agent.stats.total_cost
+                    await self._bus.publish(self.session_id, {
+                        "type": "budget",
+                        "spent": spent,
+                        "remaining": max(0.0, self._agent.budget - spent),
+                        "turn": self._agent.stats.turns,
+                    })
+            await self._bus.publish(self.session_id, {
+                "type": "status",
+                "phase": "awaiting_input",
+            })
+        finally:
+            current_session.reset(session_token)
+            self._current_send_task = None
 
     def _on_dispatch_event(
         self,
@@ -178,34 +289,12 @@ class GUISession:
     async def send_message(self, user_text: str) -> None:
         """Send a user message and drain all resulting events to the bus."""
         async with self._send_lock:
-            # Record the running task so cancel() can preempt it. Cleared
-            # in the finally block whether we exit normally or via
-            # CancelledError raised by cancel().
-            self._current_send_task = asyncio.current_task()
-            from ..sessions import current_session
-            session_token = current_session.set(self._agent)
-            try:
-                await self._bus.publish(self.session_id, {"type": "status", "phase": "running"})
-                async for ev in self._agent.send(user_text):
-                    frame = _event_to_frame(ev)
-                    if frame is not None:
-                        await self._bus.publish(self.session_id, frame)
-                    # Emit a budget frame after every result event
-                    if ev.kind == "result" and ev.cost is not None:
-                        spent = self._agent.stats.total_cost
-                        await self._bus.publish(self.session_id, {
-                            "type": "budget",
-                            "spent": spent,
-                            "remaining": max(0.0, self._agent.budget - spent),
-                            "turn": self._agent.stats.turns,
-                        })
-                await self._bus.publish(self.session_id, {
-                    "type": "status",
-                    "phase": "awaiting_input",
-                })
-            finally:
-                current_session.reset(session_token)
-                self._current_send_task = None
+            await self._run_agent_message(user_text)
+
+            while self._pending_messages:
+                pending = self._consume_pending_messages()
+                await self._publish_consumed_pending_messages(pending)
+                await self._run_agent_message(self._pending_messages_prompt(pending))
 
     async def trigger_skill(self, skill_key: str) -> None:
         """Run a profile skill by key. Equivalent to TUI's F1 picker."""

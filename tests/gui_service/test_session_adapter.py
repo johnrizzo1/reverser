@@ -94,6 +94,147 @@ async def test_budget_frame_tracks_spend(bus, gui_session):
 
 
 @pytest.mark.asyncio
+async def test_queued_message_runs_after_current_send(bus, tmp_path):
+    """Messages submitted mid-run are queued, published, consumed, and then
+    sent as the next agent input after the active send completes.
+    """
+    from reverser.backends.base import AgentEvent, Backend
+    from collections.abc import AsyncIterator
+
+    class GateBackend(Backend):
+        def __init__(self) -> None:
+            self.release_first = asyncio.Event()
+            self.prompts: list[str] = []
+
+        async def run(self, prompt, system_prompt, *, max_turns=50,
+                      max_budget_usd=5.0, allowed_tools=None) -> AsyncIterator[AgentEvent]:
+            self.prompts.append(prompt)
+            if len(self.prompts) == 1:
+                yield AgentEvent(kind="turn", turns=1)
+                await self.release_first.wait()
+                yield AgentEvent(kind="text", content="first done")
+                yield AgentEvent(kind="result", subtype="success", cost=0.0, turns=1)
+                return
+            yield AgentEvent(kind="turn", turns=1)
+            yield AgentEvent(kind="text", content="queued update handled")
+            yield AgentEvent(kind="result", subtype="success", cost=0.0, turns=1)
+
+    backend = GateBackend()
+    profile = get_profile("general")
+    with patch("reverser.agent_session.create_backend", return_value=backend):
+        gs = GUISession(
+            session_id="queued-test",
+            target=str(tmp_path / "bin"),
+            profile=profile,
+            backend_name="claude",
+            model=None,
+            api_base=None,
+            budget=5.0,
+            max_turns=50,
+            bus=bus,
+        )
+    try:
+        frames: list[dict] = []
+        async with bus.subscribe(gs.session_id) as q:
+            send_task = asyncio.create_task(gs.send_message("start"))
+            await asyncio.sleep(0.05)
+            pending = await gs.queue_message("also check port 8080")
+            assert pending["text"] == "also check port 8080"
+            backend.release_first.set()
+            await asyncio.wait_for(send_task, timeout=2.0)
+
+            while True:
+                try:
+                    frames.append(await asyncio.wait_for(q.get(), timeout=0.2))
+                except asyncio.TimeoutError:
+                    break
+
+        assert len(backend.prompts) == 2
+        assert "also check port 8080" in backend.prompts[1]
+        assert any(f["type"] == "pending_message" and f["action"] == "create" for f in frames)
+        assert any(f["type"] == "pending_message" and f["action"] == "consumed" for f in frames)
+        assert any(f.get("delta") == "queued update handled" for f in frames)
+    finally:
+        gs.close()
+
+
+@pytest.mark.asyncio
+async def test_queued_message_is_reviewed_before_backend_turn_two(bus, tmp_path):
+    """Queued messages must be consumed between backend turns, not only after
+    the backend finishes its entire multi-turn run.
+    """
+    from reverser.backends.base import AgentEvent, Backend
+    from collections.abc import AsyncIterator
+
+    class MultiTurnBackend(Backend):
+        def __init__(self) -> None:
+            self.release_turn_one = asyncio.Event()
+            self.prompts: list[str] = []
+
+        async def run(self, prompt, system_prompt, *, max_turns=50,
+                      max_budget_usd=5.0, allowed_tools=None) -> AsyncIterator[AgentEvent]:
+            self.prompts.append(prompt)
+            if len(self.prompts) == 1:
+                yield AgentEvent(kind="turn", turns=1)
+                await self.release_turn_one.wait()
+                yield AgentEvent(kind="text", content="turn one done")
+                yield AgentEvent(kind="turn", turns=2)
+                yield AgentEvent(kind="text", content="turn two should not run before queue")
+                yield AgentEvent(kind="result", subtype="success", cost=0.0, turns=2)
+                return
+            yield AgentEvent(kind="turn", turns=1)
+            yield AgentEvent(kind="text", content="queued message reviewed")
+            yield AgentEvent(kind="result", subtype="success", cost=0.0, turns=1)
+
+    backend = MultiTurnBackend()
+    profile = get_profile("general")
+    with patch("reverser.agent_session.create_backend", return_value=backend):
+        gs = GUISession(
+            session_id="queued-before-turn-two",
+            target=str(tmp_path / "bin"),
+            profile=profile,
+            backend_name="claude",
+            model=None,
+            api_base=None,
+            budget=5.0,
+            max_turns=50,
+            bus=bus,
+        )
+    try:
+        frames: list[dict] = []
+        async with bus.subscribe(gs.session_id) as q:
+            send_task = asyncio.create_task(gs.send_message("start"))
+            await asyncio.sleep(0.05)
+            await gs.queue_message("new operator instruction")
+            backend.release_turn_one.set()
+            await asyncio.wait_for(send_task, timeout=2.0)
+
+            while True:
+                try:
+                    frames.append(await asyncio.wait_for(q.get(), timeout=0.2))
+                except asyncio.TimeoutError:
+                    break
+
+        text = "\n".join(f.get("delta", "") for f in frames if f.get("type") == "text")
+        assert "turn one done" in text
+        assert "queued message reviewed" in text
+        assert "turn two should not run before queue" not in text
+        assert len(backend.prompts) == 2
+        assert "new operator instruction" in backend.prompts[1]
+    finally:
+        gs.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_pending_message_prevents_consumption(bus, gui_session):
+    pending = await gui_session.queue_message("discard this")
+    assert await gui_session.delete_pending_message(pending["id"]) is True
+    assert await gui_session.delete_pending_message(pending["id"]) is False
+    await gui_session.send_message("hi")
+    assert len(gui_session._agent._backend.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_cancel_aborts_in_flight_send(bus, tmp_path):
     """Regression: GUISession.cancel() must actually preempt an in-flight
     send_message that is blocked inside a long-running tool call.
@@ -305,3 +446,29 @@ def test_tool_result_frame_has_tool_use_id_and_turn():
     assert frame["tool_use_id"] == "tool_abc"
     assert frame["turn"] == 2
     assert frame["ok"] is True
+
+
+def test_llm_status_frame_has_progress_metrics():
+    from reverser.backends.base import AgentEvent
+    from reverser.gui_service.session_adapter import _event_to_frame
+    ev = AgentEvent(
+        kind="llm_status",
+        phase="generating",
+        content="model output streaming",
+        turn=2,
+        elapsed_ms=1200,
+        first_token_ms=800,
+        generated_chars=240,
+        rate_chars_per_sec=600.0,
+    )
+    frame = _event_to_frame(ev)
+    assert frame == {
+        "type": "llm_status",
+        "phase": "generating",
+        "detail": "model output streaming",
+        "turn": 2,
+        "elapsed_ms": 1200,
+        "first_token_ms": 800,
+        "generated_chars": 240,
+        "rate_chars_per_sec": 600.0,
+    }

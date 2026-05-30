@@ -4,6 +4,7 @@ import { useTargetKB, useSessions } from "@/api/queries";
 import { useTarget } from "@/state/targets-store";
 import { getSessionStore, type HypothesisRow } from "@/state/session-store";
 import { cn } from "@/lib/utils";
+import { FlaskConical } from "lucide-react";
 
 const STATUS_COLOR: Record<string, string> = {
   confirmed: "text-green-400",
@@ -74,7 +75,7 @@ function HypothesisRowView({
   return (
     <>
       <div
-        className="flex items-start gap-1 text-xs cursor-pointer py-1 hover:bg-neutral-900/50"
+        className="flex items-start gap-1 border-b border-neutral-900/80 text-xs cursor-pointer py-1.5 hover:bg-neutral-900/55"
         style={{ paddingLeft: 8 + depth * 16, paddingRight: 8 }}
         onClick={() => hasChildren && setOpen(node.id, !isOpen)}
       >
@@ -155,7 +156,17 @@ export function HypothesesPane({ sessionId }: { sessionId: string }) {
     setOpenIds((prev) => ({ ...prev, [id]: open }));
 
   if (rows.length === 0) {
-    return <p className="p-3 text-xs text-neutral-500">no hypotheses yet</p>;
+    return (
+      <div className="flex h-full min-h-[14rem] items-center justify-center p-4 text-center">
+        <div className="max-w-xs">
+          <FlaskConical className="mx-auto mb-2 h-5 w-5 text-cyan-300/70" />
+          <p className="text-sm font-medium text-neutral-200">No hypotheses yet</p>
+          <p className="mt-1 text-xs leading-5 text-neutral-500">
+            Agent-generated assumptions and test branches will appear here.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

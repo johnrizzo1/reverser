@@ -55,6 +55,69 @@ describe("ingest thinking frames", () => {
   });
 });
 
+describe("ingest llm_status frames", () => {
+  it("stores backend activity on the session and turn", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "llm_status",
+      phase: "generating",
+      detail: "model output streaming",
+      turn: 1,
+      elapsed_ms: 1200,
+      first_token_ms: 800,
+      generated_chars: 240,
+      rate_chars_per_sec: 600,
+    });
+    const status = store.getState().llmStatus!;
+    expect(status.phase).toBe("generating");
+    expect(status.elapsedMs).toBe(1200);
+    expect(status.firstTokenMs).toBe(800);
+    expect(status.generatedChars).toBe(240);
+    expect(status.rateCharsPerSec).toBe(600);
+    expect(store.getState().turns.get(1)?.llmStatus?.phase).toBe("generating");
+  });
+
+  it("clears global backend activity when the turn completes", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "llm_status", phase: "generating", turn: 1 });
+    store.getState().ingest({ type: "status", phase: "awaiting_input" });
+    expect(store.getState().llmStatus).toBeNull();
+  });
+});
+
+describe("ingest pending message frames", () => {
+  it("tracks queued messages and removes them on delete or consumed", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({
+      type: "pending_message",
+      action: "create",
+      message: { id: "pm1", text: "change target" },
+    });
+    expect(store.getState().pendingMessages).toEqual([
+      { id: "pm1", text: "change target" },
+    ]);
+
+    store.getState().ingest({
+      type: "pending_message",
+      action: "delete",
+      id: "pm1",
+    });
+    expect(store.getState().pendingMessages).toEqual([]);
+
+    store.getState().ingest({
+      type: "pending_message",
+      action: "create",
+      message: { id: "pm2", text: "check 8080" },
+    });
+    store.getState().ingest({
+      type: "pending_message",
+      action: "consumed",
+      id: "pm2",
+    });
+    expect(store.getState().pendingMessages).toEqual([]);
+  });
+});
+
 describe("ingest tool_call/tool_result", () => {
   it("creates a ToolCall keyed by tool_use_id and pairs the result", () => {
     const store = makeSessionStore();
@@ -257,6 +320,7 @@ describe("seedFromSessionLog", () => {
     expect(t.toolCalls.size).toBe(1);
     const tc = [...t.toolCalls.values()][0];
     expect(tc.result?.preview).toBe("out");
+    expect(t.status).toBe("done");
     expect(store.getState().replayed).toBe(true);
   });
 
@@ -272,5 +336,17 @@ describe("seedFromSessionLog", () => {
     // Speech must be ordered before the tool chip so the replay reads in
     // the same order the LLM emitted it.
     expect(t.ordering.map((e) => e.kind)).toEqual(["speech", "tool"]);
+  });
+
+  it("seeds user comments onto the replayed turn", () => {
+    const store = makeSessionStore();
+    store.getState().seedFromSessionLog([
+      { kind: "user", turn: 2, content: "please decode the flag", ts: null } as any,
+      { kind: "turn", turn: 2, ts: null } as any,
+      { kind: "text", content: "I will decode it.", ts: null } as any,
+    ]);
+    const t = store.getState().turns.get(2)!;
+    expect(t.userMessage).toBe("please decode the flag");
+    expect(t.speechDeltas).toEqual(["I will decode it."]);
   });
 });

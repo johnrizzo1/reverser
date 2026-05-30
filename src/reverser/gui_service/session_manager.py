@@ -8,13 +8,16 @@ import os
 import secrets
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ..profiles import get_profile, is_network_profile
 from ..sessions import is_session_alive
 from ..sessions import list_all as list_all_snapshots
 from .event_bus import EventBus
 from .session_adapter import GUISession
+
+if TYPE_CHECKING:
+    from ..targets import Target
 
 
 def _require_pentest_auth(profile_key: str) -> None:
@@ -60,6 +63,7 @@ class SessionManager:
         api_base: str | None,
         budget: float,
         max_turns: int,
+        target_obj: "Target | None" = None,
     ) -> dict[str, Any]:
         _require_pentest_auth(profile_key)
 
@@ -86,6 +90,7 @@ class SessionManager:
                 budget=budget,
                 max_turns=max_turns,
                 bus=self._bus,
+                target_obj=target_obj,
             )
         finally:
             if old_targets_dir is None:
@@ -172,6 +177,8 @@ class SessionManager:
             out.append({
                 "id": s.session_id,
                 "target": s.target,
+                "target_name": s.target_name,
+                "active_address_id": s.active_address_id,
                 "profile": s.config.profile,
                 "state": state,
                 "turns": s.stats.turns,
@@ -209,6 +216,8 @@ class SessionManager:
             "id": gs.session_id,
             "state": "active",
             "target": s["target"],
+            "target_name": gs._agent._snapshot.target_name,
+            "active_address_id": gs._agent._snapshot.active_address_id,
             "profile": s["profile_key"],
             "turns": s["turns"],
             "total_cost": s["total_cost"],

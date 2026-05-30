@@ -75,6 +75,13 @@ def _manager(request: Request):
     return mgr
 
 
+def _clean_optional_str(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 @router.get("/api/sessions")
 def list_sessions(request: Request) -> dict:
     return {"sessions": _manager(request).list_sessions()}
@@ -114,10 +121,11 @@ async def create_session(request: Request, body: CreateSession) -> dict:
             target=effective_target,
             profile_key=body.profile,
             backend_name=body.backend,
-            model=body.model,
-            api_base=body.api_base,
+            model=_clean_optional_str(body.model),
+            api_base=_clean_optional_str(body.api_base),
             budget=body.budget,
             max_turns=body.max_turns,
+            target_obj=resolved,
         )
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
@@ -155,6 +163,27 @@ async def send_message(request: Request, session_id: str, body: MessageBody) -> 
                 detail=f"could not resume stale active session: {exc}",
             )
     await gs.send_message(body.text)
+    return Response(status_code=204)
+
+
+@router.post("/api/sessions/{session_id}/pending-messages")
+async def queue_pending_message(request: Request, session_id: str, body: MessageBody) -> dict:
+    try:
+        gs = _manager(request).get_active(session_id)
+    except KeyError:
+        raise HTTPException(404)
+    return await gs.queue_message(body.text)
+
+
+@router.delete("/api/sessions/{session_id}/pending-messages/{message_id}", status_code=204)
+async def delete_pending_message(request: Request, session_id: str, message_id: str) -> Response:
+    try:
+        gs = _manager(request).get_active(session_id)
+    except KeyError:
+        raise HTTPException(404)
+    deleted = await gs.delete_pending_message(message_id)
+    if not deleted:
+        raise HTTPException(404)
     return Response(status_code=204)
 
 
@@ -344,17 +373,35 @@ def get_session_log(session_id: str, target: str) -> dict:
     if not log_path or not os.path.isfile(log_path):
         raise HTTPException(404, detail=f"session log file not found: {log_path!r}")
 
+    user_events_by_turn: dict[int, list[dict]] = {}
+    for conv_entry in snap.conversation:
+        user_text = (conv_entry.user or "").strip()
+        if not user_text:
+            continue
+        turn = conv_entry.turn or 0
+        user_events_by_turn.setdefault(turn, []).append({
+            "kind": "user",
+            "turn": turn,
+            "content": conv_entry.user,
+            "ts": conv_entry.timestamp,
+        })
+
     raw = load_session_log(log_path)
     _ALLOWED = {"turn", "text", "thinking", "tool_call", "tool_result", "dispatch"}
 
     out: list[dict] = []
+    emitted_user_turns: set[int] = set()
     for entry in raw:
         kind = entry.get("type")
         if kind not in _ALLOWED:
             continue
         ts = entry.get("ts")
         if kind == "turn":
-            out.append({"kind": "turn", "turn": entry.get("turn", 0), "ts": ts})
+            turn = entry.get("turn", 0)
+            if turn not in emitted_user_turns:
+                out.extend(user_events_by_turn.get(turn, []))
+                emitted_user_turns.add(turn)
+            out.append({"kind": "turn", "turn": turn, "ts": ts})
         elif kind == "text":
             out.append({"kind": "text", "content": entry.get("text", ""), "ts": ts})
         elif kind == "thinking":
@@ -388,6 +435,10 @@ def get_session_log(session_id: str, target: str) -> dict:
                 "content": entry.get("content", ""),
                 "ts": ts,
             })
+
+    for turn in sorted(user_events_by_turn):
+        if turn not in emitted_user_turns:
+            out.extend(user_events_by_turn[turn])
 
     truncated = len(out) > 5000
     if truncated:
@@ -432,6 +483,10 @@ def update_session_config(
     # `{}` (don't touch model). Optional fields (model, api_base) accept
     # null; required ones (backend, profile, budget, max_turns) do not.
     fields = body.model_dump(exclude_unset=True)
+    if "model" in fields:
+        fields["model"] = _clean_optional_str(fields["model"])
+    if "api_base" in fields:
+        fields["api_base"] = _clean_optional_str(fields["api_base"])
 
     if "profile" in fields:
         if fields["profile"] is None:

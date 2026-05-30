@@ -158,13 +158,18 @@ def list_targets() -> dict:
     return {"targets": targets}
 
 
-@router.get("/api/targets/{target}/kb")
+@router.get("/api/targets/{target:path}/kb")
 def read_kb(target: str) -> dict:
-    if not (_targets_root() / target).is_dir():
+    try:
+        target_id = target_key(target)
+    except ValueError:
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+
+    if not (_targets_root() / target_id).is_dir():
         raise HTTPException(404, detail=f"unknown target: {target!r}")
 
     try:
-        kb = for_target(target)
+        kb = for_target(target_id)
     except Exception:
         # KB init failed (e.g. permission error); return empty state
         return {
@@ -534,7 +539,7 @@ class PatchAddressRequest(BaseModel):
 
 # --- Task 26: Read endpoints ---
 
-@router.get("/api/targets/{name}")
+@router.get("/api/targets/{name:path}")
 def get_target_detail(name: str) -> dict:
     """Return the full Target model dict for a known target.
 
@@ -545,10 +550,19 @@ def get_target_detail(name: str) -> dict:
     (created by the pre-Target-model session_start path), infer kind from the
     name and persist a Target so subsequent reads succeed.
     """
+    if "/" in name and not (
+        os.path.isabs(name) or name.startswith(("http://", "https://", "ftp://"))
+    ):
+        raise HTTPException(404, detail=f"unknown target: {name!r}")
+
     tmod = _targets_mod()
     try:
         t = tmod.load_target(name)
     except FileNotFoundError:
+        for candidate in tmod.list_targets():
+            if any(a.status == "active" and a.value == name for a in candidate.addresses):
+                return _target_detail(candidate)
+
         from ...session_start import _infer_target_kind
         legacy_dir = _targets_root() / target_key(name)
         if not legacy_dir.is_dir():

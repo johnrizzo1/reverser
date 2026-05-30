@@ -7,6 +7,7 @@ __all__ = [
     "AgentEvent",
     "Backend",
     "DEFAULT_API_BASES",
+    "resolve_api_base",
     "mcp_tools_to_openai",
     "extract_tool_result_text",
     "create_backend",
@@ -20,6 +21,17 @@ DEFAULT_API_BASES: dict[str, str] = {
     "lmstudio": "http://localhost:1234/v1",
 }
 _GENERIC_DEFAULT_API_BASE = "http://localhost:8000/v1"
+
+
+def resolve_api_base(name: str, api_base: str | None) -> str:
+    """Return explicit API base or the backend's default.
+
+    GUI/API callers may send an empty string when the optional field is left
+    blank. Treat that the same as None so LM Studio and Ollama fall back to
+    their local defaults.
+    """
+    cleaned = api_base.strip() if api_base is not None else None
+    return cleaned or DEFAULT_API_BASES.get(name, _GENERIC_DEFAULT_API_BASE)
 
 
 def create_backend(
@@ -51,8 +63,7 @@ def create_backend(
     if not model:
         raise ValueError(f"--model is required for backend '{name}'")
 
-    if api_base is None:
-        api_base = DEFAULT_API_BASES.get(name, _GENERIC_DEFAULT_API_BASE)
+    api_base = resolve_api_base(name, api_base)
 
     from .openai_compat import OpenAICompatBackend
     return OpenAICompatBackend(

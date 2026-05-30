@@ -8,7 +8,7 @@ from dataclasses import dataclass
 @dataclass
 class AgentEvent:
     """An event emitted by an agent backend during execution."""
-    kind: str           # text, thinking, tool_call, tool_result, turn, result, error
+    kind: str           # text, thinking, tool_call, tool_result, turn, result, error, llm_status
     content: str = ""
     tool_name: str = ""
     tool_input: str = ""
@@ -18,6 +18,11 @@ class AgentEvent:
     cost: float | None = None
     turns: int | None = None
     subtype: str = ""   # for result events: success, max_turns, budget, error
+    phase: str = ""     # for llm_status: queued, prompt_processing, generating, complete
+    elapsed_ms: int | None = None
+    first_token_ms: int | None = None
+    generated_chars: int | None = None
+    rate_chars_per_sec: float | None = None
 
 
 class Backend(ABC):

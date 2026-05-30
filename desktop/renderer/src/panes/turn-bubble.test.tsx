@@ -13,6 +13,7 @@ function _makeTurn(overrides: Partial<Turn>): Turn {
     toolCalls: new Map(),
     dispatches: new Map(),
     status: "done",
+    llmStatus: null,
     ordering: [],
     ...overrides,
   };
@@ -46,6 +47,23 @@ describe("TurnBubble", () => {
     });
     render(<TurnBubble turn={turn} />);
     expect(screen.getByText(/bash/)).toBeInTheDocument();
+  });
+
+  it("renders LLM generation status on an active turn", () => {
+    const turn = _makeTurn({
+      status: "streaming",
+      llmStatus: {
+        phase: "generating",
+        detail: "model output streaming",
+        turn: 1,
+        firstTokenMs: 750,
+        generatedChars: 120,
+        rateCharsPerSec: 300,
+      },
+    });
+    render(<TurnBubble turn={turn} />);
+    expect(screen.getByText(/first token 750ms/)).toBeInTheDocument();
+    expect(screen.getByText(/120 chars/)).toBeInTheDocument();
   });
 
   it("renders a dispatch panel for a dispatch entry", () => {

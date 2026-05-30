@@ -4,6 +4,7 @@ import { useTargetKB, useSessions } from "@/api/queries";
 import { getSessionStore, type FindingRow } from "@/state/session-store";
 import { FindingRow as FindingRowComponent } from "@/components/FindingRow";
 import { ScreenshotLightboxModal } from "@/modals/ScreenshotLightboxModal";
+import { FileText } from "lucide-react";
 
 export function FindingsPane({ sessionId }: { sessionId: string }) {
   const store = getSessionStore(sessionId);
@@ -26,7 +27,17 @@ export function FindingsPane({ sessionId }: { sessionId: string }) {
   );
 
   if (rows.length === 0) {
-    return <p className="p-3 text-xs text-neutral-500">no findings yet</p>;
+    return (
+      <div className="flex h-full min-h-[14rem] items-center justify-center p-4 text-center">
+        <div className="max-w-xs">
+          <FileText className="mx-auto mb-2 h-5 w-5 text-cyan-300/70" />
+          <p className="text-sm font-medium text-neutral-200">No findings yet</p>
+          <p className="mt-1 text-xs leading-5 text-neutral-500">
+            Confirmed security observations and evidence will collect here.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

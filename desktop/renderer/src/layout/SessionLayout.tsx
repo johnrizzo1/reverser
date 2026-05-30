@@ -81,7 +81,7 @@ export function SessionLayout() {
   if (!id) return null;
 
   return (
-    <div className="h-full flex flex-col bg-neutral-950 text-neutral-100">
+    <div className="h-full flex flex-col bg-neutral-950/75 text-neutral-100">
       <SessionStatusBar sessionId={id} />
 
       {isStopped && (
@@ -101,15 +101,17 @@ export function SessionLayout() {
         </div>
       )}
 
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 px-2 pb-2 pt-2">
         <PanelGroup direction="horizontal">
           <Panel defaultSize={68} minSize={40}>
-            <ChatPane sessionId={id} readOnly={!isActive} />
+            <div className="h-full overflow-hidden rounded-md border border-neutral-800/90 bg-neutral-950/70 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+              <ChatPane sessionId={id} readOnly={!isActive} />
+            </div>
           </Panel>
-          <PanelResizeHandle className="w-px bg-neutral-800 hover:bg-neutral-700" />
+          <PanelResizeHandle className="w-2 bg-transparent transition-colors hover:bg-cyan-400/10" />
           <Panel defaultSize={32} minSize={20}>
-            <div className="flex flex-col h-full">
-              <div className="border-b border-neutral-800 bg-neutral-950/80 px-2 py-1.5">
+            <div className="flex h-full flex-col overflow-hidden rounded-md border border-neutral-800/90 bg-neutral-950/70 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+              <div className="border-b border-neutral-800 bg-neutral-900/50 px-2 py-2">
                 <div className="grid grid-cols-3 gap-1 rounded-md bg-neutral-900/70 p-1">
                   {RIGHT_TABS.map(({ key, label, icon: Icon }) => (
                     <button key={key}
@@ -129,7 +131,20 @@ export function SessionLayout() {
                   ))}
                 </div>
               </div>
-              <div className="flex-1 min-h-0 overflow-auto">
+              <div className="flex min-h-0 items-center gap-2 border-b border-neutral-800/70 bg-neutral-950/55 px-3 py-2 text-xs">
+                {RIGHT_TABS.map(({ key, label, icon: Icon }) => (
+                  key === rightTab ? (
+                    <div key={key} className="flex min-w-0 items-center gap-2">
+                      <Icon className="h-3.5 w-3.5 shrink-0 text-cyan-300/80" />
+                      <span className="truncate font-medium text-neutral-200">{label}</span>
+                    </div>
+                  ) : null
+                ))}
+                <span className="ml-auto font-mono text-[10px] uppercase tracking-wide text-neutral-600">
+                  live session context
+                </span>
+              </div>
+              <div className="flex-1 min-h-0 overflow-auto bg-neutral-950/40">
                 {rightTab === "hypotheses" && <HypothesesPane sessionId={id} />}
                 {rightTab === "findings" && <FindingsPane sessionId={id} />}
                 {rightTab === "kb" && <KBPane target={target} />}
@@ -140,20 +155,24 @@ export function SessionLayout() {
       </div>
 
       {isActive ? (
-        <div className="h-10 border-t border-neutral-800 bg-neutral-950/85 px-3 flex items-center gap-1.5">
-          <Button size="sm" variant="ghost" onClick={() => setSkillOpen(true)} title="Skills">
-            <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" /> Skills
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setProfileOpen(true)} title="Profile">
-            <UserCog className="mr-1.5 h-3.5 w-3.5" /> Profile
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSudoOpen(true)} title="Sudo">
-            <KeyRound className="mr-1.5 h-3.5 w-3.5" /> Sudo
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setStopOpen(true)} title="Stop">
-            <Square className="mr-1.5 h-3.5 w-3.5" /> Stop
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setDoneOpen(true)} title="Mark done">
+        <div className="h-11 border-t border-neutral-800 bg-neutral-950/90 px-3 flex items-center gap-2 shadow-[0_-1px_0_rgba(255,255,255,0.02)]">
+          <div className="flex items-center gap-1 rounded-md border border-neutral-800 bg-neutral-900/50 p-1">
+            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setSkillOpen(true)} title="Skills">
+              <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" /> Skills
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setProfileOpen(true)} title="Profile">
+              <UserCog className="mr-1.5 h-3.5 w-3.5" /> Profile
+            </Button>
+          </div>
+          <div className="flex items-center gap-1 rounded-md border border-neutral-800 bg-neutral-900/50 p-1">
+            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setSudoOpen(true)} title="Sudo">
+              <KeyRound className="mr-1.5 h-3.5 w-3.5" /> Sudo
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-red-200/80 hover:text-red-100" onClick={() => setStopOpen(true)} title="Stop">
+              <Square className="mr-1.5 h-3.5 w-3.5" /> Stop
+            </Button>
+          </div>
+          <Button size="sm" variant="ghost" className="h-8 px-3 text-emerald-200/90 hover:text-emerald-100" onClick={() => setDoneOpen(true)} title="Mark done">
             <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark done
           </Button>
           <span className="ml-auto hidden items-center gap-1.5 text-[11px] text-neutral-500 sm:inline-flex">

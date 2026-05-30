@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from urllib.parse import quote
 
 from reverser.gui_service.app import create_app
 from reverser.gui_service.config import ServiceConfig
@@ -142,6 +143,28 @@ async def test_get_target_detail(client, tmp_path, monkeypatch):
     assert body["kind"] == "network"
     assert "addresses" in body
     assert "primary_address_id" in body
+
+
+@pytest.mark.asyncio
+async def test_get_target_detail_accepts_absolute_binary_address(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    paths._reset_caches_for_tests()
+
+    binary = tmp_path / "inputs" / "Flag.exe"
+    binary.parent.mkdir()
+    binary.write_bytes(b"MZ")
+    target = tmod.create_target("flag-crackme", "binary", str(binary))
+
+    r = await client.get(
+        f"/api/targets/{quote(str(binary), safe='')}",
+        headers=HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "flag-crackme"
+    assert body["primary_address_id"] == target.primary_address_id
+    assert body["addresses"][0]["value"] == str(binary)
 
 
 @pytest.mark.asyncio

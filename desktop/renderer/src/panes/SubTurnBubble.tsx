@@ -23,13 +23,13 @@ export function SubTurnBubble({
   specialty: string;
 }) {
   return (
-    <div className="rounded border border-neutral-800 bg-neutral-950/60 text-xs">
-      <div className="flex items-center gap-2 border-b border-neutral-800 px-2 py-1.5">
+    <div className="overflow-hidden rounded-md border border-fuchsia-400/20 bg-neutral-950/70 text-xs">
+      <div className="flex items-center gap-2 border-b border-neutral-800 bg-fuchsia-950/15 px-2.5 py-1.5">
         <span className="font-medium text-fuchsia-300">{specialistLabel(specialty)}</span>
         <span className="text-neutral-600">specialist activity</span>
         <span className="ml-auto text-neutral-600">sub-turn {num}</span>
       </div>
-      <div className="space-y-1.5 px-2 py-2">
+      <div className="space-y-1.5 px-2.5 py-2">
         {subTurn.thinkingDeltas.map((delta, i) => (
           <div key={`th-${i}`} className="flex gap-2 text-neutral-500">
             <Brain className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300/80" />

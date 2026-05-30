@@ -47,12 +47,12 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
       : Loader2;
   return (
     <div className={cn(
-      "my-2 rounded-md border border-neutral-800 bg-neutral-950/70",
+      "my-2 overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/70 shadow-sm",
       dispatch.status === "running" && "border-amber-500/30 bg-amber-950/10",
     )}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs text-neutral-300 hover:bg-neutral-900/70 hover:text-neutral-100"
+        className="flex w-full min-w-0 items-center gap-2 bg-fuchsia-950/10 px-3 py-2 text-left text-xs text-neutral-300 hover:bg-neutral-900/70 hover:text-neutral-100"
       >
         <span className="w-3 shrink-0 text-neutral-500">{open ? "▾" : "▸"}</span>
         <StatusIcon
@@ -77,7 +77,7 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
         </span>
       </button>
       {open && (
-        <div className="space-y-2 border-t border-neutral-800/80 px-3 py-2">
+        <div className="space-y-2 border-t border-neutral-800/80 bg-neutral-950/45 px-3 py-2">
           <div className="text-xs text-neutral-500">Targeted task: {dispatch.subGoal}</div>
           {activity && (
             <div className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1.5 text-xs">

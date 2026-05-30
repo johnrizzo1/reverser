@@ -7,7 +7,7 @@
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
-from reverser.backends import DEFAULT_API_BASES
+from reverser.backends import DEFAULT_API_BASES, resolve_api_base
 
 router = APIRouter()
 
@@ -64,7 +64,7 @@ async def list_backend_models(
             404,
             detail=f"model discovery not supported for backend '{backend}'",
         )
-    base = (api_base or DEFAULT_API_BASES[backend]).rstrip("/")
+    base = resolve_api_base(backend, api_base).rstrip("/")
     url = f"{base}/models"
     try:
         async with _http_client(timeout=3.0) as c:

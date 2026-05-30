@@ -6,6 +6,7 @@ collapses them onto the same React key and React warns about duplicate
 children. This test asserts the backend emits unique ids for both
 structured and text-extracted tool calls.
 """
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -24,10 +25,30 @@ def _mk_response(*, content, tool_calls=None, finish_reason="stop"):
     return SimpleNamespace(choices=[choice])
 
 
+async def _stream_chunks(chunks):
+    for chunk in chunks:
+        yield chunk
+
+
+async def _gated_stream_chunks(first_chunk, release_event, second_chunk):
+    yield first_chunk
+    await release_event.wait()
+    yield second_chunk
+
+
+def _mk_stream_chunk(*, content="", finish_reason=None):
+    delta = SimpleNamespace(content=content, tool_calls=None, reasoning=None)
+    choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
+    return SimpleNamespace(choices=[choice])
+
+
 @pytest.mark.asyncio
 async def test_structured_tool_call_populates_tool_use_id_and_turn(monkeypatch):
     backend = OpenAICompatBackend(tools=[], model="qwen3", api_key="x")
-    backend._handlers = {"bash": AsyncMock(return_value=("ok", False))}
+    backend._handlers = {"bash": AsyncMock(return_value={
+        "content": [{"type": "text", "text": "ok"}],
+        "is_error": False,
+    })}
     backend._tool_names = {"bash"}
     backend._openai_tools = [{"type": "function", "function": {"name": "bash"}}]
     monkeypatch.setattr(
@@ -69,7 +90,10 @@ async def test_structured_tool_call_populates_tool_use_id_and_turn(monkeypatch):
 async def test_text_extracted_tool_calls_get_unique_synthetic_ids(monkeypatch):
     """Two text-extracted tool calls in one turn must not collide on id."""
     backend = OpenAICompatBackend(tools=[], model="qwen3", api_key="x")
-    backend._handlers = {"bash": AsyncMock(return_value=("ok", False))}
+    backend._handlers = {"bash": AsyncMock(return_value={
+        "content": [{"type": "text", "text": "ok"}],
+        "is_error": False,
+    })}
     backend._tool_names = {"bash"}
     backend._openai_tools = [{"type": "function", "function": {"name": "bash"}}]
     monkeypatch.setattr(
@@ -104,3 +128,104 @@ async def test_text_extracted_tool_calls_get_unique_synthetic_ids(monkeypatch):
     assert all(ids)            # no empty strings
     assert len(set(ids)) == 2  # all unique
     assert all(e.turn == 1 for e in tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_streaming_response_emits_llm_status_events():
+    backend = OpenAICompatBackend(tools=[], model="qwen3", api_key="x")
+    backend._handlers = {}
+    backend._tool_names = set()
+    backend._openai_tools = []
+
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=AsyncMock(return_value=_stream_chunks([
+                    _mk_stream_chunk(content="hello "),
+                    _mk_stream_chunk(content="world", finish_reason="stop"),
+                ])),
+            ),
+        ),
+    )
+
+    events = []
+    async for ev in backend.run(prompt="hi", system_prompt="sys", max_turns=1):
+        events.append(ev)
+
+    assert backend._client.chat.completions.create.call_args.kwargs["stream"] is True
+    statuses = [e for e in events if e.kind == "llm_status"]
+    assert [s.phase for s in statuses][:2] == ["prompt_processing", "generating"]
+    assert statuses[-1].phase == "complete"
+    assert statuses[-1].generated_chars == len("hello world")
+    assert "".join(e.content for e in events if e.kind == "text") == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_streaming_response_emits_text_before_stream_completes():
+    backend = OpenAICompatBackend(tools=[], model="qwen3", api_key="x")
+    backend._handlers = {}
+    backend._tool_names = set()
+    backend._openai_tools = []
+    release = asyncio.Event()
+
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=AsyncMock(return_value=_gated_stream_chunks(
+                    _mk_stream_chunk(content="hello "),
+                    release,
+                    _mk_stream_chunk(content="world", finish_reason="stop"),
+                )),
+            ),
+        ),
+    )
+
+    events = []
+
+    async def collect():
+        async for ev in backend.run(prompt="hi", system_prompt="sys", max_turns=1):
+            events.append(ev)
+
+    task = asyncio.create_task(collect())
+    try:
+        for _ in range(20):
+            if any(e.kind == "text" and e.content == "hello " for e in events):
+                break
+            await asyncio.sleep(0.01)
+        assert any(e.kind == "text" and e.content == "hello " for e in events)
+        assert not task.done()
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+
+@pytest.mark.asyncio
+async def test_streaming_response_does_not_reemit_final_text_when_only_whitespace_differs():
+    backend = OpenAICompatBackend(tools=[], model="qwen3", api_key="x")
+    backend._handlers = {"bash": AsyncMock(return_value={
+        "content": [{"type": "text", "text": "ok"}],
+        "is_error": False,
+    })}
+    backend._tool_names = {"bash"}
+    backend._openai_tools = [{"type": "function", "function": {"name": "bash"}}]
+
+    backend._client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=AsyncMock(return_value=_stream_chunks([
+                    _mk_stream_chunk(content="The answer is ready.\n"),
+                    _mk_stream_chunk(
+                        content='```json\n{"name":"bash","arguments":{"cmd":"true"}}\n```',
+                        finish_reason="stop",
+                    ),
+                ])),
+            ),
+        ),
+    )
+
+    events = []
+    async for ev in backend.run(prompt="hi", system_prompt="sys", max_turns=1):
+        events.append(ev)
+
+    text_events = [e.content for e in events if e.kind == "text"]
+    assert text_events == ["The answer is ready.\n"]

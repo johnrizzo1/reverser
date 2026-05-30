@@ -71,6 +71,42 @@ async def test_models_uses_custom_api_base(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_models_lmstudio_uses_custom_api_base(client, monkeypatch):
+    seen: list[str] = []
+
+    def handler(request: Request) -> Response:
+        seen.append(str(request.url))
+        return Response(200, json={"data": [{"id": "remote-model"}]})
+
+    _install_mock_transport(monkeypatch, handler)
+
+    resp = await client.get(
+        "/api/backends/lmstudio/models?api_base=http://192.168.1.50:1234/v1",
+        headers={"Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200
+    assert seen == ["http://192.168.1.50:1234/v1/models"]
+
+
+@pytest.mark.asyncio
+async def test_models_lmstudio_blank_api_base_uses_default(client, monkeypatch):
+    seen: list[str] = []
+
+    def handler(request: Request) -> Response:
+        seen.append(str(request.url))
+        return Response(200, json={"data": []})
+
+    _install_mock_transport(monkeypatch, handler)
+
+    resp = await client.get(
+        "/api/backends/lmstudio/models?api_base=%20%20",
+        headers={"Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200
+    assert seen == ["http://localhost:1234/v1/models"]
+
+
+@pytest.mark.asyncio
 async def test_models_ollama_uses_default_when_omitted(client, monkeypatch):
     seen: list[str] = []
 

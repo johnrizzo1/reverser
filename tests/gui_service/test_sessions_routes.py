@@ -56,6 +56,43 @@ async def test_create_session_returns_id(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_create_session_preserves_lmstudio_api_base(client, tmp_path):
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": str(tmp_path / "bin"),
+            "profile": "general",
+            "backend": "lmstudio",
+            "model": "remote-model",
+            "api_base": "  http://192.168.1.50:1234/v1  ",
+        })
+        listing = await client.get("/api/sessions", headers=HEADERS)
+
+    assert r.status_code == 200, r.text
+    row = next(s for s in listing.json()["sessions"] if s["id"] == r.json()["id"])
+    assert row["backend"] == "lmstudio"
+    assert row["model"] == "remote-model"
+    assert row["api_base"] == "http://192.168.1.50:1234/v1"
+
+
+@pytest.mark.asyncio
+async def test_create_session_blank_lmstudio_api_base_stores_none(client, tmp_path):
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": str(tmp_path / "bin"),
+            "profile": "general",
+            "backend": "lmstudio",
+            "model": "local-model",
+            "api_base": "   ",
+        })
+        listing = await client.get("/api/sessions", headers=HEADERS)
+
+    assert r.status_code == 200, r.text
+    row = next(s for s in listing.json()["sessions"] if s["id"] == r.json()["id"])
+    assert row["backend"] == "lmstudio"
+    assert row["api_base"] is None
+
+
+@pytest.mark.asyncio
 async def test_list_sessions_returns_active(client, tmp_path):
     with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
         create = await client.post("/api/sessions", headers=HEADERS, json={
@@ -82,6 +119,48 @@ async def test_send_message_204(client, tmp_path):
         r = await client.post(f"/api/sessions/{sid}/messages",
                               headers=HEADERS, json={"text": "hello"})
     assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_queue_and_delete_pending_message_routes(client, tmp_path):
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        create = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": str(tmp_path / "bin"), "profile": "general",
+            "backend": "claude", "model": None, "api_base": None,
+            "budget": 5.0, "max_turns": 50,
+        })
+        sid = create.json()["id"]
+        queued = await client.post(
+            f"/api/sessions/{sid}/pending-messages",
+            headers=HEADERS,
+            json={"text": "change direction"},
+        )
+        assert queued.status_code == 200, queued.text
+        body = queued.json()
+        assert body["text"] == "change direction"
+        assert body["id"]
+
+        deleted = await client.delete(
+            f"/api/sessions/{sid}/pending-messages/{body['id']}",
+            headers=HEADERS,
+        )
+    assert deleted.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_pending_message_returns_404(client, tmp_path):
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        create = await client.post("/api/sessions", headers=HEADERS, json={
+            "target": str(tmp_path / "bin"), "profile": "general",
+            "backend": "claude", "model": None, "api_base": None,
+            "budget": 5.0, "max_turns": 50,
+        })
+        sid = create.json()["id"]
+        deleted = await client.delete(
+            f"/api/sessions/{sid}/pending-messages/nope",
+            headers=HEADERS,
+        )
+    assert deleted.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -472,6 +551,10 @@ async def test_create_session_new_named_target_uses_target_as_initial_address(
     assert reloaded.primary_address.value == "10.10.10.5"
     assert [a.value for a in reloaded.addresses] == ["10.10.10.5"]
     assert [h.ip for h in for_target("10.10.10.5").get_hosts()] == ["10.10.10.5"]
+    listing = await client.get("/api/sessions", headers=HEADERS)
+    row = next(s for s in listing.json()["sessions"] if s["id"] == r.json()["id"])
+    assert row["target_name"] == "reactor"
+    assert row["active_address_id"] == reloaded.primary_address_id
 
 
 @pytest.mark.asyncio
@@ -518,3 +601,37 @@ async def test_create_session_target_only_seeds_binary_target_kb(
     assert len(artifacts) == 1
     assert artifacts[0].kind == "target_binary"
     assert artifacts[0].path == str(binary)
+
+
+@pytest.mark.asyncio
+async def test_create_session_new_named_binary_preserves_logical_target(
+    client, tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path / "targets"))
+    from reverser import paths, targets as tmod
+    from reverser.kb import for_target
+    paths._reset_caches_for_tests()
+
+    binary = tmp_path / "inputs" / "Flag.exe"
+    binary.parent.mkdir()
+    binary.write_bytes(b"MZ")
+
+    with patch("reverser.agent_session.create_backend", return_value=FakeBackend()):
+        r = await client.post("/api/sessions", headers=HEADERS, json={
+            "target_name": "flag-crackme",
+            "target": str(binary),
+            "profile": "general",
+            "backend": "claude",
+        })
+    assert r.status_code == 200, r.text
+
+    target = tmod.load_target("flag-crackme")
+    assert target.kind == "binary"
+    assert target.primary_address.value == str(binary)
+    assert for_target("Flag.exe").get_artifacts()[0].path == str(binary)
+
+    listing = await client.get("/api/sessions", headers=HEADERS)
+    row = next(s for s in listing.json()["sessions"] if s["id"] == r.json()["id"])
+    assert row["target"] == str(binary)
+    assert row["target_name"] == "flag-crackme"
+    assert row["active_address_id"] == target.primary_address_id

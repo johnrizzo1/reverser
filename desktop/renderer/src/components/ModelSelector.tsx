@@ -105,7 +105,7 @@ export function ModelSelector({
   );
 }
 
-function defaultApiBaseFor(backend: string): string {
+export function defaultApiBaseFor(backend: string): string {
   if (backend === "lmstudio") return "http://localhost:1234/v1";
   if (backend === "ollama") return "http://localhost:11434/v1";
   return "";

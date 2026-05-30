@@ -95,6 +95,23 @@ export function useSendMessage(sessionId: string) {
   });
 }
 
+export function useQueuePendingMessage(sessionId: string) {
+  return useMutation({
+    mutationFn: (text: string) =>
+      api.post<{ id: string; text: string }>(
+        `/api/sessions/${sessionId}/pending-messages`,
+        { text },
+      ),
+  });
+}
+
+export function useDeletePendingMessage(sessionId: string) {
+  return useMutation({
+    mutationFn: (messageId: string) =>
+      api.del<void>(`/api/sessions/${sessionId}/pending-messages/${messageId}`),
+  });
+}
+
 export function useTriggerSkill(sessionId: string) {
   return useMutation({
     mutationFn: (skillKey: string) =>

@@ -7,6 +7,11 @@ import { create } from "zustand";
 export type WSFrame =
   | { type: "text"; role: "assistant"; delta: string; turn: number }
   | { type: "thinking"; delta: string; redacted: boolean; turn: number }
+  | { type: "llm_status"; phase: string; detail?: string; turn: number;
+      elapsed_ms?: number; first_token_ms?: number; generated_chars?: number;
+      rate_chars_per_sec?: number }
+  | { type: "pending_message"; action: "create"; message: PendingMessage }
+  | { type: "pending_message"; action: "delete" | "consumed"; id: string }
   | { type: "tool_call"; name: string; args: string; tool_use_id: string; turn: number }
   | { type: "tool_result"; ok: boolean; preview: string; tool_use_id: string; turn: number }
   | DispatchFrame
@@ -65,7 +70,23 @@ export type Turn = {
   toolCalls: Map<string, ToolCall>;
   dispatches: Map<string, Dispatch>;
   status: "streaming" | "done";
+  llmStatus: LLMStatus | null;
   ordering: TurnOrderingEntry[];
+};
+
+export type LLMStatus = {
+  phase: string;
+  detail?: string;
+  turn: number;
+  elapsedMs?: number;
+  firstTokenMs?: number;
+  generatedChars?: number;
+  rateCharsPerSec?: number;
+};
+
+export type PendingMessage = {
+  id: string;
+  text: string;
 };
 
 export type FindingRow = {
@@ -101,6 +122,7 @@ export type HypothesisRow = {
 // Log event shape from /api/sessions/log/{id}.
 type LogEventInput =
   | { kind: "turn"; turn: number; ts: string | null }
+  | { kind: "user"; turn: number; content: string; ts: string | null }
   | { kind: "text"; content: string; ts: string | null }
   | { kind: "thinking"; content: string; ts: string | null }
   | { kind: "tool_call"; name: string; input: string; ts: string | null }
@@ -114,6 +136,8 @@ export type SessionState = {
   currentTurn: number;
   hypotheses: Map<number, HypothesisRow>;
   findings: Map<number, FindingRow>;
+  llmStatus: LLMStatus | null;
+  pendingMessages: PendingMessage[];
   budget: { spent: number; remaining: number; turn: number } | null;
   connBreakerTripped: boolean;
   log: { level: string; msg: string; ts: number }[];
@@ -143,6 +167,7 @@ function _getOrCreateTurn(turns: Map<number, Turn>, turn: number): Turn {
       toolCalls: new Map(),
       dispatches: new Map(),
       status: "streaming",
+      llmStatus: null,
       ordering: [],
     };
     turns.set(turn, t);
@@ -156,6 +181,8 @@ const _initialState = (): SessionState => ({
   currentTurn: 0,
   hypotheses: new Map(),
   findings: new Map(),
+  llmStatus: null,
+  pendingMessages: [],
   budget: null,
   connBreakerTripped: false,
   log: [],
@@ -198,6 +225,29 @@ export const makeSessionStore = () =>
             }
             return { turns };
           }
+          case "llm_status": {
+            const turns = new Map(s.turns);
+            const t = _getOrCreateTurn(turns, frame.turn);
+            const llmStatus: LLMStatus = {
+              phase: frame.phase,
+              detail: frame.detail,
+              turn: frame.turn,
+              elapsedMs: frame.elapsed_ms,
+              firstTokenMs: frame.first_token_ms,
+              generatedChars: frame.generated_chars,
+              rateCharsPerSec: frame.rate_chars_per_sec,
+            };
+            turns.set(frame.turn, { ...t, llmStatus });
+            return { turns, llmStatus };
+          }
+          case "pending_message": {
+            if (frame.action === "create") {
+              return { pendingMessages: [...s.pendingMessages, frame.message] };
+            }
+            return {
+              pendingMessages: s.pendingMessages.filter((msg) => msg.id !== frame.id),
+            };
+          }
           case "tool_call": {
             const turns = new Map(s.turns);
             const t = _getOrCreateTurn(turns, frame.turn);
@@ -236,6 +286,7 @@ export const makeSessionStore = () =>
               next.turns = turns;
               next.currentTurn = frame.turns;
             } else if (["awaiting_input", "stopped", "completed", "error"].includes(frame.phase)) {
+              next.llmStatus = null;
               const turns = new Map(s.turns);
               const cur = turns.get(s.currentTurn);
               if (cur && cur.status === "streaming") {
@@ -334,6 +385,10 @@ export const makeSessionStore = () =>
           if (e.kind === "turn") {
             currentTurn = e.turn;
             _getOrCreateTurn(turns, currentTurn);
+          } else if (e.kind === "user") {
+            currentTurn = e.turn;
+            const t = _getOrCreateTurn(turns, Math.max(1, currentTurn));
+            t.userMessage = t.userMessage ? `${t.userMessage}\n\n${e.content}` : e.content;
           } else if (e.kind === "text") {
             const t = _getOrCreateTurn(turns, Math.max(1, currentTurn));
             t.speechDeltas.push(e.content);
@@ -381,6 +436,9 @@ export const makeSessionStore = () =>
             else if (e.phase === "tool_result") st.toolResults.push({ ok: true, content: e.content });
             else if (e.phase === "tool_error") st.toolResults.push({ ok: false, content: e.content });
           }
+        }
+        for (const [turnNum, turn] of turns) {
+          turns.set(turnNum, { ...turn, status: "done" });
         }
         return { turns, currentTurn, replayed: true };
       }),

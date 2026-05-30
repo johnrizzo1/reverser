@@ -77,3 +77,6 @@ desktop/vite.config.d.ts
 # Electron packaging build outputs
 desktop/python-dist/
 desktop/resources/tools/
+.claude/
+.playwright-mcp/
+.reverser-authorized
