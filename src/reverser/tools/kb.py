@@ -15,7 +15,7 @@ from ..kb import (
     require_pentest_auth,
 )
 from ._common import format_error, format_tool_result
-from ..schemas.models import FindingModel
+from ..schemas.models import FindingModel, HypothesisModel, HypothesisUpdateModel
 from ..schemas.validation import validate_args, tool_input_schema
 
 
@@ -384,19 +384,24 @@ TOOLS.append(kb_add_note)
             "confidence": {"type": "integer", "description": "0-100 confidence."},
             "tags": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["target", "statement"],
+        "required": ["target", "statement", "rationale", "confidence"],
     },
 )
 async def kb_add_hypothesis(args: dict) -> dict:
     auth_err = _check_auth()
     if auth_err:
         return auth_err
+    model_args = {k: v for k, v in args.items() if k != "target"}
+    outcome = validate_args(HypothesisModel, model_args)
+    if not outcome.ok:
+        return format_error(outcome.error_text)
+    m = outcome.value
     h = for_target(args["target"]).add_hypothesis(
-        statement=args["statement"],
-        parent_id=args.get("parent_id"),
-        rationale=args.get("rationale"),
-        confidence=args.get("confidence"),
-        tags=args.get("tags"),
+        statement=m.statement,
+        parent_id=m.parent_id,
+        rationale=m.rationale,
+        confidence=m.confidence,
+        tags=m.tags,
     )
     from ..gui_service.kb_emitter import emit_hypothesis
     if h is not None:
@@ -488,8 +493,19 @@ async def kb_update_hypothesis(args: dict) -> dict:
     if auth_err:
         return auth_err
     kb = for_target(args["target"])
-    if kb.get_hypothesis(args["id"]) is None:
-        return format_tool_result(f"No hypothesis with id={args['id']}.")
+    current = kb.get_hypothesis(args["id"])
+    if current is None:
+        return format_error(f"No hypothesis with id={args['id']}.")
+    new_status = args.get("status", current.status)
+    outcome = validate_args(HypothesisUpdateModel, {
+        "from_status": current.status,
+        "to_status": new_status,
+        "rationale": args.get("rationale", "") or "",
+        "confidence": args.get("confidence"),
+        "evidence_refs": args.get("evidence_refs", []) or [],
+    })
+    if not outcome.ok:
+        return format_error(outcome.error_text)
     update_kwargs = {
         k: args[k]
         for k in ("status", "rationale", "confidence", "dispatched_to",

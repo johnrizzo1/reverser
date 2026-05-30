@@ -296,7 +296,14 @@ def test_kb_update_hypothesis_tool_changes_status(tmp_path, monkeypatch):
     from reverser.tools.kb import kb_update_hypothesis
 
     kb = _fresh_kb(tmp_path, monkeypatch, target="10.10.10.5")
-    h = kb.add_hypothesis(statement="x")
+    h = kb.add_hypothesis(statement="x", rationale="because", confidence=50)
+    # proposed -> testing (valid transition)
+    _call_tool(kb_update_hypothesis, {
+        "target": "10.10.10.5",
+        "id": h.id,
+        "status": "testing",
+    })
+    # testing -> confirmed with evidence (valid transition)
     result = _call_tool(kb_update_hypothesis, {
         "target": "10.10.10.5",
         "id": h.id,
@@ -377,3 +384,70 @@ def test_kb_export_report_omits_attack_tree_when_empty(tmp_path, monkeypatch):
     result = _call_tool(kb_export_report, {"target": "10.10.10.6"})
     text = result["content"][0]["text"]
     assert "## Attack tree" not in text
+
+
+# ---------------------------------------------------------------------------
+# Async tests for kb_add_hypothesis / kb_update_hypothesis validation
+# (Task 8: hypothesis tools use HypothesisModel + HypothesisUpdateModel)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def authorized_target(tmp_path, monkeypatch):
+    """Return a target name string, with auth and TARGETS_DIR set."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+    return "10.10.10.5"
+
+
+def _get_handler(tool_obj):
+    return getattr(tool_obj, "handler", None) or getattr(tool_obj, "fn", None) or tool_obj
+
+
+@pytest.mark.asyncio
+async def test_add_hypothesis_requires_rationale_and_confidence(authorized_target):
+    from reverser.tools.kb import kb_add_hypothesis
+    res = await _get_handler(kb_add_hypothesis)({
+        "target": authorized_target, "statement": "x",
+        # rationale + confidence missing
+    })
+    assert res.get("is_error") is True
+    assert "rationale" in res["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_illegal_transition(authorized_target):
+    from reverser.tools.kb import kb_add_hypothesis, kb_update_hypothesis
+    add = await _get_handler(kb_add_hypothesis)({
+        "target": authorized_target, "statement": "y",
+        "rationale": "because", "confidence": 40,
+    })
+    # Success message: "Hypothesis #<id> added (status=..., confidence=...): y"
+    hid = int(add["content"][0]["text"].split("#")[1].split(" ")[0])
+    res = await _get_handler(kb_update_hypothesis)({
+        "target": authorized_target, "id": hid,
+        "status": "confirmed",   # proposed -> confirmed is illegal
+        "evidence_refs": [{"kind": "finding", "id": 1}],
+    })
+    assert res.get("is_error") is True
+    assert "illegal transition" in res["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_update_confirmed_requires_evidence(authorized_target):
+    from reverser.tools.kb import kb_add_hypothesis, kb_update_hypothesis
+    add = await _get_handler(kb_add_hypothesis)({
+        "target": authorized_target, "statement": "z",
+        "rationale": "because", "confidence": 40,
+    })
+    # Success message: "Hypothesis #<id> added (status=..., confidence=...): z"
+    hid = int(add["content"][0]["text"].split("#")[1].split(" ")[0])
+    # proposed -> testing (valid)
+    await _get_handler(kb_update_hypothesis)({"target": authorized_target, "id": hid, "status": "testing"})
+    # testing -> confirmed with empty evidence_refs (invalid)
+    res = await _get_handler(kb_update_hypothesis)({
+        "target": authorized_target, "id": hid, "status": "confirmed", "evidence_refs": [],
+    })
+    assert res.get("is_error") is True
+    assert "evidence_refs" in res["content"][0]["text"]
