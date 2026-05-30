@@ -534,9 +534,11 @@ async def nikto_scan(args: dict) -> dict:
     try:
         from ..kb import for_target
         from ..kb.parsers import parse_nikto_findings
+        from ..gui_service.kb_emitter import emit_recorded_finding
         kb = for_target(target)
         for finding in parse_nikto_findings(result["stdout"]):
-            kb.record_finding(finding)
+            fid = kb.record_finding(finding)
+            emit_recorded_finding("create", fid, finding)
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning("KB write failed in nikto_scan: %s", e)
@@ -570,10 +572,12 @@ async def testssl_analyze(args: dict) -> dict:
     try:
         from ..kb import for_target
         from ..kb.parsers import parse_ssl_findings
+        from ..gui_service.kb_emitter import emit_recorded_finding
         kb = for_target(target)
         out = parse_ssl_findings(result["stdout"])
         for f in out["findings"]:
-            kb.record_finding(f)
+            fid = kb.record_finding(f)
+            emit_recorded_finding("create", fid, f)
         if out["note"]:
             kb.record_note(out["note"])
     except Exception as e:

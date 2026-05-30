@@ -1158,8 +1158,9 @@ async def metasploit_run(args: dict) -> dict:
     if session_id is not None:
         try:
             from ..kb import FindingFact
+            from ..gui_service.kb_emitter import emit_recorded_finding
             kb = for_target(target)
-            kb.record_finding(FindingFact(
+            finding = FindingFact(
                 title=f"Exploited {module_name} on {target}",
                 severity="high",
                 description=(
@@ -1170,7 +1171,9 @@ async def metasploit_run(args: dict) -> dict:
                     f"Exploit output (truncated): {exploit_output[:2000]}"
                 ),
                 evidence_paths=[],
-            ))
+            )
+            fid = kb.record_finding(finding)
+            emit_recorded_finding("create", fid, finding)
         except Exception:
             pass
 

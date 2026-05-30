@@ -27,7 +27,7 @@ test("sessions panel renders the archived filter tab", async () => {
   }
 });
 
-test("targets panel renders the Show archived toggle", async () => {
+test("targets section renders the Show archived toggle", async () => {
   const app = await electron.launch({
     args: [path.join(__dirname, "..", "..", "dist-electron", "main.js")],
     env: {
@@ -40,7 +40,6 @@ test("targets panel renders the Show archived toggle", async () => {
   try {
     const w = await app.firstWindow();
     await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
-    await w.click('[title="Targets"]');
     await expect(w.locator("text=Show archived")).toBeVisible({ timeout: 5_000 });
   } finally {
     await app.close();
@@ -67,7 +66,7 @@ test("sessions panel still shows the all filter (regression)", async () => {
   }
 });
 
-test("targets panel still shows the by activity sort (regression)", async () => {
+test("targets section still shows the by activity sort (regression)", async () => {
   const app = await electron.launch({
     args: [path.join(__dirname, "..", "..", "dist-electron", "main.js")],
     env: {
@@ -80,7 +79,6 @@ test("targets panel still shows the by activity sort (regression)", async () => 
   try {
     const w = await app.firstWindow();
     await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
-    await w.click('[title="Targets"]');
     await expect(w.locator("text=by activity")).toBeVisible({ timeout: 5_000 });
   } finally {
     await app.close();

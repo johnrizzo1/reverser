@@ -13,6 +13,14 @@ from .schema import apply_schema
 from reverser.paths import targets_root
 
 
+def _emit_kb_change(target: str, *tables: str) -> None:
+    try:
+        from reverser.gui_service.kb_emitter import emit_kb_change
+        emit_kb_change(target, *tables)
+    except Exception:
+        pass
+
+
 _VALID_CRED_STATUS = {"untested", "invalid", "valid"}
 _VALID_SEVERITY = {"info", "low", "medium", "high", "critical"}
 
@@ -191,6 +199,7 @@ class KB:
                     ),
                 )
             conn.commit()
+        _emit_kb_change(self.target_id, "hosts")
 
     def get_hosts(self) -> list[HostFact]:
         with self._connect() as conn:
@@ -226,6 +235,7 @@ class KB:
                 ),
             )
             conn.commit()
+        _emit_kb_change(self.target_id, "services")
 
     def get_services(
         self, host_ip: str | None = None, port: int | None = None,
@@ -284,6 +294,7 @@ class KB:
                     ),
                 )
                 conn.commit()
+                _emit_kb_change(self.target_id, "credentials")
                 assert cursor.lastrowid is not None  # AUTOINCREMENT guarantees this
                 return cursor.lastrowid
             cred_id, current_status = existing
@@ -297,6 +308,7 @@ class KB:
                 (new_status, now, cred_id),
             )
             conn.commit()
+            _emit_kb_change(self.target_id, "credentials")
             return cred_id
 
     def get_credentials(self, status: str | None = None) -> list[CredentialFact]:
@@ -333,6 +345,7 @@ class KB:
                 ),
             )
             conn.commit()
+        _emit_kb_change(self.target_id, "credentials")
 
     def get_cred_results(self, cred_id: int) -> list[CredResult]:
         with self._connect() as conn:
@@ -362,6 +375,7 @@ class KB:
             )
             conn.commit()
             assert cursor.lastrowid is not None  # AUTOINCREMENT guarantees this
+            _emit_kb_change(self.target_id, "findings")
             return cursor.lastrowid
 
     def append_finding_evidence(self, finding_id: int, path: str) -> None:
@@ -385,6 +399,7 @@ class KB:
                 (json.dumps(paths), finding_id, self.target_id),
             )
             conn.commit()
+        _emit_kb_change(self.target_id, "findings", "artifacts")
 
     def get_findings(self, severity: str | None = None) -> list[FindingFact]:
         sql = (
@@ -419,6 +434,7 @@ class KB:
             )
             conn.commit()
             assert cursor.lastrowid is not None  # AUTOINCREMENT guarantees this
+            _emit_kb_change(self.target_id, "artifacts")
             return cursor.lastrowid
 
     def get_artifacts(self) -> list[ArtifactFact]:
@@ -440,6 +456,7 @@ class KB:
                 (self.target_id, body, _now_iso()),
             )
             conn.commit()
+        _emit_kb_change(self.target_id, "notes")
 
     def get_notes(self) -> list[str]:
         with self._connect() as conn:

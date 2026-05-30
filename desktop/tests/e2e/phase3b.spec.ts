@@ -7,7 +7,7 @@ import path from "path";
 // require a target directory with scope.toml/report content/screenshots —
 // add those once we have a per-target test harness.
 
-test("targets panel still renders after Phase 3b refactor", async () => {
+test("targets section still renders after Phase 3b refactor", async () => {
   const app = await electron.launch({
     args: [path.join(__dirname, "..", "..", "dist-electron", "main.js")],
     env: {
@@ -20,7 +20,6 @@ test("targets panel still renders after Phase 3b refactor", async () => {
   try {
     const w = await app.firstWindow();
     await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
-    await w.click('[title="Targets"]');
     await expect(w.locator("text=Targets").first()).toBeVisible({ timeout: 5_000 });
     await expect(w.locator("text=by activity")).toBeVisible({ timeout: 5_000 });
   } finally {

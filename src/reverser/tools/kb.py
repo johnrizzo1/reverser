@@ -337,11 +337,8 @@ async def kb_add_finding(args: dict) -> dict:
     except ValueError as e:
         return format_error(str(e))
     fid = for_target(target).record_finding(finding)
-    from ..gui_service.kb_emitter import emit_finding
-    from dataclasses import asdict, is_dataclass
-    row = asdict(finding) if is_dataclass(finding) else dict(finding)
-    row["id"] = fid
-    emit_finding("create", row)
+    from ..gui_service.kb_emitter import emit_recorded_finding
+    emit_recorded_finding("create", fid, finding)
     return format_tool_result(f"Finding added: id={fid} title={finding.title!r}")
 
 

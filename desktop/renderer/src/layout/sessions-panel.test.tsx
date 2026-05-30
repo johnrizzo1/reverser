@@ -1,7 +1,7 @@
 /// <reference types="@testing-library/jest-dom" />
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ActivityBar } from "./ActivityBar";
 import { SessionsPanel } from "./SessionsPanel";
 
@@ -12,6 +12,7 @@ vi.mock("@/api/queries", () => ({
         {
           id: "s1",
           target: "acme.local",
+          target_name: "acme",
           profile: "manager",
           state: "active",
           turns: 2,
@@ -36,6 +37,18 @@ vi.mock("@/api/queries", () => ({
           has_scope: true,
           archived: false,
         },
+        {
+          name: "acme",
+          has_kb: true,
+          has_scope: true,
+          archived: false,
+        },
+        {
+          name: "unrelated",
+          has_kb: true,
+          has_scope: false,
+          archived: false,
+        },
       ],
     },
   })),
@@ -48,6 +61,17 @@ vi.mock("@/api/queries", () => ({
 }));
 
 describe("Sessions sidebar", () => {
+  function renderPanel(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/sessions" element={<SessionsPanel />} />
+          <Route path="/sessions/:id" element={<SessionsPanel />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
   it("removes the separate targets activity tab", () => {
     render(
       <MemoryRouter initialEntries={["/sessions"]}>
@@ -59,18 +83,24 @@ describe("Sessions sidebar", () => {
     expect(screen.getByTitle("Sessions")).toBeInTheDocument();
   });
 
-  it("shows targets under sessions in the same sidebar column", () => {
-    render(
-      <MemoryRouter initialEntries={["/sessions"]}>
-        <SessionsPanel />
-      </MemoryRouter>,
-    );
+  it("shows only the selected session targets under sessions", () => {
+    const { container } = renderPanel("/sessions/s1");
 
     const sessionsHeader = screen.getByText("Sessions");
     const targetsHeader = screen.getByText("Targets");
     expect(sessionsHeader.compareDocumentPosition(targetsHeader)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(screen.getAllByText("acme.local").length).toBeGreaterThanOrEqual(1);
+    expect(container.querySelector('a[href="/target/acme"]')).toBeInTheDocument();
+    expect(container.querySelector('a[href="/target/acme.local"]')).not.toBeInTheDocument();
+    expect(screen.getByText("1 session")).toBeInTheDocument();
+    expect(screen.queryByText("unrelated")).not.toBeInTheDocument();
+  });
+
+  it("prompts for a session before showing targets", () => {
+    renderPanel("/sessions");
+
+    expect(screen.getByText("select a session to see targets")).toBeInTheDocument();
+    expect(screen.queryByText("unrelated")).not.toBeInTheDocument();
   });
 });

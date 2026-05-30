@@ -41,3 +41,24 @@ def emit_finding(action: str, row: Any) -> None:
         sess.emit_kb_event("finding", {"action": action, "row": _row_to_dict(row)})
     except Exception:
         pass
+
+
+def emit_recorded_finding(action: str, finding_id: int, finding: Any) -> None:
+    """Emit a finding row after `KB.record_finding` returns its id."""
+    row = _row_to_dict(finding)
+    row["id"] = finding_id
+    emit_finding(action, row)
+
+
+def emit_kb_change(target: str, *tables: str) -> None:
+    """Emit a generic KB invalidation frame for non-row-specific writes."""
+    sess = current_session.get()
+    if sess is None:
+        return
+    try:
+        sess.emit_kb_event("kb", {
+            "target": target,
+            "tables": list(tables),
+        })
+    except Exception:
+        pass

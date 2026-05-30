@@ -4,6 +4,7 @@ from httpx import ASGITransport, AsyncClient
 
 from reverser.gui_service.app import create_app
 from reverser.gui_service.config import ServiceConfig
+from reverser.kb import FindingFact, for_target
 
 
 @pytest.fixture
@@ -47,6 +48,21 @@ async def test_list_screenshots_404_for_unknown_finding(client):
         headers=HEADERS,
     )
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_screenshots_empty_for_known_finding_without_files(client):
+    fid = for_target("10.10.10.5").record_finding(
+        FindingFact(title="weak password", severity="medium", description="confirmed")
+    )
+
+    r = await client.get(
+        f"/api/targets/10.10.10.5/findings/{fid}/screenshots",
+        headers=HEADERS,
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"finding_id": str(fid), "screenshots": []}
 
 
 @pytest.mark.asyncio

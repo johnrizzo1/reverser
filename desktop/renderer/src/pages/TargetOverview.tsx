@@ -14,7 +14,7 @@ export function TargetOverview() {
   const summary = useTargetSummary(name);
   const sessions = useSessions();
   const targetSessions = (sessions.data?.sessions ?? []).filter(
-    (s) => s.target === name,
+    (s) => s.target === name || s.target_name === name,
   );
   const [scopeOpen, setScopeOpen] = useState(false);
   const [lightbox, setLightbox] = useState<{ findingId: string; startIndex: number } | null>(null);

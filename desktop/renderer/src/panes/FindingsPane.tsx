@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { useTargetKB, useSessions } from "@/api/queries";
+import { useTarget } from "@/state/targets-store";
 import { getSessionStore, type FindingRow } from "@/state/session-store";
 import { FindingRow as FindingRowComponent } from "@/components/FindingRow";
 import { ScreenshotLightboxModal } from "@/modals/ScreenshotLightboxModal";
@@ -12,8 +13,13 @@ export function FindingsPane({ sessionId }: { sessionId: string }) {
   const seedFindings = useStore(store, (s) => s.seedFindings);
   const sessions = useSessions();
   const session = sessions.data?.sessions.find((s) => s.id === sessionId);
-  const target = session?.target ?? null;
-  const kb = useTargetKB(target);
+  const targetName = session ? (session.target_name || session.target) : null;
+  const targetQuery = useTarget(targetName);
+  const targetDetail = targetQuery.data;
+  const kbTarget = targetDetail
+    ? (targetDetail.addresses.find((a) => a.id === targetDetail.primary_address_id)?.value ?? targetName)
+    : targetName;
+  const kb = useTargetKB(kbTarget);
   const [lightbox, setLightbox] = useState<{ findingId: string; startIndex: number } | null>(null);
 
   useEffect(() => {
@@ -46,7 +52,7 @@ export function FindingsPane({ sessionId }: { sessionId: string }) {
         {rows.map((f) => (
           <FindingRowComponent
             key={`finding-${f.id}`}
-            target={target}
+            target={kbTarget}
             finding={{ ...f, severity: f.severity ?? undefined }}
             onClickEvidence={(findingId, startIndex) =>
               setLightbox({ findingId, startIndex })
@@ -56,7 +62,7 @@ export function FindingsPane({ sessionId }: { sessionId: string }) {
       </div>
       {lightbox && (
         <ScreenshotLightboxModal
-          target={target ?? ""}
+          target={kbTarget ?? ""}
           findingId={lightbox.findingId}
           startIndex={lightbox.startIndex}
           open={true}

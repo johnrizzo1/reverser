@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useConnection } from "@/state/connection";
 import { getSessionStore, type WSFrame } from "@/state/session-store";
 
@@ -12,6 +13,7 @@ export function useSessionStream(sessionId: string | null) {
   const port = useConnection((s) => s.port);
   const token = useConnection((s) => s.token);
   const ready = useConnection((s) => s.status === "ready");
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!sessionId || !ready || !port || !token) return;
@@ -21,6 +23,13 @@ export function useSessionStream(sessionId: string | null) {
     ws.onmessage = (ev) => {
       try {
         const frame = JSON.parse(ev.data) as WSFrame;
+        if (frame.type === "kb") {
+          queryClient.invalidateQueries({ queryKey: ["kb"] });
+          queryClient.invalidateQueries({
+            queryKey: ["target-summary", frame.target],
+          });
+          queryClient.invalidateQueries({ queryKey: ["targets"] });
+        }
         store.getState().ingest(frame);
       } catch {
         store.getState().ingest({ type: "log", level: "warn", msg: "non-JSON WS frame" });
@@ -32,5 +41,5 @@ export function useSessionStream(sessionId: string | null) {
     return () => {
       try { ws.close(); } catch { /* ignore */ }
     };
-  }, [sessionId, ready, port, token]);
+  }, [sessionId, ready, port, token, queryClient]);
 }

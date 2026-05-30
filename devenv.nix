@@ -20,6 +20,7 @@
 
     # Disassemblers / Decompilers
     radare2
+    python3Packages.r2pipe
     (rizin.withPlugins (ps: [ ps.rz-ghidra ]))
     (ghidra.withExtensions (exts: [
       exts.findcrypt

@@ -27,7 +27,7 @@ test("sessions panel: navigate /sessions and see the panel", async () => {
   }
 });
 
-test("targets panel: navigate /targets and see the panel", async () => {
+test("targets section renders under sessions panel", async () => {
   const app = await electron.launch({
     args: [path.join(__dirname, "..", "..", "dist-electron", "main.js")],
     env: {
@@ -41,12 +41,10 @@ test("targets panel: navigate /targets and see the panel", async () => {
     const w = await app.firstWindow();
     await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
 
-    await w.click('[title="Targets"]');
-
     await expect(w.locator("text=Targets").first()).toBeVisible({ timeout: 5_000 });
     await expect(w.locator("text=by activity")).toBeVisible({ timeout: 5_000 });
     await expect(
-      w.locator("text=Select a target from the panel on the left"),
+      w.locator("text=Select a session from the panel on the left"),
     ).toBeVisible({ timeout: 5_000 });
   } finally {
     await app.close();

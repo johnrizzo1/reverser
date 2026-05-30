@@ -397,10 +397,29 @@ def _findings_dir(target: str, finding_id: str):
     return _targets_root() / target / "findings" / finding_id
 
 
+def _known_kb_finding(target: str, finding_id: str) -> bool:
+    if not finding_id.isdigit():
+        return False
+    try:
+        target_id = target_key(target)
+    except ValueError:
+        return False
+    if not (_targets_root() / target_id).is_dir():
+        return False
+    try:
+        finding_num = int(finding_id)
+        findings = for_target(target_id).get_findings()
+    except Exception:
+        return False
+    return any(f.id == finding_num for f in findings)
+
+
 @router.get("/api/targets/{target}/findings/{finding_id}/screenshots")
 def list_screenshots(target: str, finding_id: str) -> dict:
     d = _findings_dir(target, finding_id)
     if not d.is_dir():
+        if _known_kb_finding(target, finding_id):
+            return {"finding_id": finding_id, "screenshots": []}
         raise HTTPException(404, detail=f"unknown finding: {finding_id!r}")
     entries = []
     for f in sorted(d.glob("screenshot-*.png")):

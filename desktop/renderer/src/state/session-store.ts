@@ -17,6 +17,7 @@ export type WSFrame =
   | DispatchFrame
   | { type: "hypothesis"; action: "create" | "update"; row: HypothesisRow }
   | { type: "finding"; action: "create" | "update"; row: FindingRow }
+  | { type: "kb"; target: string; tables: string[] }
   | { type: "budget"; spent: number; remaining: number; turn: number }
   | { type: "conn_breaker"; target: string; tripped: boolean }
   | { type: "status"; phase: string; turns?: number; subtype?: string; cost?: number | null }

@@ -3,16 +3,18 @@ import { StatusBar } from "./StatusBar";
 import { ActivityBar } from "./ActivityBar";
 import { Footer } from "./Footer";
 import { SessionsPanel } from "./SessionsPanel";
-import { TargetsPanel } from "./TargetsPanel";
 
 /** Routes that get a 240px side panel slot. Pages not listed here
  *  (Settings, Health, NewEngagement) render full-width main content. */
 function _sidePanelFor(pathname: string) {
-  if (pathname === "/" || pathname.startsWith("/sessions") || pathname.startsWith("/session/")) {
+  if (
+    pathname === "/" ||
+    pathname.startsWith("/sessions") ||
+    pathname.startsWith("/session/") ||
+    pathname.startsWith("/targets") ||
+    pathname.startsWith("/target/")
+  ) {
     return <SessionsPanel />;
-  }
-  if (pathname.startsWith("/targets") || pathname.startsWith("/target/")) {
-    return <TargetsPanel />;
   }
   return null;
 }

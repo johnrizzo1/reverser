@@ -165,7 +165,13 @@ function TargetRow({
   );
 }
 
-export function TargetsPanel() {
+export function TargetsPanel({
+  targetNames,
+  emptyMessage = "no targets yet",
+}: {
+  targetNames?: readonly string[];
+  emptyMessage?: string;
+}) {
   const { name: routeName } = useParams<{ name: string }>();
   const targets = useTargets();
   const sessions = useSessions();
@@ -177,8 +183,13 @@ export function TargetsPanel() {
     const list = targets.data?.targets ?? [];
     const sess = sessions.data?.sessions ?? [];
 
-    const summarized: Row[] = list.map((t) => {
-      const ts = sess.filter((s) => s.target === t.name);
+    const targetNameSet = targetNames === undefined ? null : new Set(targetNames);
+    const scoped = targetNameSet === null
+      ? list
+      : list.filter((t) => targetNameSet.has(t.name));
+
+    const summarized: Row[] = scoped.map((t) => {
+      const ts = sess.filter((s) => s.target === t.name || s.target_name === t.name);
       const last =
         ts
           .map((s) => s.stopped_at ?? "")
@@ -212,7 +223,7 @@ export function TargetsPanel() {
     });
 
     return filtered;
-  }, [targets.data, sessions.data, sort, query, showArchived]);
+  }, [targets.data, sessions.data, sort, query, showArchived, targetNames]);
 
   return (
     <div className="h-full flex flex-col bg-neutral-950 border-r border-neutral-800">
@@ -260,7 +271,7 @@ export function TargetsPanel() {
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
         {rows.length === 0 ? (
-          <p className="p-3 text-xs text-neutral-500">no targets yet</p>
+          <p className="p-3 text-xs text-neutral-500">{emptyMessage}</p>
         ) : (
           rows.map((r) => (
             <TargetRow key={r.name} r={r} active={r.name === routeName} />

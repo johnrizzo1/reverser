@@ -13,6 +13,13 @@ def test_shared_contract_requires_domain_classification_before_tools():
     assert "do not run binary-analysis tools" in text
 
 
+def test_shared_contract_requires_persisting_summarized_findings():
+    text = PROFILE_OPERATING_CONTRACT.lower()
+    assert "kb_add_finding" in text
+    assert "findings tab" in text
+    assert "prose" in text
+
+
 def test_objective_alignment_prioritizes_current_user_task_over_profile():
     text = OBJECTIVE_ALIGNMENT_PROMPT.lower()
     assert "current objective is authoritative" in text

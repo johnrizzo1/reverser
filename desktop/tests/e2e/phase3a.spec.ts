@@ -31,7 +31,7 @@ test("sessions panel still renders after Phase 3a refactor", async () => {
   }
 });
 
-test("targets panel still renders after Phase 3a refactor", async () => {
+test("targets section still renders after Phase 3a refactor", async () => {
   const app = await electron.launch({
     args: [path.join(__dirname, "..", "..", "dist-electron", "main.js")],
     env: {
@@ -44,7 +44,6 @@ test("targets panel still renders after Phase 3a refactor", async () => {
   try {
     const w = await app.firstWindow();
     await expect(w.locator("text=Sessions").first()).toBeVisible({ timeout: 30_000 });
-    await w.click('[title="Targets"]');
     await expect(w.locator("text=Targets").first()).toBeVisible({ timeout: 5_000 });
     await expect(w.locator("text=by activity")).toBeVisible({ timeout: 5_000 });
   } finally {

@@ -4,6 +4,7 @@ import { useSessions } from "@/api/queries";
 import { SessionRow } from "@/components/SessionRow";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { TargetsPanel } from "./TargetsPanel";
 
 type Filter =
   | "all"
@@ -18,7 +19,10 @@ const FILTERS: Filter[] = [
 ];
 
 export function SessionsPanel() {
-  const { id: routeId } = useParams<{ id: string }>();
+  const { id: routeId, name: routeTargetName } = useParams<{
+    id?: string;
+    name?: string;
+  }>();
   const sessions = useSessions();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -68,45 +72,72 @@ export function SessionsPanel() {
     });
   }, [all, visible, filter, query]);
 
+  const targetNamesForSelectedSession = useMemo(() => {
+    if (routeTargetName) {
+      return [routeTargetName];
+    }
+    if (!routeId) {
+      return [];
+    }
+    const selected = all.find((s) => s.id === routeId);
+    if (!selected) {
+      return [];
+    }
+    const names = [selected.target_name || selected.target];
+    return [...new Set(names.filter(Boolean))];
+  }, [all, routeId, routeTargetName]);
+
   return (
     <div className="h-full flex flex-col bg-neutral-950 border-r border-neutral-800">
-      <div className="p-3 border-b border-neutral-800">
-        <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-2">
-          Sessions
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="p-3 border-b border-neutral-800">
+          <div className="text-[10px] uppercase tracking-wide text-neutral-500 mb-2">
+            Sessions
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] mb-2">
+            {FILTERS.map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "transition-colors",
+                  f === filter
+                    ? "text-neutral-100 border-b border-neutral-100"
+                    : "text-neutral-500 hover:text-neutral-300",
+                )}
+              >
+                {f} ({counts[f]})
+              </button>
+            ))}
+          </div>
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="filter target / profile / id…"
+            className="h-7 text-xs"
+          />
         </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] mb-2">
-          {FILTERS.map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                "transition-colors",
-                f === filter
-                  ? "text-neutral-100 border-b border-neutral-100"
-                  : "text-neutral-500 hover:text-neutral-300",
-              )}
-            >
-              {f} ({counts[f]})
-            </button>
-          ))}
+        <div className="flex-1 min-h-0 overflow-auto">
+          {filtered.length === 0 ? (
+            <p className="p-3 text-xs text-neutral-500">
+              {all.length === 0 ? "no sessions yet" : "no matches"}
+            </p>
+          ) : (
+            filtered.map((s) => (
+              <SessionRow key={s.id} session={s} isActive={s.id === routeId} />
+            ))
+          )}
         </div>
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="filter target / profile / id…"
-          className="h-7 text-xs"
-        />
       </div>
-      <div className="flex-1 min-h-0 overflow-auto">
-        {filtered.length === 0 ? (
-          <p className="p-3 text-xs text-neutral-500">
-            {all.length === 0 ? "no sessions yet" : "no matches"}
-          </p>
-        ) : (
-          filtered.map((s) => (
-            <SessionRow key={s.id} session={s} isActive={s.id === routeId} />
-          ))
-        )}
+      <div className="flex min-h-0 flex-1 flex-col border-t border-neutral-800">
+        <TargetsPanel
+          targetNames={targetNamesForSelectedSession}
+          emptyMessage={
+            routeId || routeTargetName
+              ? "no targets for this session"
+              : "select a session to see targets"
+          }
+        />
       </div>
     </div>
   );

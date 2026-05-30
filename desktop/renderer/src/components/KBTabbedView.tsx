@@ -4,9 +4,18 @@ import { cn } from "@/lib/utils";
 import { FindingRow } from "@/components/FindingRow";
 import { ReportTab } from "@/panes/ReportTab";
 
-type Tab = "findings" | "hypotheses" | "hosts" | "services" | "credentials" | "report";
+type Tab = "findings" | "hypotheses" | "hosts" | "services" | "credentials" | "artifacts" | "notes" | "report";
 
-const TABS: Tab[] = ["findings", "hypotheses", "hosts", "services", "credentials", "report"];
+const TABS: Tab[] = [
+  "findings",
+  "hypotheses",
+  "hosts",
+  "services",
+  "credentials",
+  "artifacts",
+  "notes",
+  "report",
+];
 
 export function KBTabbedView({
   target,
@@ -119,14 +128,167 @@ function TabContent({
       </div>
     );
   }
-  // Generic fallback for hosts/services/credentials.
+  if (tab === "hosts") {
+    return (
+      <div className="space-y-2 text-xs">
+        {rows.map((r, i) => (
+          <RecordCard
+            key={i}
+            title={String(r.ip ?? "host")}
+            subtitle={compactJoin([r.hostname, r.os, r.domain])}
+            fields={[
+              ["domain", r.domain],
+              ["os", r.os],
+              ["dc", typeof r.is_dc === "boolean" ? (r.is_dc ? "yes" : "no") : r.is_dc],
+              ["smb signing", r.smb_signing],
+            ]}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (tab === "services") {
+    return (
+      <div className="space-y-2 text-xs">
+        {rows.map((r, i) => (
+          <RecordCard
+            key={i}
+            title={`${String(r.host_ip ?? "host")}:${String(r.port ?? "?")}/${String(r.proto ?? "tcp")}`}
+            subtitle={compactJoin([r.service, r.version])}
+            fields={[
+              ["service", r.service],
+              ["version", r.version],
+              ["banner", r.banner],
+              ["source", r.scan_source],
+            ]}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (tab === "credentials") {
+    return (
+      <div className="space-y-2 text-xs">
+        {rows.map((r, i) => (
+          <RecordCard
+            key={i}
+            title={compactJoin([r.domain, r.username], "\\") || String(r.username ?? "credential")}
+            subtitle={String(r.status ?? "untested")}
+            fields={[
+              ["status", r.status],
+              ["password", r.password],
+              ["nt hash", r.nt_hash],
+              ["kerberos ticket", r.kerberos_ticket],
+              ["source", compactJoin([r.source_tool, r.source_context], " · ")],
+            ]}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (tab === "artifacts") {
+    return (
+      <div className="space-y-2 text-xs">
+        {rows.map((r, i) => (
+          <RecordCard
+            key={i}
+            title={String(r.path ?? "artifact")}
+            subtitle={String(r.kind ?? "")}
+            fields={[
+              ["kind", r.kind],
+              ["sha256", r.sha256],
+              ["source", r.source_tool],
+            ]}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (tab === "notes") {
+    return (
+      <div className="space-y-2 text-xs">
+        {rows.map((r, i) => (
+          <div
+            key={i}
+            className="rounded-md border border-neutral-800 bg-neutral-950/80 p-2 text-neutral-300"
+          >
+            <p className="whitespace-pre-wrap break-words leading-5">
+              {String(r.body ?? r.note ?? r)}
+            </p>
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
-    <div className="space-y-1 text-[10px] font-mono">
+    <div className="space-y-2 text-xs">
       {rows.slice(0, 200).map((r, i) => (
-        <pre key={i} className="text-neutral-400 truncate" title={JSON.stringify(r)}>
-          {JSON.stringify(r)}
-        </pre>
+        <RecordCard
+          key={i}
+          title={`row ${i + 1}`}
+          fields={Object.entries(r)}
+        />
       ))}
+    </div>
+  );
+}
+
+function compactJoin(
+  values: unknown[],
+  separator = " · ",
+): string {
+  return values
+    .map((v) => (v === null || v === undefined ? "" : String(v)))
+    .filter(Boolean)
+    .join(separator);
+}
+
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (Array.isArray(value)) return value.map(formatValue).join(", ");
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function RecordCard({
+  title,
+  subtitle,
+  fields,
+}: {
+  title: string;
+  subtitle?: string;
+  fields: Array<[string, unknown]>;
+}) {
+  const visibleFields = fields.filter(([, value]) => {
+    if (value === null || value === undefined || value === "") return false;
+    if (Array.isArray(value) && value.length === 0) return false;
+    return true;
+  });
+
+  return (
+    <div className="rounded-md border border-neutral-800 bg-neutral-950/80 p-2 shadow-sm">
+      <div className="min-w-0">
+        <div className="break-words font-medium leading-5 text-neutral-100">
+          {title}
+        </div>
+        {subtitle && (
+          <div className="mt-0.5 break-words leading-5 text-neutral-400">
+            {subtitle}
+          </div>
+        )}
+      </div>
+      {visibleFields.length > 0 && (
+        <dl className="mt-2 grid grid-cols-[minmax(5rem,8rem)_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11px] leading-5">
+          {visibleFields.map(([label, value]) => (
+            <div key={label} className="contents">
+              <dt className="text-neutral-500">{label}</dt>
+              <dd className="min-w-0 whitespace-pre-wrap break-words font-mono text-neutral-300">
+                {formatValue(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </div>
   );
 }
