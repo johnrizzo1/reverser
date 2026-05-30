@@ -15,7 +15,12 @@ from ..kb import (
     require_pentest_auth,
 )
 from ._common import format_error, format_tool_result
-from ..schemas.models import FindingModel, HypothesisModel, HypothesisUpdateModel
+from ..schemas.models import (
+    FindingModel,
+    HypothesisModel,
+    HypothesisUpdateModel,
+    ReportModel,
+)
 from ..schemas.validation import validate_args, tool_input_schema
 
 
@@ -464,7 +469,8 @@ TOOLS.append(kb_get_hypothesis)
     "kb_update_hypothesis",
     "Update fields on an existing hypothesis. Pass only the fields you want to "
     "change. Common transitions: status='testing' when dispatching, "
-    "status='confirmed'/'refuted'/'inconclusive' when a dispatch returns. "
+    "status='confirmed'/'refuted' when a dispatch returns (or 'abandoned' to "
+    "drop a line of inquiry, 'blocked' when you cannot proceed). "
     "evidence_refs is a list of {kind, id} dicts pointing into the KB.",
     {
         "type": "object",
@@ -762,12 +768,17 @@ async def kb_export_report(args: dict) -> dict:
     if auth_err:
         return auth_err
     target = args["target"]
-    summary = (args.get("executive_summary") or "").strip()
-    if not summary:
-        return format_error(
-            "executive_summary is required (a 1-3 sentence engagement summary). "
-            "Resubmit kb_export_report with executive_summary set."
-        )
+    # Validate the report boundary via ReportModel (single source of truth).
+    # Strip first so a whitespace-only summary is rejected by min_length. We do
+    # NOT route KB findings through FindingModel here — the report is rendered
+    # deterministically from KB rows so legacy findings (pre-v3) stay readable.
+    report_outcome = validate_args(ReportModel, {
+        "target": target,
+        "executive_summary": (args.get("executive_summary") or "").strip(),
+    })
+    if not report_outcome.ok:
+        return format_error(report_outcome.error_text)
+    summary = report_outcome.value.executive_summary
     kb = for_target(target)
     body = _render_report(kb, executive_summary=summary)
     out_path = args.get("output_path") or str(kb.root / "report.md")
