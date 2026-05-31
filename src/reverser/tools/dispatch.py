@@ -8,8 +8,10 @@ helpers around an SDK Task call (see Task 13).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json as _json
+import os as _os
 import re
 import threading
 
@@ -384,11 +386,14 @@ async def _unserialized_dispatch_slot():
     yield
 
 
-import os as _os  # noqa: E402  (module already imports asyncio at top)
-
-
 class _DispatchStalled(Exception):
     """Raised when a dispatched specialist emits no event within the idle window."""
+
+    def __init__(self, idle_seconds: float):
+        self.idle_seconds = idle_seconds
+        super().__init__(
+            f"specialist produced no event within {idle_seconds}s idle window"
+        )
 
 
 def _dispatch_idle_timeout() -> float:
@@ -406,7 +411,9 @@ def _dispatch_idle_timeout() -> float:
         return 300.0
 
 
-async def _aiter_with_idle_timeout(agen, idle_seconds: float):
+async def _aiter_with_idle_timeout(
+    agen: AsyncIterator, idle_seconds: float
+) -> AsyncIterator:
     """Yield from ``agen``, raising ``_DispatchStalled`` if any single step
     idles longer than ``idle_seconds``. Best-effort closes the underlying
     iterator on stall so the specialist subprocess/generator is not leaked."""
@@ -418,7 +425,7 @@ async def _aiter_with_idle_timeout(agen, idle_seconds: float):
             return
         except asyncio.TimeoutError:
             try:
-                await it.aclose()
+                await asyncio.wait_for(it.aclose(), 30)
             except Exception:
                 pass
             raise _DispatchStalled(idle_seconds)
