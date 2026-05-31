@@ -384,6 +384,47 @@ async def _unserialized_dispatch_slot():
     yield
 
 
+import os as _os  # noqa: E402  (module already imports asyncio at top)
+
+
+class _DispatchStalled(Exception):
+    """Raised when a dispatched specialist emits no event within the idle window."""
+
+
+def _dispatch_idle_timeout() -> float:
+    """Seconds of sub-agent silence before the stall watchdog aborts a dispatch.
+
+    Default 300s (5 min); override with REVERSER_DISPATCH_IDLE_TIMEOUT. A
+    malformed value falls back to the default rather than crashing a dispatch.
+    """
+    raw = _os.environ.get("REVERSER_DISPATCH_IDLE_TIMEOUT")
+    if raw is None:
+        return 300.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 300.0
+
+
+async def _aiter_with_idle_timeout(agen, idle_seconds: float):
+    """Yield from ``agen``, raising ``_DispatchStalled`` if any single step
+    idles longer than ``idle_seconds``. Best-effort closes the underlying
+    iterator on stall so the specialist subprocess/generator is not leaked."""
+    it = agen.__aiter__()
+    while True:
+        try:
+            item = await asyncio.wait_for(it.__anext__(), idle_seconds)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            try:
+                await it.aclose()
+            except Exception:
+                pass
+            raise _DispatchStalled(idle_seconds)
+        yield item
+
+
 _DISPATCHABLE_SPECIALTIES = (
     "pentest", "ad", "webpentest", "webapi", "webrecon",
     "exploit",
