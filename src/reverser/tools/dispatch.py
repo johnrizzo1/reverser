@@ -612,6 +612,13 @@ async def dispatch_specialist(args: dict) -> dict:
     import json as _json
     dispatch_id = _uuid.uuid4().hex
     _sub_turn = [0]
+    # In-flight tool-call count, read by the stall watchdog so it applies the
+    # generous tool window (not the short idle window) while a tool runs. Updated
+    # before the sess guard below so it stays accurate even without a session.
+    # Tradeoff: if a backend emits a "tool_call" whose matching tool_result/error
+    # is never emitted (e.g. an `event.kind == "error"` aborts mid-tool), the count
+    # stays >0 and a *subsequent* hang waits the tool window instead of the idle
+    # window. Bounded by the tool-timeout ceiling, so it can't hang forever.
     _pending_tools = [0]
 
     def _emit(kind: str, content: str) -> None:

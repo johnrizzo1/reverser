@@ -210,7 +210,7 @@ def test_dispatch_aborts_when_idle_with_no_tool_pending(monkeypatch, tmp_path):
     async def text_then_hang(prompt, options):
         from claude_agent_sdk import AssistantMessage, TextBlock
         yield AssistantMessage(content=[TextBlock(text="done enumerating")], model="claude")
-        await asyncio.sleep(10)    # no tool pending -> idle window (0.3s) applies
+        await asyncio.sleep(2)     # no tool pending -> idle window (0.3s) applies
 
     with patch("reverser.tools.dispatch.query", text_then_hang):
         result = _call_tool(dispatch_specialist, {
