@@ -674,6 +674,8 @@ async def dispatch_specialist(args: dict) -> dict:
         # produces no text retains the prior attempt's report.
         nonlocal status, cost_usd, turns_consumed, error_msg, report_text
 
+        _idle = _dispatch_idle_timeout()
+
         if use_session_backend:
             if cfg.backend in _LOCAL_BACKEND_NAMES:
                 _emit("thinking", f"Waiting for local backend slot ({cfg.backend})")
@@ -690,12 +692,15 @@ async def dispatch_specialist(args: dict) -> dict:
                     model=cfg.model,
                     api_base=cfg.api_base,
                 )
-                async for event in backend.run(
-                    prompt=prompt,
-                    system_prompt=full_system_prompt,
-                    max_turns=max_turns,
-                    max_budget_usd=budget_usd,
-                    allowed_tools=sub_allowed_tools,
+                async for event in _aiter_with_idle_timeout(
+                    backend.run(
+                        prompt=prompt,
+                        system_prompt=full_system_prompt,
+                        max_turns=max_turns,
+                        max_budget_usd=budget_usd,
+                        allowed_tools=sub_allowed_tools,
+                    ),
+                    _idle,
                 ):
                     if event.kind == "turn":
                         _sub_turn[0] = event.turn or event.turns or _sub_turn[0] + 1
@@ -737,7 +742,9 @@ async def dispatch_specialist(args: dict) -> dict:
                         elif event.content and not report_text:
                             report_text = event.content
         else:
-            async for message in query(prompt=prompt, options=options):
+            async for message in _aiter_with_idle_timeout(
+                query(prompt=prompt, options=options), _idle,
+            ):
                 if isinstance(message, AssistantMessage):
                     _sub_turn[0] += 1
                     for block in message.content:
@@ -812,6 +819,16 @@ async def dispatch_specialist(args: dict) -> dict:
             )
         except Exception:
             reconcile_actions = []
+    except _DispatchStalled as e:
+        status = "timeout"
+        error_msg = (
+            f"specialist produced no output for {int(e.idle_seconds)}s — "
+            f"aborted by stall watchdog"
+        )
+        if not report_text:
+            report_text = f"(dispatch aborted: {error_msg})"
+        outcome = "inconclusive"
+        report_model = None
     except Exception as e:
         status = "error"
         error_msg = f"{type(e).__name__}: {e}"

@@ -61,3 +61,50 @@ def test_idle_timeout_reads_env(monkeypatch):
     assert _dispatch_idle_timeout() == 12.5
     monkeypatch.setenv("REVERSER_DISPATCH_IDLE_TIMEOUT", "garbage")
     assert _dispatch_idle_timeout() == 300.0
+
+
+from unittest.mock import patch
+
+
+def _call_tool(tool_obj, args):
+    fn = getattr(tool_obj, "handler", None) or getattr(tool_obj, "fn", None) or tool_obj
+    return asyncio.new_event_loop().run_until_complete(fn(args))
+
+
+def test_dispatch_times_out_on_stalled_specialist(monkeypatch, tmp_path):
+    """A specialist whose generator stalls aborts with Status: timeout,
+    clears in_flight, and returns a partial report instead of hanging."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    monkeypatch.setenv("REVERSER_DISPATCH_IDLE_TIMEOUT", "0.3")
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+
+    from reverser.profiles import get_profile
+    from reverser.tui.session import AgentSession
+    from reverser.tools.dispatch import dispatch_specialist
+    from reverser.sessions import current_session
+
+    sess = AgentSession(binary_path="10.10.10.5", profile=get_profile("manager"))
+    current_session.set(sess)
+
+    async def stalling_query(prompt, options):
+        from claude_agent_sdk import AssistantMessage, TextBlock
+        yield AssistantMessage(
+            content=[TextBlock(text="Partial recon so far...")], model="claude",
+        )
+        await asyncio.sleep(5)   # never reaches a ResultMessage
+
+    with patch("reverser.tools.dispatch.query", stalling_query):
+        result = _call_tool(dispatch_specialist, {
+            "specialty": "webrecon", "sub_goal": "enumerate",
+            "target": "10.10.10.5", "hypothesis_id": 1,
+        })
+
+    # NOTE: adjust this extraction to the ACTUAL return shape you confirmed by
+    # reading the end of dispatch_specialist. The line below handles a dict
+    # envelope; if it returns a raw string, assert on `result` directly.
+    body = result["content"][0]["text"] if isinstance(result, dict) and "content" in result else str(result)
+    assert "timeout" in body.lower()
+    assert "Partial recon so far" in body          # partial report preserved
+    assert sess._snapshot.in_flight is None         # finally ran
