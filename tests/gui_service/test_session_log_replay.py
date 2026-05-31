@@ -120,6 +120,28 @@ async def test_log_filters_to_allowed_kinds(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_log_dispatch_preserves_id_and_sub_turn(client, tmp_path):
+    """The frontend correlates a dispatch's start/sub-events/end by dispatch_id;
+    the replay must carry dispatch_id + sub_turn or every event becomes its own
+    'running' dispatch (stale spinners on resume)."""
+    log_path = _write_snapshot(tmp_path, "t1", "s1", "logs/s1.jsonl")
+    _write_log(log_path, [
+        {"type": "turn", "turn": 1},
+        {"type": "dispatch", "specialty": "ad", "kind": "start",
+         "dispatch_id": "d1", "sub_turn": 0, "content": "{}"},
+        {"type": "dispatch", "specialty": "ad", "kind": "end",
+         "dispatch_id": "d1", "sub_turn": 2,
+         "content": "{\"status\": \"completed\", \"cost\": 0.1, \"turns\": 2}"},
+    ])
+    r = await client.get("/api/sessions/log/s1?target=t1", headers=HEADERS)
+    assert r.status_code == 200
+    disp = [e for e in r.json()["events"] if e["kind"] == "dispatch"]
+    assert [e["phase"] for e in disp] == ["start", "end"]
+    assert all(e["dispatch_id"] == "d1" for e in disp)
+    assert disp[0]["sub_turn"] == 0 and disp[1]["sub_turn"] == 2
+
+
+@pytest.mark.asyncio
 async def test_log_replay_includes_user_messages_from_snapshot_conversation(client, tmp_path):
     log_path = _write_snapshot_with_conversation(
         tmp_path,

@@ -433,6 +433,11 @@ def get_session_log(session_id: str, target: str) -> dict:
                 "specialty": entry.get("specialty", ""),
                 "phase": entry.get("kind", ""),
                 "content": entry.get("content", ""),
+                # dispatch_id/sub_turn are required for the frontend to correlate
+                # a dispatch's start/sub-events/end into one entry on replay.
+                # Without them every event became its own "running" dispatch.
+                "dispatch_id": entry.get("dispatch_id"),
+                "sub_turn": entry.get("sub_turn"),
                 "ts": ts,
             })
 
