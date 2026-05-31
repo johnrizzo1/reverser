@@ -820,9 +820,11 @@ async def dispatch_specialist(args: dict) -> dict:
         except Exception:
             reconcile_actions = []
     except _DispatchStalled as e:
+        # _aiter_with_idle_timeout raises this when a wrapped specialist
+        # generator (query/backend.run) emits no event within the idle window.
         status = "timeout"
         error_msg = (
-            f"specialist produced no output for {int(e.idle_seconds)}s — "
+            f"specialist produced no output for {e.idle_seconds:g}s — "
             f"aborted by stall watchdog"
         )
         if not report_text:
@@ -852,7 +854,7 @@ async def dispatch_specialist(args: dict) -> dict:
         f"**Turns:** {turns_consumed}",
         f"**Outcome:** {outcome or 'unknown'}",
     ]
-    if status == "partial":
+    if status in ("partial", "timeout"):
         summary_lines.append(
             "**Note:** Subprocess exited non-zero but the specialist produced "
             "findings. READ THE REPORT BODY BELOW before deciding next action."

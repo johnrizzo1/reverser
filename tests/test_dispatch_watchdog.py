@@ -107,4 +107,5 @@ def test_dispatch_times_out_on_stalled_specialist(monkeypatch, tmp_path):
     body = result["content"][0]["text"] if isinstance(result, dict) and "content" in result else str(result)
     assert "timeout" in body.lower()
     assert "Partial recon so far" in body          # partial report preserved
+    assert "READ THE REPORT BODY BELOW" in body    # advisory shown for timeout
     assert sess._snapshot.in_flight is None         # finally ran
