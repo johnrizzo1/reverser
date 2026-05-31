@@ -1,5 +1,6 @@
 """Agent session manager — runs the agent and streams events to the TUI."""
 
+import dataclasses
 import json
 import os
 import re
@@ -837,6 +838,43 @@ When you respond, present your findings clearly with relevant details.
                 self._autosave_snapshot()
             except Exception:
                 pass
+
+    def refocus_address(self, new_address) -> str:
+        """Re-point this live session at a new address. Returns a human note.
+
+        Updates the active address + the legacy engagement string + the snapshot,
+        so subsequent tool calls / dispatches use the new IP and a resume stays on it.
+        """
+        from .sessions import save as save_snapshot
+
+        old = self.target
+        self.active_address = new_address
+        self.target = new_address.value
+        if getattr(self, "target_obj", None) is not None:
+            addr_ids = {a.id for a in self.target_obj.addresses}
+            if new_address.id in addr_ids:
+                self.target_obj = dataclasses.replace(
+                    self.target_obj, primary_address_id=new_address.id
+                )
+            else:
+                # new_address isn't in the session's (startup) copy of the target —
+                # the refocus already persisted it, so refresh from disk to keep a
+                # correct, populated target_obj rather than dropping it.
+                try:
+                    from .targets import load_target
+                    self.target_obj = load_target(self.target_obj.name)
+                except Exception:
+                    self.target_obj = None
+        if getattr(self, "_snapshot", None) is not None:
+            self._snapshot.active_address_id = new_address.id
+            try:
+                save_snapshot(self._snapshot)
+            except Exception:
+                pass
+        return (
+            f"Engagement refocused: target is now {new_address.value} (was {old}). "
+            f"Use {new_address.value} for all subsequent tool calls."
+        )
 
     def close(self):
         self._slog.close()
