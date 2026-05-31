@@ -495,6 +495,13 @@ export const makeSessionStore = () =>
     })),
   }));
 
+/** The pending (unmatched) tool call in a sub-turn — a tool still executing — or null. */
+export function pendingToolCall(st: SubTurn): { name: string; content: string } | null {
+  return st.toolCalls.length > st.toolResults.length
+    ? st.toolCalls[st.toolResults.length]
+    : null;
+}
+
 /** The running dispatch in the current turn, if any (reference-stable). */
 export function selectActiveDispatch(s: SessionState): Dispatch | null {
   const t = s.turns.get(s.currentTurn);

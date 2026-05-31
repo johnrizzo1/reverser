@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { makeSessionStore, selectActiveDispatch } from "./session-store";
+import { makeSessionStore, selectActiveDispatch, pendingToolCall } from "./session-store";
+import type { SubTurn } from "./session-store";
 
 describe("session-store new shape", () => {
   let store: ReturnType<typeof makeSessionStore>;
@@ -439,5 +440,24 @@ describe("dispatch lastActivityAt + active selector + timeout status", () => {
     });
     const d = store.getState().turns.get(1)!.dispatches.get("d1")!;
     expect(d.status).toBe("timeout");
+  });
+});
+
+describe("pendingToolCall", () => {
+  function st(calls: number, results: number): SubTurn {
+    return {
+      thinkingDeltas: [], speechDeltas: [],
+      toolCalls: Array.from({ length: calls }, (_, i) => ({ name: "", content: `nmap ${i}` })),
+      toolResults: Array.from({ length: results }, () => ({ ok: true, content: "r" })),
+    };
+  }
+  it("returns the unmatched tool call when calls outnumber results", () => {
+    expect(pendingToolCall(st(2, 1))).toEqual({ name: "", content: "nmap 1" });
+  });
+  it("returns null when calls and results balance", () => {
+    expect(pendingToolCall(st(2, 2))).toBeNull();
+  });
+  it("returns null when there are no tool calls", () => {
+    expect(pendingToolCall(st(0, 0))).toBeNull();
   });
 });
