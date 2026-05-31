@@ -1,7 +1,7 @@
 // desktop/renderer/src/panes/DispatchPanel.tsx
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, Loader2, XCircle } from "lucide-react";
-import type { Dispatch } from "@/state/session-store";
+import { pendingToolCall, type Dispatch } from "@/state/session-store";
 import { SubTurnBubble } from "./SubTurnBubble";
 import { useNow } from "@/hooks/useNow";
 import { cn } from "@/lib/utils";
@@ -37,16 +37,24 @@ function trimDetail(value: string): string {
   return oneLine.length > 180 ? `${oneLine.slice(0, 177)}...` : oneLine;
 }
 
+function toolName(content: string): string {
+  return content.trim().split(/\s+/)[0] || "tool";
+}
+
 export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
   const [open, setOpen] = useState(true);
   const subTurns = Array.from(dispatch.subTurns.entries()).sort((a, b) => a[0] - b[0]);
   const activity = latestActivity(dispatch);
+  const activeSubTurn = subTurns.length ? subTurns[subTurns.length - 1] : null; // [num, SubTurn] | null
+  const pending = dispatch.status === "running" && activeSubTurn
+    ? pendingToolCall(activeSubTurn[1])
+    : null;
   const now = useNow(15_000);
   const idleMs =
     dispatch.status === "running" && dispatch.lastActivityAt
       ? now - dispatch.lastActivityAt
       : 0;
-  const isStale = idleMs > IDLE_STALE_MS;
+  const isStale = !pending && idleMs > IDLE_STALE_MS;
   const idleLabel = isStale ? `idle ${Math.floor(idleMs / 60_000)}m` : null;
   const statusColor = dispatch.status === "completed" ? "text-emerald-300"
     : dispatch.status === "error" ? "text-red-300"
@@ -54,6 +62,7 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
   const StatusIcon = dispatch.status === "completed" ? CheckCircle2
     : dispatch.status === "error" ? XCircle
     : dispatch.status === "timeout" ? Clock3
+    : pending ? Loader2
     : isStale ? AlertTriangle
     : activity?.label === "queued on local backend" ? Clock3
       : Loader2;
@@ -80,8 +89,10 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
           <span className="text-fuchsia-300">{dispatch.specialty}</span>
           <span className="text-neutral-600">]</span>
           <span className={cn("ml-2", statusColor)}>{dispatch.status}</span>
-          {activity && <span className="ml-2 text-neutral-500">· {activity.label}</span>}
-          {idleLabel && <span className="ml-2 text-amber-400">· {idleLabel}</span>}
+          {pending
+            ? <span className="ml-2 text-amber-300">· running {toolName(pending.content)}</span>
+            : activity && <span className="ml-2 text-neutral-500">· {activity.label}</span>}
+          {!pending && idleLabel && <span className="ml-2 text-amber-400">· {idleLabel}</span>}
         </span>
         <span className="hidden shrink-0 text-neutral-500 sm:inline">
           {dispatch.cost !== undefined && `$${dispatch.cost.toFixed(4)}`}
@@ -104,6 +115,7 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
               subTurn={st}
               num={n}
               specialty={dispatch.specialty}
+              runningToolIndex={pending && activeSubTurn && n === activeSubTurn[0] ? st.toolResults.length : -1}
             />
           ))}
         </div>

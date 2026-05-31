@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { DispatchPanel } from "./DispatchPanel";
-import type { Dispatch } from "@/state/session-store";
+import type { Dispatch, SubTurn } from "@/state/session-store";
 
 function makeRunningDispatch(lastActivityAt: number): Dispatch {
   return {
@@ -44,6 +44,27 @@ describe("DispatchPanel staleness", () => {
       // lastActivityAt intentionally omitted (historical replay)
     };
     render(<DispatchPanel dispatch={replay} />);
+    expect(screen.queryByText(/idle/i)).toBeNull();
+  });
+});
+
+function dispatchWithPendingTool(lastActivityAt: number): Dispatch {
+  const sub: SubTurn = {
+    thinkingDeltas: [], speechDeltas: [],
+    toolCalls: [{ name: "", content: "nmap -sV 10.10.10.5" }],
+    toolResults: [],
+  };
+  return {
+    id: "dp", specialty: "webrecon", subGoal: "enumerate",
+    status: "running", subTurns: new Map([[1, sub]]), lastActivityAt,
+  };
+}
+
+describe("DispatchPanel running tool", () => {
+  it("shows 'running nmap' and no idle marker even past the stale threshold", () => {
+    vi.setSystemTime(new Date("2026-05-31T18:00:00Z"));
+    render(<DispatchPanel dispatch={dispatchWithPendingTool(Date.now() - 120_000)} />);
+    expect(screen.getByText(/running nmap/i)).toBeTruthy();
     expect(screen.queryByText(/idle/i)).toBeNull();
   });
 });
