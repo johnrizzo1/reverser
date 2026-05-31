@@ -51,9 +51,10 @@ export type Dispatch = {
   specialty: string;
   hypothesisId?: number;
   subGoal: string;
-  status: "running" | "completed" | "error";
+  status: "running" | "completed" | "error" | "timeout";
   cost?: number;
   turnsConsumed?: number;
+  lastActivityAt?: number;             // Date.now() of the last live frame (live WS only)
   subTurns: Map<number, SubTurn>;
 };
 
@@ -325,6 +326,7 @@ export const makeSessionStore = () =>
                 hypothesisId: frame.hypothesis_id,
                 subGoal: frame.sub_goal,
                 status: "running",
+                lastActivityAt: Date.now(),
                 subTurns: new Map(),
               });
               t.dispatches = dispatches;
@@ -340,9 +342,12 @@ export const makeSessionStore = () =>
               }
               dispatches.set(frame.dispatch_id, {
                 ...d,
-                status: frame.status === "completed" ? "completed" : "error",
+                status: frame.status === "completed" ? "completed"
+                      : frame.status === "timeout" ? "timeout"
+                      : "error",
                 cost: frame.cost,
                 turnsConsumed: frame.turns,
+                lastActivityAt: Date.now(),
               });
               t.dispatches = dispatches;
               return { turns };
@@ -368,7 +373,7 @@ export const makeSessionStore = () =>
             else if (frame.phase === "tool_error") st.toolResults = [...st.toolResults, { ok: false, content: frame.content }];
             subTurns.set(frame.sub_turn, st);
 
-            dispatches.set(frame.dispatch_id, { ...d, subTurns });
+            dispatches.set(frame.dispatch_id, { ...d, subTurns, lastActivityAt: Date.now() });
             t.dispatches = dispatches;
             return { turns };
           }
@@ -437,7 +442,9 @@ export const makeSessionStore = () =>
               // dispatch stays "running" and renders a spinner forever.
               try {
                 const meta = JSON.parse(e.content || "{}");
-                d.status = meta.status === "completed" ? "completed" : "error";
+                d.status = meta.status === "completed" ? "completed"
+                         : meta.status === "timeout" ? "timeout"
+                         : "error";
                 if (meta.cost != null) d.cost = meta.cost;
                 if (meta.turns != null) d.turnsConsumed = meta.turns;
               } catch {
@@ -487,6 +494,16 @@ export const makeSessionStore = () =>
       targetName: snapshot.target_name || snapshot.target || "",
     })),
   }));
+
+/** The running dispatch in the current turn, if any (reference-stable). */
+export function selectActiveDispatch(s: SessionState): Dispatch | null {
+  const t = s.turns.get(s.currentTurn);
+  if (!t) return null;
+  for (const d of t.dispatches.values()) {
+    if (d.status === "running") return d;
+  }
+  return null;
+}
 
 const _stores = new Map<string, ReturnType<typeof makeSessionStore>>();
 
