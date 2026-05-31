@@ -208,6 +208,33 @@ class SessionManager:
                 out.append(self._serialize(self.active))
         return out
 
+    def refocus_active(self, target_name: str, new_address) -> bool:
+        """If the active session belongs to target_name, re-point it. Returns True if so."""
+        sess = self.active
+        if sess is None:
+            return False
+        # GUISession wraps AgentSession via ._agent; the canonical target name
+        # is stored in the snapshot's target_name field, which is set from
+        # target_obj.name during AgentSession.from_target (and may be "" for
+        # legacy/resumed sessions that had no Target object).
+        snap_target_name = getattr(
+            getattr(getattr(sess, "_agent", None), "_snapshot", None),
+            "target_name",
+            None,
+        )
+        sess_target = snap_target_name or getattr(
+            getattr(getattr(sess, "_agent", None), "target_obj", None),
+            "name",
+            None,
+        )
+        if sess_target is not None and sess_target != target_name:
+            return False
+        agent = getattr(sess, "_agent", None)
+        if agent is None or not hasattr(agent, "refocus_address"):
+            return False
+        agent.refocus_address(new_address)
+        return True
+
     @staticmethod
     def _serialize(gs: GUISession) -> dict[str, Any]:
         s = gs.stats
