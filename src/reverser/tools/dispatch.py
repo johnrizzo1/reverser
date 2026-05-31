@@ -8,7 +8,7 @@ helpers around an SDK Task call (see Task 13).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 import json as _json
 import os as _os
@@ -411,16 +411,45 @@ def _dispatch_idle_timeout() -> float:
         return 300.0
 
 
+def _dispatch_tool_timeout() -> float:
+    """Seconds a single in-flight tool call may run before the watchdog aborts the
+    dispatch. Generous (default 1800s / 30 min) so real scans finish, but bounded so a
+    hung MCP server or background task can't wedge the session forever. Override with
+    REVERSER_DISPATCH_TOOL_TIMEOUT; a malformed value falls back to the default."""
+    raw = _os.environ.get("REVERSER_DISPATCH_TOOL_TIMEOUT")
+    if raw is None:
+        return 1800.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 1800.0
+
+
 async def _aiter_with_idle_timeout(
-    agen: AsyncIterator, idle_seconds: float
+    agen: AsyncIterator,
+    idle_seconds: float,
+    *,
+    tool_seconds: float | None = None,
+    is_tool_pending: Callable[[], bool] | None = None,
 ) -> AsyncIterator:
-    """Yield from ``agen``, raising ``_DispatchStalled`` if any single step
-    idles longer than ``idle_seconds``. Best-effort closes the underlying
-    iterator on stall so the specialist subprocess/generator is not leaked."""
+    """Yield from ``agen``, raising ``_DispatchStalled`` if any single step idles
+    longer than the active window. While a tool call is outstanding
+    (``is_tool_pending()`` true and ``tool_seconds`` given), the generous
+    ``tool_seconds`` window applies so a legitimately long tool is not aborted;
+    otherwise the short ``idle_seconds`` window applies. Best-effort closes the
+    underlying iterator on stall so the specialist generator is not leaked."""
     it = agen.__aiter__()
     while True:
+        if (
+            is_tool_pending is not None
+            and tool_seconds is not None
+            and is_tool_pending()
+        ):
+            timeout = tool_seconds
+        else:
+            timeout = idle_seconds
         try:
-            item = await asyncio.wait_for(it.__anext__(), idle_seconds)
+            item = await asyncio.wait_for(it.__anext__(), timeout)
         except StopAsyncIteration:
             return
         except asyncio.TimeoutError:
@@ -428,7 +457,7 @@ async def _aiter_with_idle_timeout(
                 await asyncio.wait_for(it.aclose(), 30)
             except Exception:
                 pass
-            raise _DispatchStalled(idle_seconds)
+            raise _DispatchStalled(timeout)
         yield item
 
 

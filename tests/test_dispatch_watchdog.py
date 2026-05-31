@@ -109,3 +109,42 @@ def test_dispatch_times_out_on_stalled_specialist(monkeypatch, tmp_path):
     assert "Partial recon so far" in body          # partial report preserved
     assert "READ THE REPORT BODY BELOW" in body    # advisory shown for timeout
     assert sess._snapshot.in_flight is None         # finally ran
+
+
+from reverser.tools.dispatch import _dispatch_tool_timeout
+
+
+def test_tool_timeout_reads_env(monkeypatch):
+    monkeypatch.delenv("REVERSER_DISPATCH_TOOL_TIMEOUT", raising=False)
+    assert _dispatch_tool_timeout() == 1800.0
+    monkeypatch.setenv("REVERSER_DISPATCH_TOOL_TIMEOUT", "42.5")
+    assert _dispatch_tool_timeout() == 42.5
+    monkeypatch.setenv("REVERSER_DISPATCH_TOOL_TIMEOUT", "garbage")
+    assert _dispatch_tool_timeout() == 1800.0
+
+
+async def test_pending_tool_uses_tool_window_not_idle():
+    """When a tool is pending, a gap shorter than tool_seconds but longer than
+    idle_seconds must NOT raise — the long tool budget applies."""
+    async def gen():
+        yield 0
+        await asyncio.sleep(0.4)   # > idle (0.2), < tool (2.0)
+        yield 1
+
+    result = await _collect(_aiter_with_idle_timeout(
+        gen(), 0.2, tool_seconds=2.0, is_tool_pending=lambda: True,
+    ))
+    assert result == [0, 1]
+
+
+async def test_no_pending_tool_uses_idle_window():
+    """When no tool is pending, the short idle window applies and a long gap raises."""
+    async def gen():
+        yield 0
+        await asyncio.sleep(2)     # > idle (0.2)
+        yield 1
+
+    with pytest.raises(_DispatchStalled):
+        await _collect(_aiter_with_idle_timeout(
+            gen(), 0.2, tool_seconds=5.0, is_tool_pending=lambda: False,
+        ))
