@@ -53,7 +53,7 @@ export function SessionStatusBar({ sessionId }: { sessionId: string }) {
             {status}
           </span>
           {status === "running" && activeDispatch && (
-            <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-fuchsia-500/25 bg-fuchsia-500/10 px-2 py-1 text-fuchsia-200">
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-fuchsia-500/25 bg-fuchsia-500/10 px-2 py-1 font-medium text-fuchsia-200">
               <Boxes className="h-3.5 w-3.5" />
               {activeDispatch.specialty}
               {activeSubTurn > 0 && <span className="text-fuchsia-300/70">· sub-turn {activeSubTurn}</span>}
