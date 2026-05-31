@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
+  refocusTarget,
   type HealthResponse,
   type ProfilesResponse,
   type BackendsResponse,
@@ -18,6 +19,8 @@ import {
   type ReportResponse,
   type ExportReportResponse,
   type ScreenshotsResponse,
+  type RefocusBody,
+  type RefocusResponse,
 } from "./client";
 import { useConnection } from "@/state/connection";
 
@@ -365,3 +368,17 @@ export function useDeleteTarget() {
     },
   });
 }
+
+export function useRefocusTarget(name: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RefocusBody) => refocusTarget(name, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["target-detail", name] });
+      qc.invalidateQueries({ queryKey: ["targets-summary"] });
+      qc.invalidateQueries({ queryKey: ["kb", name] });
+    },
+  });
+}
+
+export type { RefocusBody, RefocusResponse };

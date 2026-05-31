@@ -9,6 +9,8 @@
  */
 import { useState } from "react";
 import { useTargetsSummary, useTarget, type AddressDto } from "@/state/targets-store";
+import { useRefocusTarget, type RefocusResponse } from "@/api/queries";
+import { ApiError } from "@/api/client";
 import { cn } from "@/lib/utils";
 
 export function TargetsPane(): React.JSX.Element {
@@ -165,6 +167,120 @@ function TargetDetail({ name }: { name: string }): React.JSX.Element {
           ))}
         </tbody>
       </table>
+
+      <RefocusForm targetName={target.name} />
+    </div>
+  );
+}
+
+// ---- Refocus / Change IP form ----
+
+function RefocusForm({ targetName }: { targetName: string }): React.JSX.Element {
+  const [newIp, setNewIp] = useState("");
+  const [forceScope, setForceScope] = useState(false);
+  const [showForce, setShowForce] = useState(false);
+  const [result, setResult] = useState<RefocusResponse | null>(null);
+
+  const { mutateAsync, isPending, error, reset } = useRefocusTarget(targetName);
+
+  async function submit(force: boolean) {
+    if (!newIp.trim()) return;
+    reset();
+    setResult(null);
+    setShowForce(false);
+    setForceScope(false);
+    try {
+      const res = await mutateAsync({ new_ip: newIp.trim(), force_scope: force || undefined });
+      setResult(res);
+      setNewIp("");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setShowForce(true);
+      }
+    }
+  }
+
+  const errMsg =
+    error && !(error instanceof ApiError && error.status === 409)
+      ? ((error as ApiError).body as { detail?: string } | null)?.detail ??
+        (error as Error).message
+      : null;
+
+  return (
+    <div className="mt-5 border-t border-neutral-800 pt-4">
+      <h4 className="text-xs uppercase tracking-wide text-neutral-500 mb-2">
+        Refocus / Change IP
+      </h4>
+
+      <div className="flex gap-2 items-center">
+        <input
+          type="text"
+          value={newIp}
+          onChange={(e) => setNewIp(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(forceScope); }}
+          placeholder="New IP address"
+          className={cn(
+            "flex-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1",
+            "text-xs text-neutral-200 placeholder-neutral-600 focus:outline-none",
+            "focus:border-neutral-500",
+          )}
+        />
+        <button
+          onClick={() => submit(forceScope)}
+          disabled={isPending || !newIp.trim()}
+          className={cn(
+            "px-3 py-1 rounded text-xs font-medium transition-colors",
+            "bg-neutral-700 hover:bg-neutral-600 text-neutral-100",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+          )}
+        >
+          {isPending ? "Refocusing…" : "Refocus"}
+        </button>
+      </div>
+
+      {showForce && (
+        <div className="mt-2 flex items-center gap-2 text-xs text-amber-400">
+          <span>New IP may be out of scope.</span>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={forceScope}
+              onChange={(e) => setForceScope(e.target.checked)}
+              className="accent-amber-400"
+            />
+            Force (override scope check)
+          </label>
+          <button
+            onClick={() => submit(true)}
+            disabled={isPending}
+            className="px-2 py-0.5 rounded bg-amber-700 hover:bg-amber-600 text-white disabled:opacity-50"
+          >
+            Retry with force
+          </button>
+        </div>
+      )}
+
+      {errMsg && (
+        <div className="mt-2 text-xs text-red-400">{errMsg}</div>
+      )}
+
+      {result && (
+        <div className="mt-2 text-xs text-neutral-400 space-y-0.5">
+          <div>
+            Remapped:{" "}
+            <span className="font-mono text-neutral-200">{result.old_ip}</span>
+            {" → "}
+            <span className="font-mono text-green-400">{result.new_ip}</span>
+            {" "}({result.rows_remapped} KB row{result.rows_remapped !== 1 ? "s" : ""})
+          </div>
+          {result.session_refocused && (
+            <div className="text-sky-400">Active session address updated.</div>
+          )}
+          {result.scope_warning && (
+            <div className="text-amber-400">{result.scope_warning}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

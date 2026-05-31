@@ -246,3 +246,28 @@ export type ScreenshotsResponse = {
   finding_id: string;
   screenshots: ScreenshotEntry[];
 };
+
+// ---- Refocus / Change IP ----
+
+export type RefocusBody = {
+  new_ip: string;
+  hostname?: string;
+  update_etc_hosts?: boolean;
+  force_scope?: boolean;
+};
+
+export type RefocusResponse = {
+  target: string;
+  old_ip: string;
+  new_ip: string;
+  rows_remapped: number;
+  hostname_updated: boolean;
+  scope_warning: string | null;
+  session_refocused: boolean;
+  new_address_id: string;
+};
+
+/** POST /api/targets/{name}/refocus — remap all KB rows to a new IP address. */
+export function refocusTarget(name: string, body: RefocusBody): Promise<RefocusResponse> {
+  return request<RefocusResponse>("POST", `/api/targets/${encodeURIComponent(name)}/refocus`, body);
+}
