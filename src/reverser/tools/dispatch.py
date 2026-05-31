@@ -131,20 +131,58 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
+_MD_OUTCOME = re.compile(
+    r"###\s+Hypothesis\s+outcome\s*\n(.+?)(?=\n###|\Z)", re.IGNORECASE | re.DOTALL
+)
+_OUTCOME_KEYWORDS = {
+    "confirmed": "confirmed",
+    "refuted": "refuted",
+    "inconclusive": "inconclusive",
+}
+
+
+def _outcome_from_markdown(text: str) -> str | None:
+    """Extract the outcome from the markdown '### Hypothesis outcome' section.
+
+    Returns a normalized outcome string, or None if the section is absent.
+    A present-but-unrecognized section defaults to 'inconclusive'.
+    """
+    m = _MD_OUTCOME.search(text or "")
+    if not m:
+        return None
+    body = m.group(1).strip().lower()
+    if not body:
+        return "inconclusive"
+    for keyword, value in _OUTCOME_KEYWORDS.items():
+        if keyword in body:
+            return value
+    return "inconclusive"
+
+
 def parse_dispatch_report(text: str):
     """Return (outcome, model_or_None, error_text_or_None).
 
-    outcome is the validated hypothesis_outcome string, or 'inconclusive' on any
-    failure (defensive — the lead can re-dispatch).
+    Prefers a validated JSON block (which also yields the structured model);
+    falls back to the markdown '### Hypothesis outcome' section so a specialist
+    that emits only markdown is still parsed correctly. ``error_text`` is None
+    whenever an outcome was derived (JSON or markdown) — a missing JSON block is
+    NOT a failure and must not trigger re-running the specialist. Only when
+    neither a JSON block nor a markdown outcome section is present do we return a
+    non-None error (with the defensive 'inconclusive' default).
     """
     obj = _extract_json(text)
-    if obj is None:
-        return "inconclusive", None, "No JSON dispatch report block found."
-    outcome = validate_args(DispatchReportModel, obj)
-    if not outcome.ok:
-        return "inconclusive", None, outcome.error_text
-    m = outcome.value
-    return m.hypothesis_outcome.value, m, None
+    if obj is not None:
+        result = validate_args(DispatchReportModel, obj)
+        if result.ok:
+            return result.value.hypothesis_outcome.value, result.value, None
+    md_outcome = _outcome_from_markdown(text)
+    if md_outcome is not None:
+        return md_outcome, None, None
+    return (
+        "inconclusive",
+        None,
+        "No dispatch outcome found (no JSON block and no '### Hypothesis outcome' section).",
+    )
 
 
 def _promote_status(subprocess_status: str, report_model) -> str:
@@ -155,63 +193,6 @@ def _promote_status(subprocess_status: str, report_model) -> str:
     ):
         return "partial"
     return subprocess_status
-
-
-# ── Bounded emit+repair for the dispatch JSON contract ──────────────
-
-_MAX_DISPATCH_REPAIR = 2
-
-
-def _repair_prompt(report_text: str, errors: str) -> str:
-    """Build a cheap re-emit prompt that embeds the already-produced report.
-
-    Specialist dispatches are one-shot (not resumable sessions), so the repair
-    prompt embeds the prior report and asks ONLY for the JSON block — it must
-    NOT trigger re-investigation.
-    """
-    return (
-        "Your previous report was missing the mandatory machine-readable "
-        "JSON block (or it was invalid). Do NOT investigate further. "
-        "Here is the report you produced:\n\n"
-        f"{report_text}\n\n"
-        "Re-emit your report, and end your message with EXACTLY one fenced "
-        "```json block matching this schema (no prose after it):\n"
-        '{"tldr": "...", "findings": ["..."], '
-        '"hypothesis_outcome": "confirmed|refuted|inconclusive", '
-        '"kb_writes": ["..."], "follow_up": ["..."], '
-        '"status": "success|partial|error"}\n\n'
-        f"Validation errors from last attempt:\n{errors}"
-    )
-
-
-async def _run_with_repair(
-    run_specialist,
-    sub_goal: str,
-    *,
-    max_repair: int = _MAX_DISPATCH_REPAIR,
-    is_failed_status,
-    on_repair=None,
-):
-    """Run specialist, then re-prompt up to ``max_repair`` times if the JSON
-    block is missing/invalid.
-
-    ``run_specialist`` is an async callable ``(prompt) -> report_text``.
-    ``is_failed_status() -> bool`` tells whether the subprocess status is a hard
-    failure (no point repairing). ``on_repair(attempt)`` is an optional callback
-    invoked before each repair attempt (e.g. to emit a TUI event).
-
-    Returns ``(report_text, outcome, report_model, repaired: int)``.
-    """
-    report_text = await run_specialist(sub_goal)
-    outcome, model, errors = parse_dispatch_report(report_text)
-    attempts = 0
-    while errors is not None and attempts < max_repair and not is_failed_status():
-        attempts += 1
-        if on_repair is not None:
-            on_repair(attempts)
-        report_text = await run_specialist(_repair_prompt(report_text, errors))
-        outcome, model, errors = parse_dispatch_report(report_text)
-    return report_text, outcome, model, attempts
 
 
 # ── dispatch_specialist tool ────────────────────────────────────────
@@ -614,32 +595,12 @@ async def dispatch_specialist(args: dict) -> dict:
 
     _emit_start()
     try:
-        def _on_repair(attempt: int) -> None:
-            _emit(
-                "thinking",
-                f"Specialist report missing/invalid JSON block; requesting "
-                f"reformat (attempt {attempt}/{_MAX_DISPATCH_REPAIR})",
-            )
-
-        report_text, outcome, report_model, _repaired = await _run_with_repair(
-            _run_specialist,
-            sub_goal,
-            max_repair=_MAX_DISPATCH_REPAIR,
-            is_failed_status=lambda: status in (
-                "error", "budget_exhausted", "turn_limit"
-            ),
-            on_repair=_on_repair,
-        )
-        # parse_dispatch_report already ran inside _run_with_repair; re-derive
-        # the final parse errors to decide whether we exhausted repairs.
-        _outcome2, _model2, parse_errors = parse_dispatch_report(report_text)
-        if parse_errors is not None:
-            # Exhausted (or run hard-failed): degrade but keep the
-            # human-readable report so the lead still sees it.
-            outcome = "inconclusive"
-            report_model = None
-            if status not in ("error", "budget_exhausted", "turn_limit"):
-                status = "partial"
+        # Run the specialist ONCE. parse_dispatch_report recovers the outcome
+        # from the JSON block if present, else from the markdown report — so a
+        # missing JSON block is not a failure and we never re-run the specialist
+        # (re-running tripled dispatch time without reliably producing JSON).
+        report_text = await _run_specialist(sub_goal)
+        outcome, report_model, _parse_errors = parse_dispatch_report(report_text)
 
         # ── Status: partial promotion (per spec D4) ──────────────────
         # If subprocess errored but the validated JSON report carries
