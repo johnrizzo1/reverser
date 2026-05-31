@@ -425,20 +425,48 @@ export const makeSessionStore = () =>
               t.dispatches.set(dispatchId, d);
               t.ordering.push({ kind: "dispatch", id: dispatchId });
             }
-            const subTurn = e.sub_turn ?? 1;
-            let st = d.subTurns.get(subTurn);
-            if (!st) {
-              st = { thinkingDeltas: [], speechDeltas: [], toolCalls: [], toolResults: [] };
-              d.subTurns.set(subTurn, st);
+            if (e.phase === "start") {
+              // start payload carries the dispatch metadata
+              try {
+                const meta = JSON.parse(e.content || "{}");
+                if (meta.sub_goal) d.subGoal = meta.sub_goal;
+                if (meta.hypothesis_id != null) d.hypothesisId = meta.hypothesis_id;
+              } catch { /* ignore malformed start payload */ }
+            } else if (e.phase === "end") {
+              // end payload finalizes the dispatch — without this the replayed
+              // dispatch stays "running" and renders a spinner forever.
+              try {
+                const meta = JSON.parse(e.content || "{}");
+                d.status = meta.status === "completed" ? "completed" : "error";
+                if (meta.cost != null) d.cost = meta.cost;
+                if (meta.turns != null) d.turnsConsumed = meta.turns;
+              } catch {
+                d.status = "error";
+              }
+            } else {
+              const subTurn = e.sub_turn ?? 1;
+              let st = d.subTurns.get(subTurn);
+              if (!st) {
+                st = { thinkingDeltas: [], speechDeltas: [], toolCalls: [], toolResults: [] };
+                d.subTurns.set(subTurn, st);
+              }
+              if (e.phase === "thinking") st.thinkingDeltas.push(e.content);
+              else if (e.phase === "text") st.speechDeltas.push(e.content);
+              else if (e.phase === "tool_call") st.toolCalls.push({ name: "", content: e.content });
+              else if (e.phase === "tool_result") st.toolResults.push({ ok: true, content: e.content });
+              else if (e.phase === "tool_error") st.toolResults.push({ ok: false, content: e.content });
             }
-            if (e.phase === "thinking") st.thinkingDeltas.push(e.content);
-            else if (e.phase === "text") st.speechDeltas.push(e.content);
-            else if (e.phase === "tool_call") st.toolCalls.push({ name: "", content: e.content });
-            else if (e.phase === "tool_result") st.toolResults.push({ ok: true, content: e.content });
-            else if (e.phase === "tool_error") st.toolResults.push({ ok: false, content: e.content });
           }
         }
         for (const [turnNum, turn] of turns) {
+          // A replay is historical — nothing is actually running. Any dispatch
+          // still "running" here was interrupted (no end event was logged), so
+          // finalize it to a terminal state instead of spinning forever.
+          for (const [did, d] of turn.dispatches) {
+            if (d.status === "running") {
+              turn.dispatches.set(did, { ...d, status: "error" });
+            }
+          }
           turns.set(turnNum, { ...turn, status: "done" });
         }
         return { turns, currentTurn, replayed: true };

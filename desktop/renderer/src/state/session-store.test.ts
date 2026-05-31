@@ -349,4 +349,42 @@ describe("seedFromSessionLog", () => {
     expect(t.userMessage).toBe("please decode the flag");
     expect(t.speechDeltas).toEqual(["I will decode it."]);
   });
+
+  it("dispatch: start + sub-event + end collapse into ONE completed dispatch (no spinner on resume)", () => {
+    const store = makeSessionStore();
+    store.getState().seedFromSessionLog([
+      { kind: "turn", turn: 1, ts: null } as any,
+      { kind: "dispatch", dispatch_id: "d1", sub_turn: 0, phase: "start",
+        specialty: "pentest",
+        content: JSON.stringify({ hypothesis_id: 3, sub_goal: "enumerate dirs" }), ts: null } as any,
+      { kind: "dispatch", dispatch_id: "d1", sub_turn: 1, phase: "tool_call",
+        specialty: "pentest", content: "ffuf -u ...", ts: null } as any,
+      { kind: "dispatch", dispatch_id: "d1", sub_turn: 1, phase: "end",
+        specialty: "pentest",
+        content: JSON.stringify({ status: "completed", cost: 0.12, turns: 4 }), ts: null } as any,
+    ]);
+    const t = store.getState().turns.get(1)!;
+    // correlated by dispatch_id — NOT split into one synthetic dispatch per event
+    expect(t.dispatches.size).toBe(1);
+    const d = t.dispatches.get("d1")!;
+    expect(d.status).toBe("completed");   // the killer assertion: not "running"
+    expect(d.subGoal).toBe("enumerate dirs");  // start content parsed
+    expect(d.cost).toBe(0.12);
+    expect(d.turnsConsumed).toBe(4);
+  });
+
+  it("dispatch: interrupted (start, no end) is finalized to a terminal state, not left running", () => {
+    const store = makeSessionStore();
+    store.getState().seedFromSessionLog([
+      { kind: "turn", turn: 1, ts: null } as any,
+      { kind: "dispatch", dispatch_id: "d9", sub_turn: 0, phase: "start",
+        specialty: "webrecon",
+        content: JSON.stringify({ hypothesis_id: null, sub_goal: "scan" }), ts: null } as any,
+      { kind: "dispatch", dispatch_id: "d9", sub_turn: 1, phase: "tool_call",
+        specialty: "webrecon", content: "nmap ...", ts: null } as any,
+    ]);
+    const d = store.getState().turns.get(1)!.dispatches.get("d9")!;
+    // after a resume nothing is actually running — must not spin
+    expect(d.status).not.toBe("running");
+  });
 });

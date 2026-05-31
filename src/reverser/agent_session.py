@@ -329,6 +329,9 @@ class AgentSession:
         # Take ownership: mark snapshot active with our pid
         snap.state = "active"
         snap.pid = os.getpid()
+        # A resumed session has no dispatch running: if one was in flight when
+        # the prior process exited, clear it so it isn't treated as active.
+        snap.in_flight = None
         self._snapshot = snap
         save_snapshot(self._snapshot)
 

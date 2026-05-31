@@ -67,6 +67,42 @@ def test_session_init_resumed_restores_state_from_snapshot(tmp_path, monkeypatch
     assert sess._snapshot.pid == os.getpid()
 
 
+def test_session_init_resumed_clears_in_flight_dispatch(tmp_path, monkeypatch):
+    """A dispatch in flight when the prior process exited must be cleared on
+    resume — nothing is actually running, so it must not look active."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    from reverser.profiles import get_profile
+    from reverser.tui.session import AgentSession
+    from reverser.sessions import (
+        SessionSnapshot, SessionConfig, SessionStats, InFlightDispatch, save,
+    )
+
+    snap = SessionSnapshot(
+        session_id="2026-05-09T14-23-00",
+        target="10.10.10.5",
+        log_path="logs/test.jsonl",
+        state="stopped",
+        started_at="2026-05-09T14:23:00",
+        last_active_at="2026-05-09T18:47:00",
+        config=SessionConfig(profile="general", budget=10.0, max_turns=100),
+        stats=SessionStats(total_cost=0.0, turns=1),
+        conversation=[],
+        in_flight=InFlightDispatch(
+            kind="dispatch", specialty="pentest", hypothesis_id=1,
+            sub_goal="enum dirs", started_at="2026-05-09T18:46:00",
+        ),
+    )
+    save(snap)
+
+    sess = AgentSession(
+        binary_path="ignored-on-resume",
+        profile=get_profile("general"),
+        resume_from=snap,
+    )
+
+    assert sess._snapshot.in_flight is None
+
+
 def test_session_init_resumed_continues_writing_to_same_log(tmp_path, monkeypatch):
     """The resumed session reuses the snapshot's log_path; doesn't mint a new one."""
     monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
