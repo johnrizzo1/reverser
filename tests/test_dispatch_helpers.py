@@ -91,90 +91,47 @@ def test_parse_dispatch_report_invalid_returns_errors():
     assert outcome == "inconclusive"   # defensive default
 
 
-# ── bounded emit+repair loop ─────────────────────────────────────────
+# ── markdown fallback for outcome parsing ────────────────────────────
+# Specialists reliably emit markdown but often omit the JSON block, so
+# parse_dispatch_report must recover the outcome from the markdown
+# "### Hypothesis outcome" section WITHOUT treating its absence as a failure
+# (a missing JSON block must NOT trigger re-running the specialist).
 
 
-@pytest.mark.asyncio
-async def test_run_with_repair_succeeds_first_try():
-    from reverser.tools.dispatch import _run_with_repair
-    good = '```json\n{"tldr":"t","hypothesis_outcome":"confirmed","status":"success"}\n```'
-    calls = []
-
-    async def run(p):
-        calls.append(p)
-        return good
-
-    text, outcome, model, repaired = await _run_with_repair(
-        run, "goal", max_repair=2, is_failed_status=lambda: False
+def test_parse_dispatch_report_prefers_json_block():
+    from reverser.tools.dispatch import parse_dispatch_report
+    text = (
+        "### Hypothesis outcome\nINCONCLUSIVE\n\n"
+        '```json\n{"tldr":"t","hypothesis_outcome":"confirmed","status":"success"}\n```'
     )
-    assert repaired == 0 and outcome == "confirmed" and len(calls) == 1
+    outcome, model, errors = parse_dispatch_report(text)
+    assert outcome == "confirmed" and model is not None and errors is None
 
 
-@pytest.mark.asyncio
-async def test_run_with_repair_recovers_on_second_attempt():
-    from reverser.tools.dispatch import _run_with_repair
-    good = '```json\n{"tldr":"t","hypothesis_outcome":"refuted","status":"success"}\n```'
-    seq = ["no json here", good]
-
-    async def run(p):
-        return seq.pop(0)
-
-    text, outcome, model, repaired = await _run_with_repair(
-        run, "goal", max_repair=2, is_failed_status=lambda: False
+def test_parse_dispatch_report_falls_back_to_markdown_outcome():
+    from reverser.tools.dispatch import parse_dispatch_report
+    text = (
+        "## TL;DR\nFound it.\n\n"
+        "### Hypothesis outcome\nCONFIRMED — creds work over SMB.\n\n"
+        "### KB writes\n- Finding: weak SMB signing\n"
     )
-    assert repaired == 1 and outcome == "refuted" and model is not None
+    outcome, model, errors = parse_dispatch_report(text)
+    # markdown outcome recovered, no JSON block needed, NOT treated as a failure
+    assert outcome == "confirmed"
+    assert model is None
+    assert errors is None
 
 
-@pytest.mark.asyncio
-async def test_run_with_repair_exhausts_and_returns_errors():
-    from reverser.tools.dispatch import _run_with_repair
-
-    async def run(p):
-        return "never any json"
-
-    text, outcome, model, repaired = await _run_with_repair(
-        run, "goal", max_repair=2, is_failed_status=lambda: False
-    )
-    assert repaired == 2 and model is None  # caller degrades to inconclusive/partial
+def test_parse_dispatch_report_markdown_refuted():
+    from reverser.tools.dispatch import parse_dispatch_report
+    outcome, model, errors = parse_dispatch_report("### Hypothesis outcome\nREFUTED\n")
+    assert outcome == "refuted" and errors is None
 
 
-@pytest.mark.asyncio
-async def test_run_with_repair_skips_when_status_failed():
-    from reverser.tools.dispatch import _run_with_repair
-
-    async def run(p):
-        return "no json"
-
-    text, outcome, model, repaired = await _run_with_repair(
-        run, "goal", max_repair=2, is_failed_status=lambda: True
-    )
-    assert repaired == 0  # don't waste budget repairing a failed run
-
-
-@pytest.mark.asyncio
-async def test_run_with_repair_invokes_on_repair_callback():
-    from reverser.tools.dispatch import _run_with_repair
-    good = '```json\n{"tldr":"t","hypothesis_outcome":"confirmed","status":"success"}\n```'
-    seq = ["no json", "still no json", good]
-    seen = []
-
-    async def run(p):
-        return seq.pop(0)
-
-    text, outcome, model, repaired = await _run_with_repair(
-        run, "goal", max_repair=2, is_failed_status=lambda: False,
-        on_repair=lambda a: seen.append(a),
-    )
-    assert repaired == 2 and seen == [1, 2] and outcome == "confirmed"
-
-
-def test_repair_prompt_embeds_report_and_errors():
-    from reverser.tools.dispatch import _repair_prompt
-    p = _repair_prompt("PRIOR REPORT BODY", "missing tldr")
-    assert "PRIOR REPORT BODY" in p
-    assert "missing tldr" in p
-    assert "Do NOT investigate further" in p
-    assert "```json" in p
+def test_parse_dispatch_report_no_outcome_anywhere():
+    from reverser.tools.dispatch import parse_dispatch_report
+    outcome, model, errors = parse_dispatch_report("just some prose, no sections")
+    assert outcome == "inconclusive" and model is None and errors is not None
 
 
 def test_promote_status_error_with_empty_model_stays_error():
