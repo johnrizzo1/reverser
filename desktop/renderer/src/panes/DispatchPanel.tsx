@@ -47,7 +47,7 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
       ? now - dispatch.lastActivityAt
       : 0;
   const isStale = idleMs > IDLE_STALE_MS;
-  const idleLabel = isStale ? `idle ${Math.round(idleMs / 60_000)}m` : null;
+  const idleLabel = isStale ? `idle ${Math.floor(idleMs / 60_000)}m` : null;
   const statusColor = dispatch.status === "completed" ? "text-emerald-300"
     : dispatch.status === "error" ? "text-red-300"
     : "text-amber-300";

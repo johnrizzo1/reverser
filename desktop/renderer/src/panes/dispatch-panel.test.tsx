@@ -35,4 +35,15 @@ describe("DispatchPanel staleness", () => {
     render(<DispatchPanel dispatch={d} />);
     expect(screen.getByText("timeout")).toBeTruthy();
   });
+
+  it("does not show a stall indicator for a running dispatch with no lastActivityAt (replay)", () => {
+    vi.setSystemTime(new Date("2026-05-31T18:00:00Z"));
+    const replay: Dispatch = {
+      id: "d3", specialty: "webrecon", subGoal: "enumerate",
+      status: "running", subTurns: new Map(),
+      // lastActivityAt intentionally omitted (historical replay)
+    };
+    render(<DispatchPanel dispatch={replay} />);
+    expect(screen.queryByText(/idle/i)).toBeNull();
+  });
 });
