@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useStore } from "zustand";
-import { Activity, ChevronDown, ChevronRight, CircleDot, Gauge, Target } from "lucide-react";
-import { getSessionStore, type LLMStatus } from "@/state/session-store";
+import { Activity, Boxes, ChevronDown, ChevronRight, CircleDot, Gauge, Target } from "lucide-react";
+import { getSessionStore, selectActiveDispatch, type LLMStatus } from "@/state/session-store";
 import { useProfiles, useSessions } from "@/api/queries";
 import { SessionConfigPanel } from "./SessionConfigPanel";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,10 @@ export function SessionStatusBar({ sessionId }: { sessionId: string }) {
   const status = useStore(store, (s) => s.status);
   const budget = useStore(store, (s) => s.budget);
   const llmStatus = useStore(store, (s) => s.llmStatus);
+  const activeDispatch = useStore(store, selectActiveDispatch);
+  const activeSubTurn = activeDispatch
+    ? Math.max(0, ...[...activeDispatch.subTurns.keys()], 0)
+    : 0;
   const sessions = useSessions();
   const profiles = useProfiles();
   const row = sessions.data?.sessions.find((s) => s.id === sessionId);
@@ -48,6 +52,13 @@ export function SessionStatusBar({ sessionId }: { sessionId: string }) {
             <CircleDot className="h-3.5 w-3.5" />
             {status}
           </span>
+          {status === "running" && activeDispatch && (
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-fuchsia-500/25 bg-fuchsia-500/10 px-2 py-1 font-medium text-fuchsia-200">
+              <Boxes className="h-3.5 w-3.5" />
+              {activeDispatch.specialty}
+              {activeSubTurn > 0 && <span className="text-fuchsia-300/70">· sub-turn {activeSubTurn}</span>}
+            </span>
+          )}
           <span className="h-4 w-px bg-neutral-800" />
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-neutral-100">
             <Target className="h-3.5 w-3.5 shrink-0 text-cyan-300/80" />

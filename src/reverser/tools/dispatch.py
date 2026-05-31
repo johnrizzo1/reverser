@@ -8,8 +8,10 @@ helpers around an SDK Task call (see Task 13).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 import json as _json
+import os as _os
 import re
 import threading
 
@@ -384,6 +386,81 @@ async def _unserialized_dispatch_slot():
     yield
 
 
+class _DispatchStalled(Exception):
+    """Raised when a dispatched specialist emits no event within the idle window."""
+
+    def __init__(self, idle_seconds: float):
+        self.idle_seconds = idle_seconds
+        super().__init__(
+            f"specialist produced no event within {idle_seconds}s idle window"
+        )
+
+
+def _dispatch_idle_timeout() -> float:
+    """Seconds of sub-agent silence before the stall watchdog aborts a dispatch.
+
+    Default 300s (5 min); override with REVERSER_DISPATCH_IDLE_TIMEOUT. A
+    malformed value falls back to the default rather than crashing a dispatch.
+    """
+    raw = _os.environ.get("REVERSER_DISPATCH_IDLE_TIMEOUT")
+    if raw is None:
+        return 300.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 300.0
+
+
+def _dispatch_tool_timeout() -> float:
+    """Seconds a single in-flight tool call may run before the watchdog aborts the
+    dispatch. Generous (default 1800s / 30 min) so real scans finish, but bounded so a
+    hung MCP server or background task can't wedge the session forever. Override with
+    REVERSER_DISPATCH_TOOL_TIMEOUT; a malformed value falls back to the default."""
+    raw = _os.environ.get("REVERSER_DISPATCH_TOOL_TIMEOUT")
+    if raw is None:
+        return 1800.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 1800.0
+
+
+async def _aiter_with_idle_timeout(
+    agen: AsyncIterator,
+    idle_seconds: float,
+    *,
+    tool_seconds: float | None = None,
+    is_tool_pending: Callable[[], bool] | None = None,
+) -> AsyncIterator:
+    """Yield from ``agen``, raising ``_DispatchStalled`` if any single step idles
+    longer than the active window. While a tool call is outstanding
+    (``is_tool_pending()`` true and ``tool_seconds`` given), the generous
+    ``tool_seconds`` window applies so a legitimately long tool is not aborted;
+    otherwise the short ``idle_seconds`` window applies. Best-effort closes the
+    underlying iterator on stall so the specialist generator is not leaked."""
+    it = agen.__aiter__()
+    while True:
+        if (
+            is_tool_pending is not None
+            and tool_seconds is not None
+            and is_tool_pending()
+        ):
+            timeout = tool_seconds
+        else:
+            timeout = idle_seconds
+        try:
+            item = await asyncio.wait_for(it.__anext__(), timeout)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            try:
+                await asyncio.wait_for(it.aclose(), 30)
+            except Exception:
+                pass
+            raise _DispatchStalled(timeout)
+        yield item
+
+
 _DISPATCHABLE_SPECIALTIES = (
     "pentest", "ad", "webpentest", "webapi", "webrecon",
     "exploit",
@@ -535,8 +612,20 @@ async def dispatch_specialist(args: dict) -> dict:
     import json as _json
     dispatch_id = _uuid.uuid4().hex
     _sub_turn = [0]
+    # In-flight tool-call count, read by the stall watchdog so it applies the
+    # generous tool window (not the short idle window) while a tool runs. Updated
+    # before the sess guard below so it stays accurate even without a session.
+    # Tradeoff: if a backend emits a "tool_call" whose matching tool_result/error
+    # is never emitted (e.g. an `event.kind == "error"` aborts mid-tool), the count
+    # stays >0 and a *subsequent* hang waits the tool window instead of the idle
+    # window. Bounded by the tool-timeout ceiling, so it can't hang forever.
+    _pending_tools = [0]
 
     def _emit(kind: str, content: str) -> None:
+        if kind == "tool_call":
+            _pending_tools[0] += 1
+        elif kind in ("tool_result", "tool_error"):
+            _pending_tools[0] = max(0, _pending_tools[0] - 1)
         if sess is None:
             return
         try:
@@ -561,13 +650,16 @@ async def dispatch_specialist(args: dict) -> dict:
     def _emit_start() -> None:
         if sess is None:
             return
+        payload = _json.dumps({"hypothesis_id": hypothesis_id, "sub_goal": sub_goal})
+        try:
+            sess._slog.log_dispatch_event(
+                specialty, "start", payload, dispatch_id=dispatch_id, sub_turn=0,
+            )
+        except Exception:
+            pass
         try:
             sess.emit_dispatch_event(
-                specialty, dispatch_id, 0, "start",
-                _json.dumps({
-                    "hypothesis_id": hypothesis_id,
-                    "sub_goal": sub_goal,
-                }),
+                specialty, dispatch_id, 0, "start", payload,
             )
         except Exception:
             pass
@@ -575,14 +667,16 @@ async def dispatch_specialist(args: dict) -> dict:
     def _emit_end(status: str, cost: float, turns_consumed: int) -> None:
         if sess is None:
             return
+        payload = _json.dumps({"status": status, "cost": cost, "turns": turns_consumed})
+        try:
+            sess._slog.log_dispatch_event(
+                specialty, "end", payload, dispatch_id=dispatch_id, sub_turn=0,
+            )
+        except Exception:
+            pass
         try:
             sess.emit_dispatch_event(
-                specialty, dispatch_id, 0, "end",
-                _json.dumps({
-                    "status": status,
-                    "cost": cost,
-                    "turns": turns_consumed,
-                }),
+                specialty, dispatch_id, 0, "end", payload,
             )
         except Exception:
             pass
@@ -626,6 +720,10 @@ async def dispatch_specialist(args: dict) -> dict:
         # produces no text retains the prior attempt's report.
         nonlocal status, cost_usd, turns_consumed, error_msg, report_text
 
+        _idle = _dispatch_idle_timeout()
+        _tool = _dispatch_tool_timeout()
+        _pending = lambda: _pending_tools[0] > 0
+
         if use_session_backend:
             if cfg.backend in _LOCAL_BACKEND_NAMES:
                 _emit("thinking", f"Waiting for local backend slot ({cfg.backend})")
@@ -642,12 +740,17 @@ async def dispatch_specialist(args: dict) -> dict:
                     model=cfg.model,
                     api_base=cfg.api_base,
                 )
-                async for event in backend.run(
-                    prompt=prompt,
-                    system_prompt=full_system_prompt,
-                    max_turns=max_turns,
-                    max_budget_usd=budget_usd,
-                    allowed_tools=sub_allowed_tools,
+                async for event in _aiter_with_idle_timeout(
+                    backend.run(
+                        prompt=prompt,
+                        system_prompt=full_system_prompt,
+                        max_turns=max_turns,
+                        max_budget_usd=budget_usd,
+                        allowed_tools=sub_allowed_tools,
+                    ),
+                    _idle,
+                    tool_seconds=_tool,
+                    is_tool_pending=_pending,
                 ):
                     if event.kind == "turn":
                         _sub_turn[0] = event.turn or event.turns or _sub_turn[0] + 1
@@ -689,7 +792,12 @@ async def dispatch_specialist(args: dict) -> dict:
                         elif event.content and not report_text:
                             report_text = event.content
         else:
-            async for message in query(prompt=prompt, options=options):
+            async for message in _aiter_with_idle_timeout(
+                query(prompt=prompt, options=options),
+                _idle,
+                tool_seconds=_tool,
+                is_tool_pending=_pending,
+            ):
                 if isinstance(message, AssistantMessage):
                     _sub_turn[0] += 1
                     for block in message.content:
@@ -764,6 +872,18 @@ async def dispatch_specialist(args: dict) -> dict:
             )
         except Exception:
             reconcile_actions = []
+    except _DispatchStalled as e:
+        # _aiter_with_idle_timeout raises this when a wrapped specialist
+        # generator (query/backend.run) emits no event within the idle window.
+        status = "timeout"
+        error_msg = (
+            f"specialist produced no output for {e.idle_seconds:g}s — "
+            f"aborted by stall watchdog"
+        )
+        if not report_text:
+            report_text = f"(dispatch aborted: {error_msg})"
+        outcome = "inconclusive"
+        report_model = None
     except Exception as e:
         status = "error"
         error_msg = f"{type(e).__name__}: {e}"
@@ -787,7 +907,7 @@ async def dispatch_specialist(args: dict) -> dict:
         f"**Turns:** {turns_consumed}",
         f"**Outcome:** {outcome or 'unknown'}",
     ]
-    if status == "partial":
+    if status in ("partial", "timeout"):
         summary_lines.append(
             "**Note:** Subprocess exited non-zero but the specialist produced "
             "findings. READ THE REPORT BODY BELOW before deciding next action."

@@ -1,5 +1,5 @@
 // desktop/renderer/src/panes/SubTurnBubble.tsx
-import { Brain, Terminal, CheckCircle2, XCircle, MessageSquare } from "lucide-react";
+import { Brain, Terminal, CheckCircle2, XCircle, MessageSquare, Loader2 } from "lucide-react";
 import type { SubTurn } from "@/state/session-store";
 import { SpeechBlock } from "./SpeechBlock";
 import { cn } from "@/lib/utils";
@@ -17,10 +17,12 @@ export function SubTurnBubble({
   subTurn,
   num,
   specialty,
+  runningToolIndex = -1,
 }: {
   subTurn: SubTurn;
   num: number;
   specialty: string;
+  runningToolIndex?: number;
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-fuchsia-400/20 bg-neutral-950/70 text-xs">
@@ -37,12 +39,26 @@ export function SubTurnBubble({
           </div>
         ))}
         <SpeechBlock deltas={subTurn.speechDeltas} />
-        {subTurn.toolCalls.map((tc, i) => (
-          <div key={`tc-${i}`} className="flex gap-2 font-mono text-cyan-300/90">
-            <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 whitespace-pre-wrap break-words">{tc.content}</span>
-          </div>
-        ))}
+        {subTurn.toolCalls.map((tc, i) => {
+          const running = i === runningToolIndex;
+          return (
+            <div
+              key={`tc-${i}`}
+              className={cn(
+                "flex gap-2 font-mono",
+                running ? "text-amber-200" : "text-cyan-300/90",
+              )}
+            >
+              {running
+                ? <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+                : <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+              <span className="min-w-0 whitespace-pre-wrap break-words">
+                {running && <span className="mr-1 font-medium not-italic text-amber-300">running</span>}
+                {tc.content}
+              </span>
+            </div>
+          );
+        })}
         {subTurn.toolResults.map((tr, i) => (
           <div
             key={`tr-${i}`}

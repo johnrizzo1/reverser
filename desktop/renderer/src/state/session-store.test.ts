@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { makeSessionStore } from "./session-store";
+import { makeSessionStore, selectActiveDispatch, pendingToolCall } from "./session-store";
+import type { SubTurn } from "./session-store";
 
 describe("session-store new shape", () => {
   let store: ReturnType<typeof makeSessionStore>;
@@ -386,5 +387,77 @@ describe("seedFromSessionLog", () => {
     const d = store.getState().turns.get(1)!.dispatches.get("d9")!;
     // after a resume nothing is actually running — must not spin
     expect(d.status).not.toBe("running");
+  });
+});
+
+describe("dispatch lastActivityAt + active selector + timeout status", () => {
+  it("stamps lastActivityAt on start and updates it on sub-turn frames", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "status", phase: "running", turns: 1 } as never);
+    store.getState().ingest({
+      type: "dispatch", dispatch_id: "d1", turn: 1, phase: "start",
+      specialty: "webrecon", sub_goal: "enumerate",
+    });
+    const d0 = store.getState().turns.get(1)!.dispatches.get("d1")!;
+    expect(typeof d0.lastActivityAt).toBe("number");
+
+    store.getState().ingest({
+      type: "dispatch", dispatch_id: "d1", turn: 1, sub_turn: 3,
+      phase: "text", specialty: "webrecon", content: "found /admin",
+    });
+    const d1 = store.getState().turns.get(1)!.dispatches.get("d1")!;
+    expect(d1.lastActivityAt).toBeGreaterThanOrEqual(d0.lastActivityAt!);
+  });
+
+  it("selectActiveDispatch returns the running dispatch in the current turn, else null", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "status", phase: "running", turns: 1 } as never);
+    expect(selectActiveDispatch(store.getState())).toBeNull();
+
+    store.getState().ingest({
+      type: "dispatch", dispatch_id: "d1", turn: 1, phase: "start",
+      specialty: "webrecon", sub_goal: "enumerate",
+    });
+    expect(selectActiveDispatch(store.getState())?.specialty).toBe("webrecon");
+
+    store.getState().ingest({
+      type: "dispatch", dispatch_id: "d1", turn: 1, phase: "end",
+      specialty: "webrecon", status: "completed", cost: 0.1, turns: 4,
+    });
+    expect(selectActiveDispatch(store.getState())).toBeNull();
+  });
+
+  it("preserves a timeout end status distinctly (not coerced to error)", () => {
+    const store = makeSessionStore();
+    store.getState().ingest({ type: "status", phase: "running", turns: 1 } as never);
+    store.getState().ingest({
+      type: "dispatch", dispatch_id: "d1", turn: 1, phase: "start",
+      specialty: "webrecon", sub_goal: "enumerate",
+    });
+    store.getState().ingest({
+      type: "dispatch", dispatch_id: "d1", turn: 1, phase: "end",
+      specialty: "webrecon", status: "timeout", cost: 0.2, turns: 3,
+    });
+    const d = store.getState().turns.get(1)!.dispatches.get("d1")!;
+    expect(d.status).toBe("timeout");
+  });
+});
+
+describe("pendingToolCall", () => {
+  function st(calls: number, results: number): SubTurn {
+    return {
+      thinkingDeltas: [], speechDeltas: [],
+      toolCalls: Array.from({ length: calls }, (_, i) => ({ name: "", content: `nmap ${i}` })),
+      toolResults: Array.from({ length: results }, () => ({ ok: true, content: "r" })),
+    };
+  }
+  it("returns the unmatched tool call when calls outnumber results", () => {
+    expect(pendingToolCall(st(2, 1))).toEqual({ name: "", content: "nmap 1" });
+  });
+  it("returns null when calls and results balance", () => {
+    expect(pendingToolCall(st(2, 2))).toBeNull();
+  });
+  it("returns null when there are no tool calls", () => {
+    expect(pendingToolCall(st(0, 0))).toBeNull();
   });
 });
