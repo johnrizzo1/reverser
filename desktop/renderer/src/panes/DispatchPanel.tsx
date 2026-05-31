@@ -1,9 +1,12 @@
 // desktop/renderer/src/panes/DispatchPanel.tsx
 import { useState } from "react";
-import { CheckCircle2, Clock3, Loader2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, Loader2, XCircle } from "lucide-react";
 import type { Dispatch } from "@/state/session-store";
 import { SubTurnBubble } from "./SubTurnBubble";
+import { useNow } from "@/hooks/useNow";
 import { cn } from "@/lib/utils";
+
+const IDLE_STALE_MS = 90_000;
 
 function latestActivity(dispatch: Dispatch): { label: string; detail: string } | null {
   const subTurns = Array.from(dispatch.subTurns.entries()).sort((a, b) => b[0] - a[0]);
@@ -38,11 +41,20 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
   const [open, setOpen] = useState(true);
   const subTurns = Array.from(dispatch.subTurns.entries()).sort((a, b) => a[0] - b[0]);
   const activity = latestActivity(dispatch);
+  const now = useNow(15_000);
+  const idleMs =
+    dispatch.status === "running" && dispatch.lastActivityAt
+      ? now - dispatch.lastActivityAt
+      : 0;
+  const isStale = idleMs > IDLE_STALE_MS;
+  const idleLabel = isStale ? `idle ${Math.round(idleMs / 60_000)}m` : null;
   const statusColor = dispatch.status === "completed" ? "text-emerald-300"
     : dispatch.status === "error" ? "text-red-300"
     : "text-amber-300";
   const StatusIcon = dispatch.status === "completed" ? CheckCircle2
     : dispatch.status === "error" ? XCircle
+    : dispatch.status === "timeout" ? Clock3
+    : isStale ? AlertTriangle
     : activity?.label === "queued on local backend" ? Clock3
       : Loader2;
   return (
@@ -59,7 +71,7 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
           className={cn(
             "h-3.5 w-3.5 shrink-0",
             statusColor,
-            dispatch.status === "running" && activity?.label !== "queued on local backend" && "animate-spin",
+            dispatch.status === "running" && !isStale && activity?.label !== "queued on local backend" && "animate-spin",
           )}
         />
         <span className="min-w-0 flex-1">
@@ -69,6 +81,7 @@ export function DispatchPanel({ dispatch }: { dispatch: Dispatch }) {
           <span className="text-neutral-600">]</span>
           <span className={cn("ml-2", statusColor)}>{dispatch.status}</span>
           {activity && <span className="ml-2 text-neutral-500">· {activity.label}</span>}
+          {idleLabel && <span className="ml-2 text-amber-400">· {idleLabel}</span>}
         </span>
         <span className="hidden shrink-0 text-neutral-500 sm:inline">
           {dispatch.cost !== undefined && `$${dispatch.cost.toFixed(4)}`}
