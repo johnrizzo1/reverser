@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from openai import AsyncOpenAI
 
 from .base import AgentEvent, Backend
+from .retry import call_with_retries
 from .tools import mcp_tools_to_openai, execute_tool
 
 log = logging.getLogger(__name__)
@@ -421,15 +422,28 @@ class OpenAICompatBackend(Backend):
                 started_at=llm_started_at,
             )
 
-            try:
-                response = await self._client.chat.completions.create(
+            _retry_notes: list[str] = []
+
+            def _on_retry(attempt, delay, exc):
+                _retry_notes.append(
+                    f"LLM API error ({type(exc).__name__}); retrying in "
+                    f"{delay:.0f}s (attempt {attempt}/3)"
+                )
+
+            async def _make_call():
+                return await self._client.chat.completions.create(
                     model=self._model,
                     messages=messages,
                     tools=tools_for_model if tools_for_model else None,
                     extra_body={"think": True},
                     stream=True,
                 )
+
+            try:
+                response = await call_with_retries(_make_call, on_retry=_on_retry)
             except Exception as e:
+                for note in _retry_notes:
+                    yield AgentEvent(kind="llm_status", content=note)
                 err = str(e)
                 if "n_keep" in err and "n_ctx" in err:
                     err = (
@@ -439,9 +453,20 @@ class OpenAICompatBackend(Backend):
                         "and increase 'Context Length' to at least 16384 "
                         "(32768 recommended), then reload the model."
                     )
-                yield AgentEvent(kind="error", content=err, is_error=True)
+                code = getattr(e, "status_code", None) or getattr(
+                    getattr(e, "response", None), "status_code", None)
+                if code == 429:
+                    subtype = "rate_limited"
+                elif code in (401, 403):
+                    subtype = "quota_exhausted"
+                else:
+                    subtype = "api_error"
+                yield AgentEvent(kind="error", content=err, subtype=subtype, is_error=True)
                 yield AgentEvent(kind="result", content=f"Error: {err}", subtype="error")
                 return
+            else:
+                for note in _retry_notes:
+                    yield AgentEvent(kind="llm_status", content=note)
 
             if hasattr(response, "__aiter__"):
                 content_parts: list[str] = []
