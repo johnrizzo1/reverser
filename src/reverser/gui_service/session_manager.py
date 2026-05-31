@@ -227,7 +227,10 @@ class SessionManager:
             "name",
             None,
         )
-        if sess_target is not None and sess_target != target_name:
+        # Refocus ONLY when we can positively confirm the active session belongs
+        # to this target. An unknown session target (None/"") is treated as a
+        # mismatch so we never refocus a session that belongs to a different target.
+        if not sess_target or sess_target != target_name:
             return False
         agent = getattr(sess, "_agent", None)
         if agent is None or not hasattr(agent, "refocus_address"):

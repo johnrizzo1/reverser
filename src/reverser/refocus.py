@@ -3,6 +3,9 @@ optionally update /etc/hosts. (refocus_target/RefocusResult are added later.)"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Optional
+
 
 def rewrite_hosts_entry(path: str, hostname: str, old_ip: str | None, new_ip: str) -> bool:
     """Point `hostname` at `new_ip` in a hosts file. Returns True if changed.
@@ -50,9 +53,6 @@ def rewrite_hosts_entry(path: str, hostname: str, old_ip: str | None, new_ip: st
 # refocus_target — promote a new IP, remap KB rows, optionally patch /etc/hosts
 # ---------------------------------------------------------------------------
 
-from dataclasses import dataclass
-from typing import Optional
-
 
 class RefocusError(RuntimeError):
     """Refocus could not be performed."""
@@ -93,7 +93,10 @@ def refocus_target(
     if not new_ip:
         raise RefocusError("new_ip must be a non-empty string")
 
-    target = load_target(target_name)
+    try:
+        target = load_target(target_name)
+    except (FileNotFoundError, ValueError) as e:
+        raise RefocusError(f"unknown target {target_name!r}: {e}") from e
     old_ip = target.primary_address.value
 
     if new_ip == old_ip:
@@ -112,13 +115,25 @@ def refocus_target(
             raise RefocusScopeError(msg)
         scope_warning = msg + " (applied with force_scope)"
 
-    existing = next((a for a in target.addresses if a.value == new_ip), None)
-    if existing is not None:
-        target = set_primary(target, existing.id)
-        new_address_id = existing.id
-    else:
-        target = add_address(target, new_ip, "ip", label="refocus", make_primary=True)
-        new_address_id = target.primary_address_id
+    # Reuse an existing ACTIVE address record; promoting a retired one (or
+    # re-adding a value that exists but is retired) raises ValueError, which we
+    # surface as a clean RefocusError instead of a 500 / agent crash.
+    existing = next(
+        (a for a in target.addresses if a.value == new_ip and a.status == "active"),
+        None,
+    )
+    try:
+        if existing is not None:
+            target = set_primary(target, existing.id)
+            new_address_id = existing.id
+        else:
+            target = add_address(target, new_ip, "ip", label="refocus", make_primary=True)
+            new_address_id = target.primary_address_id
+    except ValueError as e:
+        raise RefocusError(
+            f"cannot focus {new_ip!r}: {e} "
+            f"(it may already exist as a retired address — re-add it first)"
+        ) from e
 
     rows = KB(target.name).remap_address(old_ip, new_ip)
 

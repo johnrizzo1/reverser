@@ -758,4 +758,5 @@ async def refocus_target_route(target: str, body: _RefocusBody, request: Request
         "hostname_updated": result.hostname_updated,
         "scope_warning": result.scope_warning,
         "session_refocused": session_refocused,
+        "new_address_id": result.new_address_id,
     }
