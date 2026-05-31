@@ -612,8 +612,13 @@ async def dispatch_specialist(args: dict) -> dict:
     import json as _json
     dispatch_id = _uuid.uuid4().hex
     _sub_turn = [0]
+    _pending_tools = [0]
 
     def _emit(kind: str, content: str) -> None:
+        if kind == "tool_call":
+            _pending_tools[0] += 1
+        elif kind in ("tool_result", "tool_error"):
+            _pending_tools[0] = max(0, _pending_tools[0] - 1)
         if sess is None:
             return
         try:
@@ -709,6 +714,8 @@ async def dispatch_specialist(args: dict) -> dict:
         nonlocal status, cost_usd, turns_consumed, error_msg, report_text
 
         _idle = _dispatch_idle_timeout()
+        _tool = _dispatch_tool_timeout()
+        _pending = lambda: _pending_tools[0] > 0
 
         if use_session_backend:
             if cfg.backend in _LOCAL_BACKEND_NAMES:
@@ -735,6 +742,8 @@ async def dispatch_specialist(args: dict) -> dict:
                         allowed_tools=sub_allowed_tools,
                     ),
                     _idle,
+                    tool_seconds=_tool,
+                    is_tool_pending=_pending,
                 ):
                     if event.kind == "turn":
                         _sub_turn[0] = event.turn or event.turns or _sub_turn[0] + 1
@@ -777,7 +786,10 @@ async def dispatch_specialist(args: dict) -> dict:
                             report_text = event.content
         else:
             async for message in _aiter_with_idle_timeout(
-                query(prompt=prompt, options=options), _idle,
+                query(prompt=prompt, options=options),
+                _idle,
+                tool_seconds=_tool,
+                is_tool_pending=_pending,
             ):
                 if isinstance(message, AssistantMessage):
                     _sub_turn[0] += 1
