@@ -271,7 +271,7 @@ function RefocusForm({ targetName }: { targetName: string }): React.JSX.Element 
             <span className="font-mono text-neutral-200">{result.old_ip}</span>
             {" → "}
             <span className="font-mono text-green-400">{result.new_ip}</span>
-            {" "}({result.rows_remapped} KB row{result.rows_remapped !== 1 ? "s" : ""})
+            {" "}({result.rows_remapped.hosts} host(s), {result.rows_remapped.services} service(s))
           </div>
           {result.session_refocused && (
             <div className="text-sky-400">Active session address updated.</div>

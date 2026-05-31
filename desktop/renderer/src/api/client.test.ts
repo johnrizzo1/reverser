@@ -24,7 +24,7 @@ describe("refocusTarget", () => {
         target: "box",
         old_ip: "10.0.0.1",
         new_ip: "10.0.0.2",
-        rows_remapped: 3,
+        rows_remapped: { hosts: 2, services: 1, cred_results: 0 },
         hostname_updated: false,
         scope_warning: null,
         session_refocused: false,
@@ -43,7 +43,7 @@ describe("refocusTarget", () => {
     expect(opts.headers).toMatchObject({ Authorization: "Bearer test-token" });
     expect(res.new_ip).toBe("10.0.0.2");
     expect(res.old_ip).toBe("10.0.0.1");
-    expect(res.rows_remapped).toBe(3);
+    expect(res.rows_remapped.hosts).toBe(2);
   });
 
   it("URL-encodes the target name", async () => {
@@ -54,7 +54,7 @@ describe("refocusTarget", () => {
         target: "my box",
         old_ip: "1.1.1.1",
         new_ip: "2.2.2.2",
-        rows_remapped: 0,
+        rows_remapped: { hosts: 0, services: 0, cred_results: 0 },
         hostname_updated: false,
         scope_warning: null,
         session_refocused: false,
@@ -77,7 +77,7 @@ describe("refocusTarget", () => {
         target: "box",
         old_ip: "10.0.0.1",
         new_ip: "10.0.0.3",
-        rows_remapped: 1,
+        rows_remapped: { hosts: 1, services: 0, cred_results: 0 },
         hostname_updated: true,
         scope_warning: null,
         session_refocused: true,

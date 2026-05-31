@@ -181,3 +181,32 @@ def test_session_refocus_address_updates_target_and_snapshot(tmp_path, monkeypat
     # wasn't in the session's startup copy of the target.
     assert sess.target_obj is not None
     assert sess.target_obj.primary_address.value == "10.0.0.2"
+
+
+def test_resume_after_refocus_stays_on_new_ip(tmp_path, monkeypatch):
+    """A session refocused to a new IP, then resumed from disk, must come back
+    on the NEW IP — not revert to the old one."""
+    monkeypatch.setenv("REVERSER_TARGETS_DIR", str(tmp_path))
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    from reverser.profiles import get_profile
+    from reverser.tui.session import AgentSession
+    from reverser.targets import create_target, add_address, load_target
+
+    create_target(name="box", kind="network", initial_address="10.0.0.1")
+    sess = AgentSession.from_target(load_target("box"), profile=get_profile("pentest"))
+
+    t = add_address(load_target("box"), "10.0.0.2", "ip", make_primary=True)
+    sess.refocus_address(t.primary_address)
+    snap = sess._snapshot
+    sess.close()
+
+    # the refocus must have persisted the new IP onto the snapshot (the field
+    # _init_resumed restores from) — otherwise a resume reverts to the old IP
+    assert snap.target == "10.0.0.2"
+    snap.state = "stopped"  # simulate a clean stop before resume
+    resumed = AgentSession(
+        binary_path="ignored-on-resume",
+        profile=get_profile("pentest"),
+        resume_from=snap,
+    )
+    assert resumed.target == "10.0.0.2"

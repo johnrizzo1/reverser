@@ -785,6 +785,9 @@ class KB:
             f"Refocused {old_ip} -> {new_ip}; remapped {hosts} host(s), "
             f"{services} service(s), {creds} cred-result(s)."
         )
+        # Refresh the live GUI Hosts/Services/Credentials panes (record_note
+        # already emitted a 'notes' event).
+        _emit_kb_change(self.target_id, "hosts", "services", "credentials")
         return {"hosts": hosts, "services": services, "cred_results": creds}
 
     def _get_service_by_id(self, service_row_id: int):

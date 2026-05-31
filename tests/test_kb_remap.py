@@ -52,3 +52,26 @@ def test_remap_same_ip_noop(tmp_path, monkeypatch):
     kb.record_host(HostFact(ip="10.0.0.1"))
     counts = kb.remap_address("10.0.0.1", "10.0.0.1")
     assert counts == {"hosts": 0, "services": 0, "cred_results": 0}
+
+
+def test_remap_updates_cred_results(tmp_path, monkeypatch):
+    # insert a credential + cred_result via SQL (schema-stable, avoids dataclass API churn)
+    kb = _fresh_kb(tmp_path, monkeypatch)
+    with kb._connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO credentials (target_id, username, status, first_seen) "
+            "VALUES (?, 'admin', 'untested', '2026-01-01T00:00:00')",
+            (kb.target_id,),
+        )
+        cid = cur.lastrowid
+        conn.execute(
+            "INSERT INTO cred_results (cred_id, service_kind, target_host, success, attempted_at) "
+            "VALUES (?, 'smb', '10.0.0.1', 1, '2026-01-01T00:00:00')",
+            (cid,),
+        )
+        conn.commit()
+    counts = kb.remap_address("10.0.0.1", "10.0.0.2")
+    assert counts["cred_results"] == 1
+    with kb._connect() as conn:
+        rows = conn.execute("SELECT target_host FROM cred_results").fetchall()
+    assert all(r[0] == "10.0.0.2" for r in rows)

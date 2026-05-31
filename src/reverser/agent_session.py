@@ -867,6 +867,9 @@ When you respond, present your findings clearly with relevant details.
                     self.target_obj = None
         if getattr(self, "_snapshot", None) is not None:
             self._snapshot.active_address_id = new_address.id
+            # _init_resumed restores the engagement string from snap.target, so
+            # update it too — otherwise a resume after refocus reverts to the old IP.
+            self._snapshot.target = new_address.value
             try:
                 save_snapshot(self._snapshot)
             except Exception:

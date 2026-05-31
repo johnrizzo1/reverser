@@ -260,11 +260,11 @@ export type RefocusResponse = {
   target: string;
   old_ip: string;
   new_ip: string;
-  rows_remapped: number;
+  rows_remapped: { hosts: number; services: number; cred_results: number };
   hostname_updated: boolean;
   scope_warning: string | null;
   session_refocused: boolean;
-  new_address_id: string;
+  new_address_id: string | null;
 };
 
 /** POST /api/targets/{name}/refocus — remap all KB rows to a new IP address. */
