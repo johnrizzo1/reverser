@@ -2,7 +2,34 @@
 
 An AI-powered agent for reverse engineering and penetration testing. Give it a binary or a network target and it works autonomously — or sit at the interactive TUI and direct it through a real engagement.
 
-**91 MCP tools** wired across binary RE, network pentest, Active Directory, web pentest, exploit hunting, and browser automation. **15 profiles** that specialize the system prompt and tool surface for different target types. Local model support (LM Studio, Ollama, any OpenAI-compatible endpoint) alongside Claude.
+**91 MCP tools** wired across binary RE, network pentest, Active Directory, web pentest, exploit hunting, and browser automation. **15 profiles** that specialize the system prompt and tool surface for different target types. Local model support (LM Studio, Ollama, any OpenAI-compatible endpoint) alongside Claude. Findings, hypotheses, and specialist dispatch reports are captured as schema-validated structured records in a per-target knowledge base.
+
+![reverser — interactive engagement and live knowledge base](screenshot.png)
+
+> ⚠️ **For authorized security research and penetration testing only.**
+>
+> reverser drives real offensive tooling (nmap, NetExec, Metasploit, sqlmap, BloodHound, Playwright, …) against whatever target you point it at. **Only use it against systems you own or have explicit written authorization to test.** Network-touching tools are gated behind an explicit authorization acknowledgement (`REVERSER_PENTEST_AUTHORIZED=1` or a `.reverser-authorized` marker), and an optional per-target `scope.toml` enforces CIDR / no-DoS / no-lockout / allowed-hours limits. You are responsible for staying within scope and the law.
+
+---
+
+## Quick start
+
+reverser is designed to run **alongside modern RE / pentesting tools** — it orchestrates radare2, Ghidra, GDB, angr, nmap, NetExec, BloodHound, Metasploit, nuclei, ffuf, sqlmap, Playwright, and more. There are two supported ways to set it up:
+
+**1. devenv shell + GUI (macOS or Linux).** The Nix-based [devenv](https://devenv.sh) shell provisions all 60+ tools and installs the CLI for you:
+
+```sh
+devenv shell      # drops you into a shell with the full RE/pentest toolchain + the reverser CLI
+reverser g        # launch the desktop GUI  (alias for `reverser gui`)
+```
+
+**2. CLI on a pentest distribution such as Kali Linux.** On a distro that already ships the tooling, install the CLI (`pip install -e .` from a checkout, or the Linux installer below) and reverser will use the `nmap` / `netexec` / `metasploit` / `nuclei` / … already on your `PATH`:
+
+```sh
+reverser i <target> --profile pentest    # interactive engagement  (alias for `reverser interactive`)
+```
+
+> Network-touching profiles require `export REVERSER_PENTEST_AUTHORIZED=1` (see the warning above).
 
 ---
 
@@ -98,7 +125,9 @@ under `desktop/dist/{mac-arm64,linux-unpacked}/` for fast iteration.
 devenv shell
 ```
 
-This drops you into a shell with 60+ tools (radare2, rizin, ghidra, gdb, strace, binwalk, yara, angr, nmap, ffuf, nuclei, sqlmap, metasploit, exploitdb, neo4j, etc.) and installs the `reverser` CLI in editable mode.
+This drops you into a shell with 60+ tools (radare2, rizin, ghidra, gdb, strace, binwalk, yara, angr, nmap, ffuf, nuclei, sqlmap, metasploit, exploitdb, neo4j, etc.) and installs the `reverser` CLI in editable mode. From here, `reverser g` launches the desktop GUI and `reverser i <target>` starts an interactive engagement.
+
+**Already on a pentest distro (e.g. Kali Linux)?** You don't need devenv — install the CLI with `pip install -e .` from a checkout (or the Linux installer below) and reverser will use the RE/pentest tools already on your `PATH`. Anything missing from `PATH` is simply unavailable to the agent; the devenv shell exists to guarantee the full toolchain.
 
 For penetration testing tools (anything that touches the network), set:
 
