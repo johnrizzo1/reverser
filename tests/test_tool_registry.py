@@ -54,13 +54,14 @@ def test_all_tools_count_after_manager_work():
     Manager work added 4 hypothesis CRUD + 1 dispatch_specialist = 68
     registered (66 unique). enum4linux_ng added post-merge = 69 registered,
     67 unique. web_browser_* tools (14) added = 91 registered, 89 unique.
+    kb_refocus_target added = 92 registered, 90 unique.
     """
-    assert len(ALL_TOOLS) == 91, (
-        f"expected 91 registered tools, got {len(ALL_TOOLS)}"
+    assert len(ALL_TOOLS) == 92, (
+        f"expected 92 registered tools, got {len(ALL_TOOLS)}"
     )
     unique_names = {t.name for t in ALL_TOOLS}
-    assert len(unique_names) == 89, (
-        f"expected 89 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
+    assert len(unique_names) == 90, (
+        f"expected 90 unique tools (with 2 pre-existing dups), got {len(unique_names)}"
     )
 
 

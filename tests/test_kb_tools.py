@@ -385,3 +385,39 @@ async def test_export_report_writes_with_summary(tmp_targets_dir, authorize, tmp
     assert res.get("is_error") is not True
     assert out.exists()
     assert "SMB relay" in out.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Task 5 (refocus-target-ip): kb_refocus_target tool
+# ---------------------------------------------------------------------------
+
+import pytest
+from reverser.tools.kb import kb_refocus_target
+
+
+@pytest.mark.asyncio
+async def test_kb_refocus_target_promotes_and_remaps(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+    from reverser.targets import create_target, load_target
+    create_target(name="box", kind="network", initial_address="10.0.0.1")
+
+    fn = getattr(kb_refocus_target, "handler", None) or getattr(kb_refocus_target, "fn", None) or kb_refocus_target
+    res = await fn({"target": "box", "new_ip": "10.0.0.222"})
+    assert res.get("is_error") is not True
+    assert "10.0.0.222" in res["content"][0]["text"]
+    assert load_target("box").primary_address.value == "10.0.0.222"
+
+
+@pytest.mark.asyncio
+async def test_kb_refocus_target_rejects_blank_ip(tmp_targets_dir, monkeypatch):
+    monkeypatch.setenv("REVERSER_PENTEST_AUTHORIZED", "1")
+    import reverser.kb
+    reverser.kb._kb_cache.clear()
+    from reverser.targets import create_target
+    create_target(name="box2", kind="network", initial_address="10.0.0.1")
+    fn = getattr(kb_refocus_target, "handler", None) or getattr(kb_refocus_target, "fn", None) or kb_refocus_target
+    res = await fn({"target": "box2", "new_ip": ""})
+    assert res.get("is_error") is True
+    assert "new_ip" in res["content"][0]["text"]

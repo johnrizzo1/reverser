@@ -793,3 +793,69 @@ async def kb_export_report(args: dict) -> dict:
 
 
 TOOLS.append(kb_export_report)
+
+
+@tool(
+    "kb_refocus_target",
+    "Re-point the engagement at a new IP for `target` (e.g. after an HTB reset). "
+    "Promotes the new address, remaps host/service KB rows old->new, and refocuses "
+    "the current session so subsequent tool calls use the new IP. Optionally updates "
+    "/etc/hosts when `hostname` is given and update_etc_hosts is true.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "Target name/identifier."},
+            "new_ip": {"type": "string", "description": "The target's new IP address."},
+            "hostname": {"type": "string", "description": "Optional hostname (e.g. box.htb)."},
+            "update_etc_hosts": {"type": "boolean", "default": False},
+            "force_scope": {"type": "boolean", "default": False},
+        },
+        "required": ["target", "new_ip"],
+    },
+)
+async def kb_refocus_target(args: dict) -> dict:
+    auth_err = _check_auth()
+    if auth_err:
+        return auth_err
+    target = args.get("target")
+    new_ip = (args.get("new_ip") or "").strip()
+    if not target:
+        return format_error("target is required.")
+    if not new_ip:
+        return format_error("new_ip is required (the target's new IP address).")
+    from ..refocus import refocus_target, RefocusError
+    try:
+        result = refocus_target(
+            target, new_ip,
+            update_etc_hosts=bool(args.get("update_etc_hosts", False)),
+            hostname=args.get("hostname"),
+            force_scope=bool(args.get("force_scope", False)),
+        )
+    except RefocusError as e:
+        return format_error(f"Refocus failed: {e}")
+    # refocus the live session (if this tool runs inside one) using the REAL,
+    # persisted address object — do NOT fabricate an Address.
+    note = ""
+    try:
+        from ..sessions import current_session
+        from ..targets import load_target
+        sess = current_session.get()
+        if sess is not None and getattr(sess, "active_address", None) is not None:
+            addr = load_target(target).primary_address
+            note = sess.refocus_address(addr)
+    except Exception:
+        note = ""
+    lines = [
+        f"Refocused {result.target}: {result.old_ip} -> {result.new_ip}",
+        f"Remapped: {result.rows_remapped}",
+    ]
+    if result.scope_warning:
+        lines.append(f"Scope warning: {result.scope_warning}")
+    if result.hostname_updated:
+        lines.append("/etc/hosts updated.")
+    if note:
+        lines.append(note)
+    return format_tool_result("\n".join(lines))
+
+
+TOOLS.append(kb_refocus_target)

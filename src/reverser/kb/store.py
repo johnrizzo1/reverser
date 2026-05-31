@@ -713,6 +713,83 @@ class KB:
             domain=row[3], status=row[4],
         )
 
+    def remap_address(self, old_ip: str, new_ip: str) -> dict:
+        """Rewrite IP-keyed rows from old_ip to new_ip within this target.
+
+        hosts PK is (target_id, ip); services PK is (target_id, host_ip, port, proto).
+        On a new-IP conflict, merge/keep the new-IP row and drop the stale old-IP row.
+        Records a note. Returns {"hosts","services","cred_results"} counts.
+        """
+        if old_ip == new_ip:
+            return {"hosts": 0, "services": 0, "cred_results": 0}
+        hosts = services = creds = 0
+        with self._connect() as conn:
+            # ── hosts ──
+            new_host = conn.execute(
+                "SELECT 1 FROM hosts WHERE target_id=? AND ip=?",
+                (self.target_id, new_ip),
+            ).fetchone()
+            if new_host is None:
+                cur = conn.execute(
+                    "UPDATE hosts SET ip=? WHERE target_id=? AND ip=?",
+                    (new_ip, self.target_id, old_ip),
+                )
+                hosts = cur.rowcount
+            else:
+                conn.execute(
+                    """
+                    UPDATE hosts SET
+                        hostname    = COALESCE(hostname,    (SELECT hostname    FROM hosts WHERE target_id=? AND ip=?)),
+                        os          = COALESCE(os,          (SELECT os          FROM hosts WHERE target_id=? AND ip=?)),
+                        domain      = COALESCE(domain,      (SELECT domain      FROM hosts WHERE target_id=? AND ip=?)),
+                        smb_signing = COALESCE(smb_signing, (SELECT smb_signing FROM hosts WHERE target_id=? AND ip=?))
+                    WHERE target_id=? AND ip=?
+                    """,
+                    (self.target_id, old_ip) * 4 + (self.target_id, new_ip),
+                )
+                cur = conn.execute(
+                    "DELETE FROM hosts WHERE target_id=? AND ip=?",
+                    (self.target_id, old_ip),
+                )
+                hosts = cur.rowcount
+            # ── services ──
+            old_svcs = conn.execute(
+                "SELECT port, proto FROM services WHERE target_id=? AND host_ip=?",
+                (self.target_id, old_ip),
+            ).fetchall()
+            for port, proto in old_svcs:
+                exists = conn.execute(
+                    "SELECT 1 FROM services WHERE target_id=? AND host_ip=? AND port=? AND proto=?",
+                    (self.target_id, new_ip, port, proto),
+                ).fetchone()
+                if exists is None:
+                    conn.execute(
+                        "UPDATE services SET host_ip=? WHERE target_id=? AND host_ip=? AND port=? AND proto=?",
+                        (new_ip, self.target_id, old_ip, port, proto),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM services WHERE target_id=? AND host_ip=? AND port=? AND proto=?",
+                        (self.target_id, old_ip, port, proto),
+                    )
+                services += 1
+            # ── cred_results.target_host ──
+            cur = conn.execute(
+                "UPDATE cred_results SET target_host=? "
+                "WHERE target_host=? AND cred_id IN (SELECT id FROM credentials WHERE target_id=?)",
+                (new_ip, old_ip, self.target_id),
+            )
+            creds = cur.rowcount
+            conn.commit()
+        self.record_note(
+            f"Refocused {old_ip} -> {new_ip}; remapped {hosts} host(s), "
+            f"{services} service(s), {creds} cred-result(s)."
+        )
+        # Refresh the live GUI Hosts/Services/Credentials panes (record_note
+        # already emitted a 'notes' event).
+        _emit_kb_change(self.target_id, "hosts", "services", "credentials")
+        return {"hosts": hosts, "services": services, "cred_results": creds}
+
     def _get_service_by_id(self, service_row_id: int):
         # services has a composite PK (target_id, host_ip, port, proto) — id refs
         # are by rowid here. Defensive: if missing, return None.

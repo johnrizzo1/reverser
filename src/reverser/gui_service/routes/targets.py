@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, model_validator
 
@@ -556,6 +556,13 @@ class PatchAddressRequest(BaseModel):
     label: Optional[str] = None
 
 
+class _RefocusBody(BaseModel):
+    new_ip: str
+    hostname: str | None = None
+    update_etc_hosts: bool = False
+    force_scope: bool = False
+
+
 # --- Task 26: Read endpoints ---
 
 @router.get("/api/targets/{name:path}")
@@ -711,3 +718,45 @@ def rehash_address_endpoint(name: str, address_id: str) -> dict:
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc))
     return _target_detail(t)
+
+
+# --- Refocus endpoint ---
+
+@router.post("/api/targets/{target}/refocus")
+async def refocus_target_route(target: str, body: _RefocusBody, request: Request):
+    """Change the primary IP/address for a target and optionally re-point the active session."""
+    import reverser.targets as tmod
+    from reverser.refocus import refocus_target as _refocus, RefocusError, RefocusScopeError
+    try:
+        tmod.load_target(target)
+    except Exception:
+        raise HTTPException(404, detail=f"unknown target: {target!r}")
+    try:
+        result = _refocus(
+            target, body.new_ip,
+            update_etc_hosts=body.update_etc_hosts,
+            hostname=body.hostname,
+            force_scope=body.force_scope,
+        )
+    except RefocusScopeError as e:
+        raise HTTPException(409, detail=str(e))
+    except RefocusError as e:
+        raise HTTPException(400, detail=str(e))
+    session_refocused = False
+    mgr = getattr(request.app.state, "session_manager", None)
+    if mgr is not None and hasattr(mgr, "refocus_active"):
+        try:
+            addr = tmod.load_target(target).primary_address
+            session_refocused = mgr.refocus_active(target, addr)
+        except Exception:
+            session_refocused = False
+    return {
+        "target": result.target,
+        "old_ip": result.old_ip,
+        "new_ip": result.new_ip,
+        "rows_remapped": result.rows_remapped,
+        "hostname_updated": result.hostname_updated,
+        "scope_warning": result.scope_warning,
+        "session_refocused": session_refocused,
+        "new_address_id": result.new_address_id,
+    }
