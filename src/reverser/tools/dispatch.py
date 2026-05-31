@@ -609,13 +609,16 @@ async def dispatch_specialist(args: dict) -> dict:
     def _emit_start() -> None:
         if sess is None:
             return
+        payload = _json.dumps({"hypothesis_id": hypothesis_id, "sub_goal": sub_goal})
+        try:
+            sess._slog.log_dispatch_event(
+                specialty, "start", payload, dispatch_id=dispatch_id, sub_turn=0,
+            )
+        except Exception:
+            pass
         try:
             sess.emit_dispatch_event(
-                specialty, dispatch_id, 0, "start",
-                _json.dumps({
-                    "hypothesis_id": hypothesis_id,
-                    "sub_goal": sub_goal,
-                }),
+                specialty, dispatch_id, 0, "start", payload,
             )
         except Exception:
             pass
@@ -623,14 +626,16 @@ async def dispatch_specialist(args: dict) -> dict:
     def _emit_end(status: str, cost: float, turns_consumed: int) -> None:
         if sess is None:
             return
+        payload = _json.dumps({"status": status, "cost": cost, "turns": turns_consumed})
+        try:
+            sess._slog.log_dispatch_event(
+                specialty, "end", payload, dispatch_id=dispatch_id, sub_turn=0,
+            )
+        except Exception:
+            pass
         try:
             sess.emit_dispatch_event(
-                specialty, dispatch_id, 0, "end",
-                _json.dumps({
-                    "status": status,
-                    "cost": cost,
-                    "turns": turns_consumed,
-                }),
+                specialty, dispatch_id, 0, "end", payload,
             )
         except Exception:
             pass
