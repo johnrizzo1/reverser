@@ -17,11 +17,20 @@ import threading
 # ── Pure helpers ────────────────────────────────────────────────────
 
 
-_RETURN_CONTRACT = """## Return contract
-When you finish, your final assistant message MUST contain (1) a human-readable
-markdown report with the sections below, and (2) as the VERY LAST thing in the
-message, a fenced ```json block restating the report. The JSON block is parsed
-by the lead and is MANDATORY.
+_RETURN_CONTRACT = """## Persist as you go (REQUIRED)
+BEFORE you write your final report, persist what you found into the knowledge
+base by CALLING the tools — do not merely describe it:
+- For each finding, call `kb_add_finding` (title, severity, description,
+  reproduction, confidence, reachability — attach evidence_paths when you have
+  them).
+- For each NEW hypothesis you formed, call `kb_add_hypothesis`.
+The lead reads the KB, not your prose. A finding you only describe but never
+persist may be lost.
+
+## Return contract
+When you finish, your final assistant message MUST be a human-readable markdown
+report with the sections below. You MAY also append a fenced ```json block
+restating it (helpful but optional — the lead parses your markdown either way).
 
 ### TL;DR
 One sentence.
@@ -33,13 +42,15 @@ What you discovered. Bullet list.
 One of: CONFIRMED, REFUTED, INCONCLUSIVE — followed by one-sentence justification.
 
 ### KB writes
-Short list of what you persisted (creds added, findings added, hypotheses
-spawned). The lead reads this to know what changed.
+List what you persisted, ONE item per bullet, using exactly this format so the
+lead can reconcile it (this mirrors your kb_add_* calls above):
+- Finding: <short title> — <one-line description>
+- Hypothesis: <statement>
 
 ### Suggested follow-up
 What you would test next if you had more budget.
 
-### Machine-readable summary (MANDATORY — emit exactly this, as the last thing)
+### Machine-readable summary (optional — append last if you include it)
 ```json
 {
   "tldr": "one sentence",
@@ -193,6 +204,138 @@ def _promote_status(subprocess_status: str, report_model) -> str:
     ):
         return "partial"
     return subprocess_status
+
+
+# ── Backstop: reconcile a specialist's markdown report into the KB ───
+# Specialists describe findings/hypotheses in their report's "### KB writes"
+# section but do not reliably CALL kb_add_finding/kb_add_hypothesis. The
+# contract now mandates those calls (primary path); this parser + reconcile is
+# the backstop that persists anything the specialist only described, so report
+# findings/hypotheses never silently evaporate.
+
+_KB_WRITES_SECTION = re.compile(
+    r"###\s+KB writes\s*\n(.+?)(?=\n###|\Z)", re.IGNORECASE | re.DOTALL
+)
+_BULLET = re.compile(r"^\s*[-*]\s+(.*\S)\s*$")
+# split a "title — description" / "title - description" bullet at the first
+# em-dash or spaced hyphen separator
+_TITLE_SPLIT = re.compile(r"\s+[—–-]\s+")
+
+
+def _norm(s: str) -> str:
+    """Normalize for dedup: lowercase, collapse whitespace."""
+    return " ".join((s or "").lower().split())
+
+
+def parse_report_kb_writes(report_text: str):
+    """Extract labeled findings/hypotheses from a report's '### KB writes' section.
+
+    Returns ``(findings, hypotheses)`` where findings is a list of
+    ``{"title": str, "description": str}`` and hypotheses is a list of statement
+    strings. Only bullets explicitly prefixed ``Finding:`` / ``Hypothesis:``
+    (optionally bold) are extracted, so prose bullets are ignored.
+    """
+    findings: list[dict] = []
+    hypotheses: list[str] = []
+    m = _KB_WRITES_SECTION.search(report_text or "")
+    if not m:
+        return findings, hypotheses
+    for line in m.group(1).splitlines():
+        bm = _BULLET.match(line)
+        if not bm:
+            continue
+        item = bm.group(1).replace("**", "").strip()
+        low = item.lower()
+        if low.startswith("finding:") or low.startswith("finding "):
+            text = item.split(":", 1)[1].strip() if ":" in item else item
+            if not text:
+                continue
+            title = (_TITLE_SPLIT.split(text, 1)[0].strip() or text)[:120]
+            findings.append({"title": title, "description": text})
+        elif low.startswith("hypothesis"):
+            text = item.split(":", 1)[1].strip() if ":" in item else item
+            if text:
+                hypotheses.append(text)
+    return findings, hypotheses
+
+
+def reconcile_report_to_kb(kb, findings, hypotheses, *, specialty: str) -> list[str]:
+    """Persist report-described findings/hypotheses that aren't already in the KB.
+
+    Findings are stored UNVALIDATED (via evidence_blocker — no real evidence was
+    attached) so they are clearly flagged as needing confirmation. Hypotheses are
+    created at 'proposed'. Dedup is by normalized title/statement against the live
+    KB (so items the specialist already persisted via the mandate are skipped) and
+    within the batch. Never raises — bad items are skipped with a noted reason.
+    Returns a list of human-readable action lines for the dispatch envelope.
+    """
+    from ..schemas.models import FindingModel
+    from ..schemas.validation import validate_args
+    from ..kb.store import FindingFact
+    from ..gui_service.kb_emitter import emit_recorded_finding, emit_hypothesis
+
+    actions: list[str] = []
+
+    existing_titles = {_norm(f.title) for f in kb.get_findings()}
+    seen: set[str] = set()
+    for fnd in findings or []:
+        title = (fnd.get("title") or "").strip()[:120]
+        if not title:
+            continue
+        key = _norm(title)
+        if key in existing_titles or key in seen:
+            continue
+        seen.add(key)
+        result = validate_args(FindingModel, {
+            "title": title,
+            "severity": "info",
+            "description": fnd.get("description") or title,
+            "reproduction": "(reported via specialist dispatch; reproduction not provided)",
+            "confidence": 25,
+            "reachability": "unknown",
+            "evidence_blocker": f"reported via {specialty} dispatch; evidence not attached",
+        })
+        if not result.ok:
+            reason = (result.error_text or "invalid").splitlines()[-1]
+            actions.append(f"skipped finding {title!r}: {reason}")
+            continue
+        m = result.value
+        fact = FindingFact(
+            title=m.title, severity=m.severity.value, description=m.description,
+            evidence_paths=m.evidence_paths, cvss=m.cvss, reproduction=m.reproduction,
+            reachability=m.reachability.value, confidence=m.confidence,
+            evidence_blocker=m.evidence_blocker, validated=m.validated,
+        )
+        fid = kb.record_finding(fact)
+        try:
+            emit_recorded_finding("create", fid, fact)
+        except Exception:
+            pass
+        actions.append(f"finding #{fid} (unvalidated): {title}")
+
+    existing_hyps = {_norm(h.statement) for h in kb.list_hypotheses()}
+    seen_h: set[str] = set()
+    for stmt in hypotheses or []:
+        stmt = (stmt or "").strip()
+        if not stmt:
+            continue
+        key = _norm(stmt)
+        if key in existing_hyps or key in seen_h:
+            continue
+        seen_h.add(key)
+        h = kb.add_hypothesis(
+            statement=stmt,
+            rationale=f"spawned via {specialty} dispatch",
+            confidence=25,
+        )
+        if h is not None:
+            try:
+                emit_hypothesis("create", h)
+            except Exception:
+                pass
+            actions.append(f"hypothesis #{h.id} (proposed): {stmt[:80]}")
+
+    return actions
 
 
 # ── dispatch_specialist tool ────────────────────────────────────────
@@ -592,6 +735,7 @@ async def dispatch_specialist(args: dict) -> dict:
 
     outcome = "inconclusive"
     report_model = None
+    reconcile_actions: list[str] = []
 
     _emit_start()
     try:
@@ -607,6 +751,19 @@ async def dispatch_specialist(args: dict) -> dict:
         # actionable content, promote status so the manager doesn't dismiss
         # the report based on the Status header alone.
         status = _promote_status(status, report_model)
+
+        # ── Backstop: reconcile the report's KB-writes into the KB ───
+        # Specialists describe findings/hypotheses but don't always CALL the
+        # kb_add_* tools. Parse the report's "### KB writes" bullets and persist
+        # anything not already present (deduped against what the specialist did
+        # persist), so report findings never silently evaporate.
+        try:
+            rec_findings, rec_hyps = parse_report_kb_writes(report_text)
+            reconcile_actions = reconcile_report_to_kb(
+                kb, rec_findings, rec_hyps, specialty=specialty
+            )
+        except Exception:
+            reconcile_actions = []
     except Exception as e:
         status = "error"
         error_msg = f"{type(e).__name__}: {e}"
@@ -637,6 +794,11 @@ async def dispatch_specialist(args: dict) -> dict:
         )
     if error_msg:
         summary_lines.append(f"**Error:** {error_msg}")
+    if reconcile_actions:
+        summary_lines.append("")
+        summary_lines.append("**Reconciled to KB** (backstop — items the specialist reported):")
+        for action in reconcile_actions:
+            summary_lines.append(f"- {action}")
     summary_lines.append("")
     summary_lines.append("---")
     summary_lines.append("")
