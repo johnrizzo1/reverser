@@ -134,6 +134,17 @@ def test_parse_dispatch_report_no_outcome_anywhere():
     assert outcome == "inconclusive" and model is None and errors is not None
 
 
+def test_return_contract_mandates_persistence_and_bullet_format():
+    from reverser.tools.dispatch import _RETURN_CONTRACT
+    c = _RETURN_CONTRACT
+    # the specialist is told to actually persist via the KB tools
+    assert "kb_add_finding" in c and "kb_add_hypothesis" in c
+    # the KB-writes bullet format the backstop parser keys on is documented
+    assert "- Finding:" in c and "- Hypothesis:" in c
+    # the JSON block is no longer punitively "MANDATORY" (repair loop is gone)
+    assert "MANDATORY" not in c
+
+
 def test_promote_status_error_with_empty_model_stays_error():
     from reverser.tools.dispatch import _promote_status, parse_dispatch_report
     _, model, _ = parse_dispatch_report('```json\n{"tldr":"t","status":"error"}\n```')
