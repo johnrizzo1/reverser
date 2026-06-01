@@ -210,3 +210,21 @@ def test_resume_after_refocus_stays_on_new_ip(tmp_path, monkeypatch):
         resume_from=snap,
     )
     assert resumed.target == "10.0.0.2"
+
+
+def test_session_config_validation_fields_round_trip():
+    from reverser.sessions import SessionConfig
+    from dataclasses import asdict
+    c = SessionConfig(profile="ad", validation_backend="claude",
+                      validation_model="m", validation_api_base="http://x/v1")
+    c2 = SessionConfig(**asdict(c))
+    assert c2.validation_backend == "claude" and c2.validation_model == "m"
+    assert c2.validation_api_base == "http://x/v1"
+
+
+def test_session_config_validation_defaults_none():
+    from reverser.sessions import SessionConfig
+    assert SessionConfig(profile="general").validation_backend is None
+    c2 = SessionConfig(profile="general", backend="claude", model=None, api_base=None,
+                       budget=5.0, max_turns=50, max_parallel=1)
+    assert c2.validation_backend is None

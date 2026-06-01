@@ -47,6 +47,10 @@ class SessionConfig:
     backend: str = "claude"
     model: Optional[str] = None
     api_base: Optional[str] = None
+    # Adversarial hypothesis validation (opt-in). None = no adversary runs.
+    validation_backend: Optional[str] = None
+    validation_model: Optional[str] = None
+    validation_api_base: Optional[str] = None
     budget: float = 5.0
     max_turns: int = 50
     max_parallel: int = 1
