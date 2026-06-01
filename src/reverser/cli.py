@@ -105,6 +105,13 @@ def main():
         help="Override the target's primary address for this session",
     )
     add_backend_args(interactive_parser)
+    interactive_parser.add_argument("--validation-backend", default=None,
+        help="Backend for adversarial hypothesis validation (e.g. claude, ollama). "
+             "If unset, no adversarial validation runs.")
+    interactive_parser.add_argument("--validation-model", default=None,
+        help="Model for the validation backend (ideally different from the main model).")
+    interactive_parser.add_argument("--validation-api-base", default=None,
+        help="API base for the validation backend.")
 
     # Target management subcommand group
     target_parser = subparsers.add_parser("target", help="Manage targets")
@@ -424,6 +431,9 @@ def _run_interactive(args):
         backend=args.backend,
         model=args.model,
         api_base=args.api_base,
+        validation_backend=getattr(args, "validation_backend", None),
+        validation_model=getattr(args, "validation_model", None),
+        validation_api_base=getattr(args, "validation_api_base", None),
         resume_from=resume_snap,
         target_obj=resolved_target_obj,
     )

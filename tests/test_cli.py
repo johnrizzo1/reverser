@@ -46,3 +46,30 @@ def test_interactive_help_mentions_model_family():
         capture_output=True, text=True,
     )
     assert "--model-family" in result.stdout, result.stdout
+
+
+def test_interactive_help_mentions_validation_flags():
+    """--validation-backend / --validation-model / --validation-api-base appear in interactive help."""
+    result = subprocess.run(
+        [PYTHON, "-m", "reverser", "interactive", "--help"],
+        capture_output=True, text=True,
+    )
+    assert "--validation-backend" in result.stdout, result.stdout
+    assert "--validation-model" in result.stdout, result.stdout
+    assert "--validation-api-base" in result.stdout, result.stdout
+
+
+def test_interactive_validation_flags_parse_without_error():
+    """Passing --validation-backend + --validation-model to --list-profiles exits cleanly."""
+    result = subprocess.run(
+        [
+            PYTHON, "-m", "reverser", "interactive",
+            "--list-profiles",
+            "--validation-backend", "claude",
+            "--validation-model", "advm",
+        ],
+        capture_output=True, text=True,
+    )
+    # --list-profiles prints profiles and exits 0; unrecognized arg would exit non-zero
+    assert result.returncode == 0, result.stderr
+    assert "general" in result.stdout.lower(), result.stdout

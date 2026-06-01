@@ -432,6 +432,9 @@ class ReverserApp(App):
         backend: str = "claude",
         model: str | None = None,
         api_base: str | None = None,
+        validation_backend: str | None = None,
+        validation_model: str | None = None,
+        validation_api_base: str | None = None,
         resume_from=None,  # SessionSnapshot | None
         target_obj=None,   # Target | None — when set, AgentSession.from_target is used
     ):
@@ -443,6 +446,9 @@ class ReverserApp(App):
         self.backend_name = backend
         self.model = model
         self.api_base = api_base
+        self.validation_backend = validation_backend
+        self.validation_model = validation_model
+        self.validation_api_base = validation_api_base
         self.profile = get_profile(profile_key)
         self.session: AgentSession | None = None
         self._resume_from = resume_from
@@ -545,6 +551,9 @@ class ReverserApp(App):
             backend_name=self.backend_name,
             model=self.model,
             api_base=self.api_base,
+            validation_backend=self.validation_backend,
+            validation_model=self.validation_model,
+            validation_api_base=self.validation_api_base,
             resume_from=self._resume_from,
         )
         if self._target_obj is not None and self._resume_from is None:
@@ -1056,6 +1065,9 @@ def run_tui(
     backend: str = "claude",
     model: str | None = None,
     api_base: str | None = None,
+    validation_backend: str | None = None,
+    validation_model: str | None = None,
+    validation_api_base: str | None = None,
     resume_from=None,  # SessionSnapshot | None
     target_obj=None,  # Target | None — when set, AgentSession.from_target is used
 ):
@@ -1069,6 +1081,9 @@ def run_tui(
         backend=backend,
         model=model,
         api_base=api_base,
+        validation_backend=validation_backend,
+        validation_model=validation_model,
+        validation_api_base=validation_api_base,
         resume_from=resume_from,
         target_obj=target_obj,
     )

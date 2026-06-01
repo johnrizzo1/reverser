@@ -82,6 +82,9 @@ class AgentSession:
         backend_name: str = "claude",
         model: str | None = None,
         api_base: str | None = None,
+        validation_backend: str | None = None,
+        validation_model: str | None = None,
+        validation_api_base: str | None = None,
         resume_from: "SessionSnapshot | None" = None,
         session_id: str | None = None,
     ):
@@ -94,7 +97,8 @@ class AgentSession:
         self.has_pending_user_messages = None
 
         if resume_from is not None:
-            self._init_resumed(resume_from, profile, backend_name, model, api_base)
+            self._init_resumed(resume_from, profile, backend_name, model, api_base,
+                               validation_backend, validation_model, validation_api_base)
         else:
             self._init_new(
                 binary_path=binary_path,
@@ -105,6 +109,9 @@ class AgentSession:
                 backend_name=backend_name,
                 model=model,
                 api_base=api_base,
+                validation_backend=validation_backend,
+                validation_model=validation_model,
+                validation_api_base=validation_api_base,
                 session_id=session_id,
             )
         # Make this session reachable to session-aware tools (e.g. dispatch_specialist)
@@ -168,7 +175,9 @@ class AgentSession:
 
     def _init_new(
         self, *, binary_path, profile, budget, max_turns,
-        log_path, backend_name, model, api_base, session_id=None,
+        log_path, backend_name, model, api_base,
+        validation_backend=None, validation_model=None, validation_api_base=None,
+        session_id=None,
     ):
         """Original __init__ body — fresh session."""
         from .sessions import (
@@ -239,6 +248,9 @@ class AgentSession:
             backend=backend_name,
             model=model,
             api_base=api_base,
+            validation_backend=validation_backend,
+            validation_model=validation_model,
+            validation_api_base=validation_api_base,
             budget=budget,
             max_turns=max_turns,
         )
@@ -254,6 +266,7 @@ class AgentSession:
 
     def _init_resumed(
         self, snap: "SessionSnapshot", profile, backend_name, model, api_base,
+        validation_backend=None, validation_model=None, validation_api_base=None,
     ):
         """Restore session state from a snapshot."""
         import os
@@ -315,6 +328,15 @@ class AgentSession:
             api_base=effective_api_base,
         )
         self._backend_name = effective_backend
+
+        # Validation backend config (override snapshot values if provided)
+        if validation_backend is not None:
+            snap.config.validation_backend = validation_backend
+        if validation_model is not None:
+            snap.config.validation_model = validation_model
+        if validation_api_base is not None:
+            snap.config.validation_api_base = validation_api_base
+
         self._running = False
         self._cancel = False
         self._stop_requested = False
