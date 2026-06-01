@@ -22,6 +22,7 @@ from ..schemas.models import (
     ReportModel,
 )
 from ..schemas.validation import validate_args, tool_input_schema
+from ..adversary import run_adversary_validation
 
 
 def _resolve_target(target: str | None):
@@ -465,6 +466,36 @@ async def kb_get_hypothesis(args: dict) -> dict:
 TOOLS.append(kb_get_hypothesis)
 
 
+def _serialize_evidence_for_validation(kb, hypothesis, evidence_refs) -> str:
+    """Compact text of a hypothesis + its dereferenced evidence for the adversary."""
+    lines = [f"Hypothesis: {getattr(hypothesis, 'statement', '')}"]
+    if getattr(hypothesis, "rationale", None):
+        lines.append(f"Rationale: {hypothesis.rationale}")
+    refs = list(evidence_refs or [])
+    if getattr(hypothesis, "evidence_refs", None):
+        refs = refs + list(hypothesis.evidence_refs)
+    seen = set()
+    for item in kb.resolve_evidence_refs(refs):
+        key = (item["kind"], item["id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        data = item.get("data") or {}
+        if item["kind"] == "finding":
+            lines.append(f"- finding: {str(data.get('title', ''))[:120]} "
+                         f"[{data.get('severity', '')}] {str(data.get('description', ''))[:300]}")
+        elif item["kind"] == "note":
+            body = data.get("body") if isinstance(data, dict) else str(data)
+            lines.append(f"- note: {str(body)[:300]}")
+        elif item["kind"] == "credential":
+            lines.append(f"- cred: {data.get('username', '')}@{data.get('domain', '') or '-'} "
+                         f"({data.get('status', '')})")
+        elif item["kind"] == "service":
+            lines.append(f"- service: {data.get('host_ip', '')}:{data.get('port', '')} "
+                         f"{data.get('service', '')}")
+    return "\n".join(lines)[:4000]
+
+
 @tool(
     "kb_update_hypothesis",
     "Update fields on an existing hypothesis. Pass only the fields you want to "
@@ -512,6 +543,50 @@ async def kb_update_hypothesis(args: dict) -> dict:
     })
     if not outcome.ok:
         return format_error(outcome.error_text)
+    _validation_suffix = ""
+    # ── Adversarial validation gate (opt-in) ─────────────────────────
+    # Before promoting to 'confirmed', a read-only second-model skeptic tries to
+    # REFUTE the hypothesis from the KB evidence. 'refuted' hard-blocks (not
+    # persisted); otherwise the verdict is recorded and we proceed. Skipped if no
+    # validator configured; fails open on adversary error.
+    if new_status == "confirmed":
+        try:
+            from ..sessions import current_session
+            sess = current_session.get()
+        except Exception:
+            sess = None
+        vbackend = getattr(getattr(sess, "config", None), "validation_backend", None)
+        if vbackend:
+            vmodel = getattr(sess.config, "validation_model", None)
+            vmodel_label = vmodel or "(backend default)"
+            vapi = getattr(sess.config, "validation_api_base", None)
+            evidence_text = _serialize_evidence_for_validation(
+                kb, current, args.get("evidence_refs"))
+            try:
+                verdict = await run_adversary_validation(
+                    claim=current.statement, evidence_text=evidence_text,
+                    backend_name=vbackend, model=vmodel, api_base=vapi)
+            except Exception as e:
+                kb.record_note(
+                    f"Adversarial validation unavailable for hyp #{args['id']} "
+                    f"({type(e).__name__}: {e}); confirmed without it.")
+                verdict = None
+            if verdict is not None and verdict.verdict == "refuted":
+                kb.record_note(
+                    f"Adversarial validation REFUTED hyp #{args['id']} "
+                    f"(model={vmodel_label}): {verdict.reasoning}")
+                return format_error(
+                    "Adversarial validation refused the 'confirmed' transition: "
+                    f"{verdict.reasoning}. Revise the hypothesis/evidence, gather more, "
+                    "or use status='testing'/'inconclusive'.")
+            if verdict is not None:
+                kb.record_note(
+                    f"Adversarial validation {verdict.verdict} hyp #{args['id']} "
+                    f"(model={vmodel_label}): {verdict.reasoning}")
+                args["evidence_refs"] = list(args.get("evidence_refs") or []) + [{
+                    "kind": "validation", "verdict": verdict.verdict,
+                    "model": vmodel, "reasoning": verdict.reasoning}]
+                _validation_suffix = f" (adversary: {verdict.verdict})"
     update_kwargs = {
         k: args[k]
         for k in ("status", "rationale", "confidence", "dispatched_to",
@@ -526,7 +601,7 @@ async def kb_update_hypothesis(args: dict) -> dict:
     if updated is not None:
         emit_hypothesis("update", updated)
     return format_tool_result(
-        f"Hypothesis #{args['id']} updated: {sorted(update_kwargs.keys())}"
+        f"Hypothesis #{args['id']} updated: {sorted(update_kwargs.keys())}{_validation_suffix}"
     )
 
 
