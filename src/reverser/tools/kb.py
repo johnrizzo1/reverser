@@ -691,6 +691,32 @@ def _is_confirmed(f) -> bool:
     return f.reachability == "demonstrated" and bool(f.validated)
 
 
+_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+
+
+def _finding_sort_key(f):
+    try:
+        sev = _SEVERITY_ORDER.index((f.severity or "info").lower())
+    except ValueError:
+        sev = len(_SEVERITY_ORDER)
+    return (sev, (f.title or "").lower())
+
+
+def _render_finding_block(lines, f, marker, suffix="") -> None:
+    reach = f.reachability or "unknown"
+    lines.append(f"### [{f.severity.upper()}] {f.title}  {marker} {reach}{suffix}")
+    if f.cvss is not None:
+        lines.append(f"_CVSS: {f.cvss}_")
+    lines.append("")
+    lines.append(f.description or "_(no description)_")
+    if f.evidence_paths:
+        lines.append("")
+        lines.append("**Evidence:**")
+        for p in f.evidence_paths:
+            lines.append(f"- `{p}`")
+    lines.append("")
+
+
 def _render_report(kb, executive_summary: str = "") -> str:
     """Render a markdown report from KB contents in the project house style."""
     hosts = kb.get_hosts()
@@ -699,6 +725,9 @@ def _render_report(kb, executive_summary: str = "") -> str:
     findings = kb.get_findings()
     artifacts = kb.get_artifacts()
     notes = kb.get_notes()
+
+    _confirmed = [f for f in findings if _is_confirmed(f)]
+    _unproven = [f for f in findings if not _is_confirmed(f)]
 
     lines = [
         f"# Penetration Test Report — {kb.target_id}",
@@ -720,7 +749,9 @@ def _render_report(kb, executive_summary: str = "") -> str:
         f"Recorded {len(hosts)} host(s), {len(services)} service(s), "
         f"{len(creds)} credential(s) ("
         f"{sum(1 for c in creds if c.status == 'valid')} valid), "
-        f"{len(findings)} finding(s), {len(artifacts)} artifact(s).",
+        f"{len(findings)} finding(s) "
+        f"({len(_confirmed)} confirmed, {len(_unproven)} unproven), "
+        f"{len(artifacts)} artifact(s).",
         "",
     ]
 
@@ -769,23 +800,27 @@ def _render_report(kb, executive_summary: str = "") -> str:
         lines.append("_No credentials recorded._")
     lines.append("")
 
-    lines.append("## Findings")
+    lines.append("## Confirmed Findings")
     lines.append("")
-    if findings:
-        for f in findings:
-            lines.append(f"### [{f.severity.upper()}] {f.title}")
-            if f.cvss is not None:
-                lines.append(f"_CVSS: {f.cvss}_")
-            lines.append("")
-            lines.append(f.description or "_(no description)_")
-            if f.evidence_paths:
-                lines.append("")
-                lines.append("**Evidence:**")
-                for p in f.evidence_paths:
-                    lines.append(f"- `{p}`")
-            lines.append("")
+    if _confirmed:
+        for f in sorted(_confirmed, key=_finding_sort_key):
+            _render_finding_block(lines, f, "✓")  # check mark
     else:
-        lines.append("_No findings recorded._")
+        lines.append("_None._")
+    lines.append("")
+
+    lines.append("## Unproven / Needs Verification")
+    lines.append("")
+    lines.append(
+        "_These findings are not yet proven — reachability is unconfirmed or "
+        "evidence is missing. Verify before relying on them._")
+    lines.append("")
+    if _unproven:
+        for f in sorted(_unproven, key=_finding_sort_key):
+            suffix = "" if getattr(f, "validated", True) else " (unvalidated)"
+            _render_finding_block(lines, f, "⚠", suffix)  # warning sign
+    else:
+        lines.append("_None._")
     lines.append("")
 
     lines.append("## Artifacts")
