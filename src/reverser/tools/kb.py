@@ -684,6 +684,13 @@ def _render_hypothesis_tree(kb) -> str:
     return "\n".join(lines)
 
 
+def _is_confirmed(f) -> bool:
+    """A finding is 'confirmed' for report tiering only when reachability is
+    'demonstrated' AND it carries real evidence (validated). reachability is a
+    plain string on FindingFact; None/legacy -> not confirmed."""
+    return f.reachability == "demonstrated" and bool(f.validated)
+
+
 def _render_report(kb, executive_summary: str = "") -> str:
     """Render a markdown report from KB contents in the project house style."""
     hosts = kb.get_hosts()
