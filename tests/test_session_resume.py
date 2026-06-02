@@ -228,3 +228,18 @@ def test_session_config_validation_defaults_none():
     c2 = SessionConfig(profile="general", backend="claude", model=None, api_base=None,
                        budget=5.0, max_turns=50, max_parallel=1)
     assert c2.validation_backend is None
+
+
+def test_session_config_token_cost_round_trip():
+    from reverser.sessions import SessionConfig
+    from dataclasses import asdict
+    c = SessionConfig(profile="general", token_cost_per_1k=0.75)
+    assert SessionConfig(**asdict(c)).token_cost_per_1k == 0.75
+
+
+def test_session_config_token_cost_default_zero():
+    from reverser.sessions import SessionConfig
+    assert SessionConfig(profile="general").token_cost_per_1k == 0.0
+    c = SessionConfig(profile="general", backend="claude", model=None, api_base=None,
+                      budget=5.0, max_turns=50, max_parallel=1)
+    assert c.token_cost_per_1k == 0.0
