@@ -6,12 +6,14 @@ import re
 import time
 import uuid as _uuid
 from collections.abc import AsyncIterator
+from math import ceil
 from types import SimpleNamespace
 
 from openai import AsyncOpenAI
 
 from .base import AgentEvent, Backend
 from .retry import call_with_retries
+from .tokens import tokens_from_usage
 from .tools import mcp_tools_to_openai, execute_tool
 
 log = logging.getLogger(__name__)
@@ -342,6 +344,7 @@ class OpenAICompatBackend(Backend):
         api_base: str = "http://localhost:11434/v1",
         api_key: str = "not-needed",
         model_family: str | None = None,
+        token_cost_per_1k: float = 0.0,
     ):
         self._model = model
         if model_family is None:
@@ -354,6 +357,8 @@ class OpenAICompatBackend(Backend):
             base_url=api_base,
             api_key=api_key,
         )
+        self._token_cost_per_1k = token_cost_per_1k
+        self._stream_usage_supported = True
 
     def _filtered_tools(
         self, allowed_tools: list[str] | None,
@@ -409,6 +414,10 @@ class OpenAICompatBackend(Backend):
 
         turn = 0
         has_used_tools = False
+        run_tokens = 0
+
+        def _cost(tok: int) -> float:
+            return tok / 1000.0 * self._token_cost_per_1k
 
         while turn < max_turns:
             turn += 1
@@ -431,13 +440,21 @@ class OpenAICompatBackend(Backend):
                 )
 
             async def _make_call():
-                return await self._client.chat.completions.create(
-                    model=self._model,
-                    messages=messages,
+                kwargs = dict(
+                    model=self._model, messages=messages,
                     tools=tools_for_model if tools_for_model else None,
-                    extra_body={"think": True},
-                    stream=True,
+                    extra_body={"think": True}, stream=True,
                 )
+                if self._stream_usage_supported:
+                    kwargs["stream_options"] = {"include_usage": True}
+                try:
+                    return await self._client.chat.completions.create(**kwargs)
+                except Exception as e:  # noqa: BLE001
+                    if self._stream_usage_supported and "stream_options" in str(e).lower():
+                        self._stream_usage_supported = False
+                        kwargs.pop("stream_options", None)
+                        return await self._client.chat.completions.create(**kwargs)
+                    raise
 
             try:
                 response = await call_with_retries(_make_call, on_retry=_on_retry)
@@ -462,7 +479,8 @@ class OpenAICompatBackend(Backend):
                 else:
                     subtype = "api_error"
                 yield AgentEvent(kind="error", content=err, subtype=subtype, is_error=True)
-                yield AgentEvent(kind="result", content=f"Error: {err}", subtype="error")
+                yield AgentEvent(kind="result", content=f"Error: {err}", subtype="error",
+                                 tokens=run_tokens, cost=_cost(run_tokens))
                 return
             else:
                 for note in _retry_notes:
@@ -478,9 +496,13 @@ class OpenAICompatBackend(Backend):
                 generated_chars = 0
                 stream_text_suppressed = False
                 streamed_visible_parts: list[str] = []
+                turn_usage_tokens = 0
 
                 async for chunk in response:
                     choices = _obj_get(chunk, "choices", []) or []
+                    _usage = _obj_get(chunk, "usage", None)
+                    if _usage is not None:
+                        turn_usage_tokens = tokens_from_usage(_usage) or turn_usage_tokens
                     if not choices:
                         continue
                     choice0 = choices[0]
@@ -564,6 +586,11 @@ class OpenAICompatBackend(Backend):
                     finish_reason=finish_reason,
                 )
                 streamed_visible_text = "".join(streamed_visible_parts)
+                if turn_usage_tokens > 0:
+                    run_tokens += turn_usage_tokens
+                else:
+                    prompt_chars = sum(len(str(m.get("content") or "")) for m in messages)
+                    run_tokens += ceil(prompt_chars / 4) + ceil(generated_chars / 4)
             else:
                 yield _status_event(
                     "complete",
@@ -719,6 +746,8 @@ class OpenAICompatBackend(Backend):
                     content=visible_text,
                     turns=turn,
                     subtype="success",
+                    tokens=run_tokens,
+                    cost=_cost(run_tokens),
                 )
                 return
 
@@ -772,6 +801,8 @@ class OpenAICompatBackend(Backend):
             content="Reached maximum turn limit.",
             turns=turn,
             subtype="max_turns",
+            tokens=run_tokens,
+            cost=_cost(run_tokens),
         )
 
 
