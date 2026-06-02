@@ -64,7 +64,14 @@ class FindingModel(BaseModel):
         non_empty = [p for p in self.evidence_paths if p and p.strip()]
         self.evidence_paths = non_empty
         if not non_empty:
-            if not (self.evidence_blocker and self.evidence_blocker.strip()):
+            has_blocker = bool(self.evidence_blocker and self.evidence_blocker.strip())
+            if not has_blocker:
+                if self.reachability == Reachability.demonstrated:
+                    raise ValueError(
+                        "reachability='demonstrated' requires at least one evidence_paths "
+                        "entry — attach proof, lower reachability to "
+                        "'likely'/'theoretical'/'unknown', or set evidence_blocker"
+                    )
                 raise ValueError(
                     "evidence_paths must contain at least 1 entry, "
                     "or set evidence_blocker explaining why none exist"

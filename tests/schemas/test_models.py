@@ -124,3 +124,35 @@ def test_dispatch_report_valid():
 def test_dispatch_report_bad_outcome_rejected():
     with pytest.raises(ValidationError):
         DispatchReportModel(tldr="x", hypothesis_outcome="maybe", status="success")
+
+
+def test_demonstrated_without_evidence_is_rejected():
+    kw = _valid_finding_kwargs()
+    kw["evidence_paths"] = []
+    kw["reachability"] = "demonstrated"
+    with pytest.raises(ValidationError) as ei:
+        FindingModel(**kw)
+    assert "demonstrated" in str(ei.value).lower()
+
+
+def test_demonstrated_with_evidence_passes():
+    kw = _valid_finding_kwargs()  # already demonstrated + evidence_paths
+    m = FindingModel(**kw)
+    assert m.reachability == Reachability.demonstrated and m.validated is True
+
+
+def test_demonstrated_with_blocker_clamps_not_demonstrated():
+    kw = _valid_finding_kwargs()
+    kw["evidence_paths"] = []
+    kw["reachability"] = "demonstrated"
+    kw["evidence_blocker"] = "target offline"
+    m = FindingModel(**kw)
+    assert m.validated is False and m.reachability == Reachability.theoretical
+
+
+def test_likely_without_evidence_still_rejected_generically():
+    kw = _valid_finding_kwargs()
+    kw["evidence_paths"] = []
+    kw["reachability"] = "likely"
+    with pytest.raises(ValidationError):
+        FindingModel(**kw)
