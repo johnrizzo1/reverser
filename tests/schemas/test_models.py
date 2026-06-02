@@ -132,7 +132,9 @@ def test_demonstrated_without_evidence_is_rejected():
     kw["reachability"] = "demonstrated"
     with pytest.raises(ValidationError) as ei:
         FindingModel(**kw)
-    assert "demonstrated" in str(ei.value).lower()
+    # assert the SPECIFIC message (not just "demonstrated", which Pydantic also
+    # echoes from the input) so this can't false-pass on the generic error path
+    assert "requires at least one evidence_paths" in str(ei.value)
 
 
 def test_demonstrated_with_evidence_passes():
