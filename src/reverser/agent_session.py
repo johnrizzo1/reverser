@@ -85,6 +85,7 @@ class AgentSession:
         validation_backend: str | None = None,
         validation_model: str | None = None,
         validation_api_base: str | None = None,
+        token_cost_per_1k: float = 0.0,
         resume_from: "SessionSnapshot | None" = None,
         session_id: str | None = None,
     ):
@@ -112,6 +113,7 @@ class AgentSession:
                 validation_backend=validation_backend,
                 validation_model=validation_model,
                 validation_api_base=validation_api_base,
+                token_cost_per_1k=token_cost_per_1k,
                 session_id=session_id,
             )
         # Make this session reachable to session-aware tools (e.g. dispatch_specialist)
@@ -177,6 +179,7 @@ class AgentSession:
         self, *, binary_path, profile, budget, max_turns,
         log_path, backend_name, model, api_base,
         validation_backend=None, validation_model=None, validation_api_base=None,
+        token_cost_per_1k=0.0,
         session_id=None,
     ):
         """Original __init__ body — fresh session."""
@@ -223,6 +226,7 @@ class AgentSession:
             ALL_TOOLS,
             model=model,
             api_base=api_base,
+            token_cost_per_1k=token_cost_per_1k,
         )
         self._backend_name = backend_name
         self._running = False
@@ -251,6 +255,7 @@ class AgentSession:
             validation_backend=validation_backend,
             validation_model=validation_model,
             validation_api_base=validation_api_base,
+            token_cost_per_1k=token_cost_per_1k,
             budget=budget,
             max_turns=max_turns,
         )
@@ -326,6 +331,7 @@ class AgentSession:
             ALL_TOOLS,
             model=effective_model,
             api_base=effective_api_base,
+            token_cost_per_1k=getattr(snap.config, "token_cost_per_1k", 0.0),
         )
         self._backend_name = effective_backend
 

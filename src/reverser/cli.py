@@ -112,6 +112,9 @@ def main():
         help="Model for the validation backend (ideally different from the main model).")
     interactive_parser.add_argument("--validation-api-base", default=None,
         help="API base for the validation backend.")
+    interactive_parser.add_argument("--token-cost-per-1k", type=float, default=0.0,
+        help="Pseudo-USD cost per 1k tokens for local (OpenAI-compatible) backends, "
+             "so token usage counts toward the budget. Default 0 (tokens tracked, no cost).")
 
     # Target management subcommand group
     target_parser = subparsers.add_parser("target", help="Manage targets")
@@ -434,6 +437,7 @@ def _run_interactive(args):
         validation_backend=getattr(args, "validation_backend", None),
         validation_model=getattr(args, "validation_model", None),
         validation_api_base=getattr(args, "validation_api_base", None),
+        token_cost_per_1k=getattr(args, "token_cost_per_1k", 0.0),
         resume_from=resume_snap,
         target_obj=resolved_target_obj,
     )
