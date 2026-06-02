@@ -41,6 +41,7 @@ def create_backend(
     model: str | None = None,
     api_base: str | None = None,
     model_family: str | None = None,
+    token_cost_per_1k: float = 0.0,
 ) -> Backend:
     """Factory to create a backend by name.
 
@@ -71,4 +72,5 @@ def create_backend(
         model=model,
         api_base=api_base,
         model_family=model_family,
+        token_cost_per_1k=token_cost_per_1k,
     )

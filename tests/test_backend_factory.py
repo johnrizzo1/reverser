@@ -81,3 +81,15 @@ def test_claude_factory_ignores_model_family():
     with patch("reverser.backends.claude.ClaudeBackend") as M:
         create_backend("claude", tools=[], model_family="deepseek")
         M.assert_called_once_with([])
+
+
+def test_create_backend_forwards_token_cost():
+    from reverser.backends import create_backend
+    be = create_backend("ollama", [], model="m", token_cost_per_1k=1.5)
+    assert be._token_cost_per_1k == 1.5
+
+
+def test_create_backend_token_cost_defaults_zero():
+    from reverser.backends import create_backend
+    be = create_backend("ollama", [], model="m")
+    assert be._token_cost_per_1k == 0.0
