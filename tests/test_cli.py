@@ -73,3 +73,27 @@ def test_interactive_validation_flags_parse_without_error():
     # --list-profiles prints profiles and exits 0; unrecognized arg would exit non-zero
     assert result.returncode == 0, result.stderr
     assert "general" in result.stdout.lower(), result.stdout
+
+
+def test_interactive_help_mentions_token_cost_flag():
+    """--token-cost-per-1k appears in interactive subcommand help."""
+    result = subprocess.run(
+        [PYTHON, "-m", "reverser", "interactive", "--help"],
+        capture_output=True, text=True,
+    )
+    assert "--token-cost-per-1k" in result.stdout, result.stdout
+
+
+def test_interactive_token_cost_flag_parses_without_error():
+    """Passing --token-cost-per-1k 0.5 to --list-profiles exits cleanly."""
+    result = subprocess.run(
+        [
+            PYTHON, "-m", "reverser", "interactive",
+            "--list-profiles",
+            "--token-cost-per-1k", "0.5",
+        ],
+        capture_output=True, text=True,
+    )
+    # --list-profiles prints profiles and exits 0; unrecognized arg would exit non-zero
+    assert result.returncode == 0, result.stderr
+    assert "general" in result.stdout.lower(), result.stdout

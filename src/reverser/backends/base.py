@@ -16,6 +16,7 @@ class AgentEvent:
     turn: int = 0                # 1-based; 0 means "not associated with a turn"
     is_error: bool = False
     cost: float | None = None
+    tokens: int | None = None        # total tokens for this run (local backends)
     turns: int | None = None
     subtype: str = ""   # for result events: success, max_turns, budget, error
     phase: str = ""     # for llm_status: queued, prompt_processing, generating, complete

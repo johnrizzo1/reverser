@@ -739,6 +739,7 @@ async def dispatch_specialist(args: dict) -> dict:
                     ALL_TOOLS,
                     model=cfg.model,
                     api_base=cfg.api_base,
+                    token_cost_per_1k=getattr(cfg, "token_cost_per_1k", 0.0),
                 )
                 async for event in _aiter_with_idle_timeout(
                     backend.run(

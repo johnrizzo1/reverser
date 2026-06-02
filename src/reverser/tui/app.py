@@ -435,6 +435,7 @@ class ReverserApp(App):
         validation_backend: str | None = None,
         validation_model: str | None = None,
         validation_api_base: str | None = None,
+        token_cost_per_1k: float = 0.0,
         resume_from=None,  # SessionSnapshot | None
         target_obj=None,   # Target | None — when set, AgentSession.from_target is used
     ):
@@ -449,6 +450,7 @@ class ReverserApp(App):
         self.validation_backend = validation_backend
         self.validation_model = validation_model
         self.validation_api_base = validation_api_base
+        self.token_cost_per_1k = token_cost_per_1k
         self.profile = get_profile(profile_key)
         self.session: AgentSession | None = None
         self._resume_from = resume_from
@@ -554,6 +556,7 @@ class ReverserApp(App):
             validation_backend=self.validation_backend,
             validation_model=self.validation_model,
             validation_api_base=self.validation_api_base,
+            token_cost_per_1k=self.token_cost_per_1k,
             resume_from=self._resume_from,
         )
         if self._target_obj is not None and self._resume_from is None:
@@ -1068,6 +1071,7 @@ def run_tui(
     validation_backend: str | None = None,
     validation_model: str | None = None,
     validation_api_base: str | None = None,
+    token_cost_per_1k: float = 0.0,
     resume_from=None,  # SessionSnapshot | None
     target_obj=None,  # Target | None — when set, AgentSession.from_target is used
 ):
@@ -1084,6 +1088,7 @@ def run_tui(
         validation_backend=validation_backend,
         validation_model=validation_model,
         validation_api_base=validation_api_base,
+        token_cost_per_1k=token_cost_per_1k,
         resume_from=resume_from,
         target_obj=target_obj,
     )

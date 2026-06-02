@@ -51,6 +51,7 @@ class SessionConfig:
     validation_backend: Optional[str] = None
     validation_model: Optional[str] = None
     validation_api_base: Optional[str] = None
+    token_cost_per_1k: float = 0.0
     budget: float = 5.0
     max_turns: int = 50
     max_parallel: int = 1
